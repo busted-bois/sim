@@ -1,0 +1,2 @@
+"""MAVLink client module placeholder."""
+
