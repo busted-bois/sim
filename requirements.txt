@@ -1,3 +1,4 @@
-mavsdk
 pymavlink
+pytest
+matplotlib
 
