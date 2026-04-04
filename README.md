@@ -10,19 +10,18 @@ A Python-based autonomy stack for the [AI Grand Prix](https://theaigrandprix.com
 - Aneesh Saxena
 - Tushar Shrivastav
 
-### Communications & Networks
+### Simulation & Network Communication
 - Kunal Shrivastav
+- Samyak Kakatur
 - Yat Chun Wong
-- David Vayntrub
-
-### Physics & Hardware
 - Ryan Yang
 - Trung Nguyen
-
+  
 ### Algorithms & Autonomy
-- Ram Rao
+- Kunal Shrivastav
 - Samyak Kakatur
-- Prachod Kakatur
+- David Vayntrub
+- Ram Rao
 
 ---
 
