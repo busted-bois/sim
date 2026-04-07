@@ -63,6 +63,12 @@ venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 ```
 
+### Manual flight in sim (Windows)
+
+If the AirSim / Colosseum **Python client already connects**, teammates can add **keyboard or gamepad manual control** (vJoy, `settings.json` under **Documents** or **OneDrive\Documents**, `RemoteControlID`). Step-by-step guide:
+
+**[docs/MANUAL_FLIGHT_WINDOWS.md](docs/MANUAL_FLIGHT_WINDOWS.md)**
+
 ---
 
 ## 🏁 Competition Overview
