@@ -7,4 +7,4 @@ cd "$PROJECT_ROOT"
 
 echo "AIGP Drone Challenge - Launch Script"
 echo "====================================="
-uv run python scripts/launch.py "$@"
+uv run scripts/launch.py "$@"
