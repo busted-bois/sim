@@ -1,0 +1,30 @@
+{
+  "telemetry": {
+    "host": "127.0.0.1",
+    "port": 14550,
+    "timeout_seconds": 1.0,
+    "heartbeat_interval_seconds": 1.0
+  },
+  "simulator": {
+    "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe",
+    "project_path": "",
+    "map_name": "BlocksV2",
+    "airsim_port": 41451,
+    "startup_delay_seconds": 30
+  },
+  "control": {
+    "command_rate_hz": 50,
+    "max_speed_ms": 10.0,
+    "max_altitude_m": 50.0
+  },
+  "waypoints": [
+    {"x": 10.0, "y": 0.0, "z": -5.0},
+    {"x": 10.0, "y": 10.0, "z": -5.0},
+    {"x": 0.0, "y": 10.0, "z": -5.0},
+    {"x": 0.0, "y": 0.0, "z": -5.0}
+  ],
+  "logging": {
+    "level": "INFO",
+    "telemetry_log_enabled": false
+  }
+}

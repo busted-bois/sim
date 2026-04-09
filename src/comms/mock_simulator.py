@@ -5,7 +5,7 @@ Sends fake MAVLink telemetry over UDP so the client code can be tested
 end-to-end without Unreal Engine.
 
 Usage:
-    python -m comms.mock_simulator [--host 127.0.0.1] [--port 14550] [--hz 50]
+    python -m src.comms.mock_simulator [--host 127.0.0.1] [--port 14550] [--hz 50]
 
 The simulator generates:
 - HEARTBEAT at 1 Hz
@@ -21,7 +21,7 @@ import random
 import socket
 import time
 
-from comms.mavlink_parser import (
+from src.comms.mavlink_parser import (
     Attitude,
     Heartbeat,
     HighresImu,
@@ -69,10 +69,10 @@ def run_simulator(host: str = "127.0.0.1", port: int = 14550, hz: int = 50):
             if now - last_heartbeat >= heartbeat_interval:
                 hb = Heartbeat(
                     custom_mode=0,
-                    type=2,          # MAV_TYPE_QUADROTOR
-                    autopilot=12,    # MAV_AUTOPILOT_PX4
-                    base_mode=209,   # armed + custom mode
-                    system_status=4, # MAV_STATE_ACTIVE
+                    type=2,  # MAV_TYPE_QUADROTOR
+                    autopilot=12,  # MAV_AUTOPILOT_PX4
+                    base_mode=209,  # armed + custom mode
+                    system_status=4,  # MAV_STATE_ACTIVE
                     mavlink_version=3,
                 )
                 sock.sendto(encode(hb), target)
@@ -111,22 +111,24 @@ def run_simulator(host: str = "127.0.0.1", port: int = 14550, hz: int = 50):
             sock.sendto(encode(att), target)
 
             # --- HIGHRES_IMU ---
-            noise = lambda: random.gauss(0, 0.01)
+            def _noise() -> float:
+                return random.gauss(0, 0.01)
+
             imu = HighresImu(
                 time_usec=_sim_time_us(start),
-                xacc=-9.81 * math.sin(pitch) + noise(),
-                yacc=9.81 * math.sin(roll) + noise(),
-                zacc=-9.81 * math.cos(roll) * math.cos(pitch) + noise(),
-                xgyro=att.rollspeed + noise(),
-                ygyro=att.pitchspeed + noise(),
-                zgyro=att.yawspeed + noise(),
-                xmag=0.2 + noise(),
-                ymag=0.0 + noise(),
-                zmag=0.4 + noise(),
+                xacc=-9.81 * math.sin(pitch) + _noise(),
+                yacc=9.81 * math.sin(roll) + _noise(),
+                zacc=-9.81 * math.cos(roll) * math.cos(pitch) + _noise(),
+                xgyro=att.rollspeed + _noise(),
+                ygyro=att.pitchspeed + _noise(),
+                zgyro=att.yawspeed + _noise(),
+                xmag=0.2 + _noise(),
+                ymag=0.0 + _noise(),
+                zmag=0.4 + _noise(),
                 abs_pressure=1013.25 + z * 0.12,
                 diff_pressure=0.5 * 1.225 * (vx**2 + vy**2) * 0.01,
                 pressure_alt=-z,
-                temperature=25.0 + noise(),
+                temperature=25.0 + _noise(),
                 fields_updated=0xFFFF,
             )
             sock.sendto(encode(imu), target)
@@ -143,11 +145,15 @@ def run_simulator(host: str = "127.0.0.1", port: int = 14550, hz: int = 50):
 
             odom = Odometry(
                 time_usec=_sim_time_us(start),
-                frame_id=1,        # MAV_FRAME_LOCAL_NED
+                frame_id=1,  # MAV_FRAME_LOCAL_NED
                 child_frame_id=1,
-                x=x, y=y, z=z,
+                x=x,
+                y=y,
+                z=z,
                 q=(qw, qx, qy, qz),
-                vx=vx, vy=vy, vz=vz,
+                vx=vx,
+                vy=vy,
+                vz=vz,
                 rollspeed=att.rollspeed,
                 pitchspeed=att.pitchspeed,
                 yawspeed=att.yawspeed,
@@ -156,9 +162,11 @@ def run_simulator(host: str = "127.0.0.1", port: int = 14550, hz: int = 50):
 
             seq += 1
             if seq % (hz * 5) == 0:
-                print(f"[mock_sim] t={t:.1f}s  pos=({x:.1f}, {y:.1f}, {z:.1f})  "
-                      f"att=({math.degrees(roll):.1f}, {math.degrees(pitch):.1f}, "
-                      f"{math.degrees(yaw):.1f}) deg")
+                print(
+                    f"[mock_sim] t={t:.1f}s  pos=({x:.1f}, {y:.1f}, {z:.1f})  "
+                    f"att=({math.degrees(roll):.1f}, {math.degrees(pitch):.1f}, "
+                    f"{math.degrees(yaw):.1f}) deg"
+                )
 
             # Sleep to maintain target rate
             elapsed = time.monotonic() - now
