@@ -1,16 +1,26 @@
-"""AIGP Drone — main entry point."""
-
 import signal
+import socket
 import sys
 import time
 
+from src.comms.command import send_velocity
 from src.comms.telemetry import TelemetryClient
 from src.config import load_config
+from src.control.algorithms import get_algorithm
 
 
 def main() -> None:
     config = load_config()
     telem_cfg = config["telemetry"]
+    cmd_cfg = config.get("command", {})
+    ctrl_cfg = config.get("control", {})
+    algo_name = config.get("algorithm", "six_directions")
+
+    rate_hz = ctrl_cfg.get("command_rate_hz", 50)
+    tick_s = 1.0 / rate_hz
+
+    cmd_host = cmd_cfg.get("host", "127.0.0.1")
+    cmd_port = cmd_cfg.get("port", 14540)
 
     client = TelemetryClient(
         host=telem_cfg["host"],
@@ -18,30 +28,68 @@ def main() -> None:
         timeout=telem_cfg["timeout_seconds"],
     )
 
+    algo = get_algorithm(algo_name, config)
+    print(f"Algorithm: {algo_name} @ {rate_hz}Hz -> {cmd_host}:{cmd_port}")
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
     def shutdown(sig, frame):
         print("\nShutting down...")
+        send_velocity(0, 0, 0, sock=sock, target_address=cmd_host, port=cmd_port)
         client.stop()
+        sock.close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
 
     client.start()
-    print(f"Listening on {telem_cfg['host']}:{telem_cfg['port']}...")
+    print("Waiting for connection and arm...")
 
-    while True:
+    while not (client.is_connected and client.get_state().armed):
         if client.is_connected:
             state = client.get_state()
-            stats = client.get_packet_stats()
-            hb = client.get_heartbeat_stats()
-            print(
-                f"pos=({state.x:.1f}, {state.y:.1f}, {state.z:.1f}) "
-                f"att=({state.roll:.1f}, {state.pitch:.1f}, {state.yaw:.1f}) "
-                f"armed={state.armed} "
-                f"pkts={stats['received']} hb_rx={hb.received}"
-            )
+            if not state.armed:
+                print(f"Connected, waiting for arm... (status={state.system_status})")
         else:
             print("Waiting for heartbeat...")
-        time.sleep(1)
+        time.sleep(0.5)
+
+    print("Armed — starting control loop")
+
+    last_print = 0.0
+    tick_count = 0
+
+    while True:
+        t0 = time.monotonic()
+        state = client.get_state()
+
+        cmd = algo.compute(state)
+        if cmd is not None:
+            send_velocity(
+                cmd.vx,
+                cmd.vy,
+                cmd.vz,
+                cmd.yaw,
+                sock=sock,
+                target_address=cmd_host,
+                port=cmd_port,
+            )
+
+        tick_count += 1
+        now = time.monotonic()
+        if now - last_print >= 1.0:
+            print(
+                f"pos=({state.x:.1f}, {state.y:.1f}, {state.z:.1f}) "
+                f"vel=({state.vx:.1f}, {state.vy:.1f}, {state.vz:.1f}) "
+                f"armed={state.armed} ticks={tick_count}"
+            )
+            tick_count = 0
+            last_print = now
+
+        elapsed = time.monotonic() - t0
+        sleep_time = tick_s - elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,14 @@
 {
+  "algorithm": "six_directions",
   "telemetry": {
     "host": "127.0.0.1",
     "port": 14550,
     "timeout_seconds": 1.0,
     "heartbeat_interval_seconds": 1.0
+  },
+  "command": {
+    "host": "127.0.0.1",
+    "port": 14540
   },
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
