@@ -10,16 +10,16 @@ and logs:
 
 Usage:
     # Terminal 1: start the mock simulator
-    python -m comms.mock_simulator --port 14550
+    python -m src.comms.mock_simulator --port 14550
 
     # Terminal 2: run this stress test
-    python -m comms.heartbeat_stress_test [--port 14550] [--duration 480]
+    python -m scripts.heartbeat_stress_test [--port 14550] [--duration 480]
 """
 
 import argparse
 import time
 
-from comms.mavlink_client import TelemetryClient
+from src.comms.telemetry import TelemetryClient
 
 
 def run_stress_test(port: int = 14550, duration_s: int = 480):
@@ -69,17 +69,18 @@ def _print_report(client: TelemetryClient, elapsed: float, final: bool = False):
     state = client.get_state()
 
     expected_heartbeats = max(1, int(elapsed))  # 1 Hz expected
-    loss_pct = ((expected_heartbeats - hb.received) / expected_heartbeats * 100
-                if expected_heartbeats > 0 else 0)
+    loss_pct = (
+        (expected_heartbeats - hb.received) / expected_heartbeats * 100
+        if expected_heartbeats > 0
+        else 0
+    )
 
     print(f"\n[t={elapsed:.0f}s] {'FINAL' if final else 'Periodic'} Report")
     print(f"  Connected: {client.is_connected}")
-    print(f"  Heartbeats: {hb.received}/{expected_heartbeats} "
-          f"(loss: {loss_pct:.1f}%)")
+    print(f"  Heartbeats: {hb.received}/{expected_heartbeats} (loss: {loss_pct:.1f}%)")
     print(f"  Missed heartbeats (gap > 1.5s): {hb.missed}")
     print(f"  Max heartbeat gap: {hb.max_gap_s:.3f}s")
-    print(f"  Total packets: {pkt['received']} decoded, "
-          f"{pkt['failed_decode']} failed")
+    print(f"  Total packets: {pkt['received']} decoded, {pkt['failed_decode']} failed")
     print(f"  Messages by type: {pkt['by_type']}")
     print(f"  Last position: ({state.x:.2f}, {state.y:.2f}, {state.z:.2f})")
     print(f"  Armed: {state.armed}, Status: {state.system_status}")
@@ -90,12 +91,19 @@ def _print_report(client: TelemetryClient, elapsed: float, final: bool = False):
             print(f"    at t={ts:.1f}s: gap={gap:.3f}s")
 
     if final:
-        total_expected_msgs = int(elapsed) * 50 * 3 + expected_heartbeats  # att+imu+odom at 50Hz + hb at 1Hz
-        actual = pkt['received']
-        overall_loss = ((total_expected_msgs - actual) / total_expected_msgs * 100
-                        if total_expected_msgs > 0 else 0)
-        print(f"\n  Overall packet loss estimate: {overall_loss:.1f}% "
-              f"({actual}/{total_expected_msgs})")
+        total_expected_msgs = (
+            int(elapsed) * 50 * 3 + expected_heartbeats
+        )  # att+imu+odom at 50Hz + hb at 1Hz
+        actual = pkt["received"]
+        overall_loss = (
+            (total_expected_msgs - actual) / total_expected_msgs * 100
+            if total_expected_msgs > 0
+            else 0
+        )
+        print(
+            f"\n  Overall packet loss estimate: {overall_loss:.1f}% "
+            f"({actual}/{total_expected_msgs})"
+        )
         if hb.missed == 0 and loss_pct < 1:
             print("  RESULT: PASS - Heartbeat reliability is solid")
         else:
@@ -105,7 +113,11 @@ def _print_report(client: TelemetryClient, elapsed: float, final: bool = False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Heartbeat stress test")
     parser.add_argument("--port", type=int, default=14550)
-    parser.add_argument("--duration", type=int, default=480,
-                        help="Test duration in seconds (default: 480 = 8 minutes)")
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=480,
+        help="Test duration in seconds (default: 480 = 8 minutes)",
+    )
     args = parser.parse_args()
     run_stress_test(args.port, args.duration)
