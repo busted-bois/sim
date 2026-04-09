@@ -7,17 +7,19 @@ Uses MAVLink v2 over UDP for telemetry, a custom wire-protocol parser (no pymavl
 ## Project Structure
 
 ```
-├── main.py                       # Entry point — connects to simulator, prints telemetry
-├── sim.config.json               # All runtime configuration
+├── main.py                       # Entry point
+├── sim.config.json               # Runtime configuration
 ├── pyproject.toml                # Python project config (uv)
-├── launch.bat                    # One-command launch (Windows)
+├── Makefile                      # make install / make start
 ├── scripts/
+│   ├── install.sh                # Setup venv + git hooks
+│   ├── launch.bat                # One-command launch (Windows)
 │   ├── launch.py                 # Cross-platform launch script
 │   └── heartbeat_stress_test.py  # Telemetry reliability test
 ├── src/
-│   ├── config.py                 # Config loader (plain json.load)
+│   ├── config.py                 # Config loader
 │   ├── comms/
-│   │   ├── mavlink_parser.py     # MAVLink v2 wire protocol (encode/decode)
+│   │   ├── mavlink_parser.py     # MAVLink v2 wire protocol
 │   │   ├── telemetry.py          # Threaded UDP telemetry client
 │   │   ├── state.py              # DroneState dataclass
 │   │   └── mock_simulator.py     # Fake telemetry for development
@@ -32,11 +34,9 @@ Uses MAVLink v2 over UDP for telemetry, a custom wire-protocol parser (no pymavl
 
 ## Configuration
 
-All settings live in `sim.config.json`. The file is loaded at startup by `src/config.py` with plain `json.load()` (no schema validation).
+All settings live in `sim.config.json`, loaded at startup by `src/config.py`.
 
 ### `telemetry`
-
-UDP connection to the simulator's MAVLink endpoint.
 
 | Field | Default | Description |
 |---|---|---|
@@ -47,19 +47,15 @@ UDP connection to the simulator's MAVLink endpoint.
 
 ### `simulator`
 
-Colosseum / UE5 launch parameters.
-
 | Field | Default | Description |
 |---|---|---|
 | `colosseum_path` | `C:\Program Files\...` | Path to UnrealEditor-Cmd.exe |
 | `project_path` | `""` | Path to the UE5 project file |
 | `map_name` | `BlocksV2` | Which map to load |
 | `airsim_port` | `41451` | AirSim RPC port |
-| `startup_delay_seconds` | `30` | Wait time before connecting (sim boot) |
+| `startup_delay_seconds` | `30` | Wait time before connecting |
 
 ### `control`
-
-Flight parameters.
 
 | Field | Default | Description |
 |---|---|---|
@@ -69,49 +65,37 @@ Flight parameters.
 
 ### `waypoints`
 
-Array of `{x, y, z}` coordinates in NED frame. NED means **N**orth **E**ast **D**own, so negative z values are above ground. Example:
-
-```json
-[
-  {"x": 10.0, "y": 0.0, "z": -5.0},
-  {"x": 10.0, "y": 10.0, "z": -5.0},
-  {"x": 0.0, "y": 10.0, "z": -5.0},
-  {"x": 0.0, "y": 0.0, "z": -5.0}
-]
-```
+Array of `{x, y, z}` coordinates in NED frame (**N**orth **E**ast **D**own — negative z is above ground).
 
 ### `logging`
 
 | Field | Default | Description |
 |---|---|---|
-| `level` | `INFO` | Python log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `level` | `INFO` | Python log level |
 | `telemetry_log_enabled` | `false` | Log every received telemetry packet |
+
+## Prerequisites
+
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
 
 ## Quick Start
 
-Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
-
 ```bash
-# Install dependencies
-uv sync
-
-# Run with mock simulator (no UE5 needed)
-uv run python -m src.comms.mock_simulator &
-uv run python main.py
+# Install dependencies and git hooks
+make install
 
 # Run with real simulator (Windows)
-launch.bat
+make start
 ```
 
 ## Development Notes
 
-**Coordinate frame:** NED (North-East-Down). X points north, Y points east, Z points down. A drone hovering at 5 meters has `z = -5.0`.
+**Coordinate frame:** NED (North-East-Down). A drone at 5m altitude has `z = -5.0`.
 
-**Protocol:** MAVLink v2 over UDP port 14550. The parser in `src/comms/mavlink_parser.py` handles wire encoding and decoding with raw struct packing. No pymavlink dependency.
+**Protocol:** MAVLink v2 over UDP. Custom parser in `src/comms/mavlink_parser.py` — no pymavlink dependency.
 
-**Telemetry:** Threaded UDP listener (not asyncio). The client runs a background thread that continuously receives and parses MAVLink messages, updating `DroneState` in real time.
-
-**Dependencies:** Managed with `uv`. See `pyproject.toml`. No pymavlink, matplotlib, or pytest in the dep list.
+**Telemetry:** Threaded UDP listener. Background thread receives and parses MAVLink messages, updating `DroneState` in real time.
 
 **Team**
 
