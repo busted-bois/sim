@@ -31,8 +31,10 @@ Uses MAVLink v2 over UDP for telemetry, a custom wire-protocol parser (no pymavl
 ├── sim.config.json               # Runtime configuration
 ├── pyproject.toml                # Python project config (uv)
 ├── scripts/
-│   ├── install.sh                # Setup venv + git hooks
-│   ├── launch.sh                 # Launch simulator + main.py
+│   ├── install.sh                # Setup venv + git hooks (bash)
+│   ├── install.ps1               # Setup venv + git hooks (PowerShell)
+│   ├── launch.sh                 # Launch simulator + main.py (bash)
+│   ├── launch.ps1                # Launch simulator + main.py (PowerShell)
 │   ├── launch.py                 # Cross-platform launch logic
 │   └── heartbeat_stress_test.py  # Telemetry reliability test
 ├── src/
@@ -102,10 +104,12 @@ Array of `{x, y, z}` coordinates in NED frame (**N**orth **E**ast **D**own — n
 
 ```bash
 # Install dependencies and git hooks
-bash scripts/install.sh
+pwsh scripts/install.ps1        # PowerShell
+bash scripts/install.sh         # Bash
 
 # Launch simulator and run main.py
-bash scripts/launch.sh
+pwsh scripts/launch.ps1         # PowerShell
+bash scripts/launch.sh          # Bash
 ```
 
 ## Development Notes
