@@ -1,7 +1,7 @@
 # AIGP Drone Challenge
 
 Autonomous drone navigating the Colosseum (UE5/AirSim) simulator for the [AI Grand Prix](https://theaigrandprix.com).
-Custom MAVLink v2 parser over UDP, threaded telemetry, pluggable flight algorithms.
+AirSim Python RPC client for drone control, pluggable flight algorithms.
 
 ## Quick Start
 
@@ -41,10 +41,10 @@ bash scripts/launch.sh           # or pwsh scripts/launch.ps1
 ## Project Structure
 
 ```
-main.py                          # Entry point — control loop
+main.py                          # Entry point — AirSim RPC client
 sim.config.json                  # Runtime config
 src/
-  comms/
+  comms/                         # MAVLink code (for future PX4 use)
     mavlink_parser.py            # MAVLink v2 encode/decode (no pymavlink)
     telemetry.py                 # Threaded UDP telemetry listener
     state.py                     # DroneState dataclass (NED frame)
@@ -56,27 +56,29 @@ src/
   planning/
     waypoint.py                  # WaypointFollower + VelocityCommand
   config.py                      # Config loader
+airsim/                          # Vendored AirSim Python client
 scripts/                         # Install/launch scripts
 ```
 
 ## Writing a Custom Algorithm
 
 1. Create `src/control/algorithms/my_algo.py`
-2. Extend `Algorithm`, implement `compute(state) -> VelocityCommand | None`
+2. Extend `Algorithm`, implement `run(client)` receiving an `airsim.MultirotorClient`
 3. Add `@register("my_algo")` decorator
 4. Set `"algorithm": "my_algo"` in `sim.config.json`
 
 ```python
 from src.control.algorithms import Algorithm, register
-from src.planning.waypoint import VelocityCommand
 
 @register("my_algo")
 class MyAlgo(Algorithm):
-    def compute(self, state) -> VelocityCommand | None:
-        return VelocityCommand(vx=1.0, vy=0.0, vz=0.0)
+    def run(self, client):
+        client.takeoffAsync().join()
+        client.moveByVelocityAsync(1.0, 0.0, 0.0, 5.0).join()
+        client.hoverAsync().join()
 ```
 
-`compute()` is called each control tick. Return `None` to skip sending. Return `VelocityCommand(0,0,0)` to hover.
+`run()` receives the AirSim `MultirotorClient` and has full control over the flight. Use `moveByVelocityAsync(vx, vy, vz, duration).join()` for timed velocity commands (NED frame).
 
 ## Configuration
 
@@ -85,10 +87,8 @@ class MyAlgo(Algorithm):
 | Section | Purpose |
 |---|---|
 | `algorithm` | Name of registered algorithm to run |
-| `telemetry` | UDP host/port for incoming MAVLink telemetry |
-| `command` | UDP host/port for outgoing velocity commands |
+| `simulator` | UE5/AirSim paths and ports (`airsim_port` for RPC) |
 | `control` | `command_rate_hz`, `max_speed_ms`, `max_altitude_m` |
-| `simulator` | UE5/AirSim paths and ports |
 | `waypoints` | NED coordinate waypoints |
 | `logging` | Log level, telemetry logging toggle |
 
@@ -98,12 +98,9 @@ Coordinate frame: **NED** (North-East-Down). Negative z = above ground. Drone at
 
 ## Key Modules
 
-- **comms/mavlink_parser.py** — MAVLink v2 wire protocol (encode/decode, CRC)
-- **comms/telemetry.py** — Threaded UDP listener, heartbeat tracking, `DroneState` updates
-- **comms/state.py** — `DroneState` dataclass with position, velocity, attitude, arm status
-- **comms/command.py** — Sends `SET_POSITION_TARGET_LOCAL_NED` velocity commands over UDP
+- **airsim/** — Vendored AirSim Python RPC client (`msgpackrpc` on port 41451)
 - **control/algorithms/** — Pluggable flight algorithms via decorator registry
-- **planning/waypoint.py** — `VelocityCommand` dataclass, `WaypointFollower` proportional controller
+- **comms/** — MAVLink code retained for future PX4 SITL integration
 
 | Field | Default | Description |
 |---|---|---|
