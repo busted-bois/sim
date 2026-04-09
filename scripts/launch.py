@@ -1,5 +1,6 @@
 """Launch script — starts UE5 Colosseum simulator, waits, then runs main.py."""
 
+import os
 import subprocess
 import sys
 import time
@@ -17,16 +18,20 @@ def launch() -> None:
 
     colosseum = sim_cfg.get("colosseum_path", "")
     project = sim_cfg.get("project_path", "")
-    map_name = sim_cfg.get("map_name", "BlocksV2")
+    windowed = sim_cfg.get("windowed", True)
+    res_x = sim_cfg.get("res_x", 1280)
+    res_y = sim_cfg.get("res_y", 720)
+    airsim_port = sim_cfg.get("airsim_port", 41451)
     delay = sim_cfg.get("startup_delay_seconds", 30)
 
     if colosseum and Path(colosseum).exists():
         print(f"Launching Colosseum: {colosseum}")
         cmd = [colosseum]
         if project:
-            cmd.extend([project, f"-Game={map_name}"])
-        else:
-            cmd.append(f"-Game={map_name}")
+            cmd.append(project)
+        cmd.append("-game")
+        if windowed:
+            cmd.extend(["-windowed", f"-resx={res_x}", f"-resy={res_y}"])
 
         subprocess.Popen(
             cmd,
@@ -37,8 +42,14 @@ def launch() -> None:
     else:
         print(f"Colosseum not found at '{colosseum}', skipping simulator launch.")
 
+    env = os.environ.copy()
+    env["AIRSIM_PORT"] = str(airsim_port)
+
     print("Starting main.py...")
-    subprocess.run([sys.executable, str(ROOT / "main.py")])
+    subprocess.run(
+        [sys.executable, str(ROOT / "main.py")],
+        env=env,
+    )
 
 
 if __name__ == "__main__":
