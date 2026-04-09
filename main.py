@@ -3,7 +3,7 @@ import socket
 import sys
 import time
 
-from src.comms.command import send_velocity
+from src.comms.command import arm_drone, send_velocity, set_offboard_mode
 from src.comms.telemetry import TelemetryClient
 from src.config import load_config
 from src.control.algorithms import get_algorithm
@@ -43,18 +43,21 @@ def main() -> None:
     signal.signal(signal.SIGINT, shutdown)
 
     client.start()
-    print("Waiting for connection and arm...")
+    print("Waiting for connection...")
 
-    while not (client.is_connected and client.get_state().armed):
-        if client.is_connected:
-            state = client.get_state()
-            if not state.armed:
-                print(f"Connected, waiting for arm... (status={state.system_status})")
-        else:
-            print("Waiting for heartbeat...")
+    while not client.is_connected:
+        print("Waiting for heartbeat...")
         time.sleep(0.5)
 
-    print("Armed — starting control loop")
+    print("Connected. Arming drone...")
+    arm_drone(target_address=cmd_host, port=cmd_port, sock=sock)
+    time.sleep(0.5)
+
+    print("Setting OFFBOARD mode...")
+    set_offboard_mode(target_address=cmd_host, port=cmd_port, sock=sock)
+    time.sleep(0.5)
+
+    print("Starting control loop")
 
     last_print = 0.0
     tick_count = 0
