@@ -13,11 +13,8 @@ Wire format: MAVLink v2 compatible payload layout.
 """
 
 import struct
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import Optional
-
 
 # --- MAVLink v2 constants ---
 MAVLINK_STX_V2 = 0xFD
@@ -45,15 +42,17 @@ CRC_EXTRA = {
 
 # --- Data classes for each message ---
 
+
 @dataclass
 class Heartbeat:
     """MAVLink HEARTBEAT message."""
-    custom_mode: int = 0        # uint32
-    type: int = 0               # uint8  (MAV_TYPE)
-    autopilot: int = 0          # uint8  (MAV_AUTOPILOT)
-    base_mode: int = 0          # uint8
-    system_status: int = 0      # uint8  (MAV_STATE)
-    mavlink_version: int = 3    # uint8
+
+    custom_mode: int = 0  # uint32
+    type: int = 0  # uint8  (MAV_TYPE)
+    autopilot: int = 0  # uint8  (MAV_AUTOPILOT)
+    base_mode: int = 0  # uint8
+    system_status: int = 0  # uint8  (MAV_STATE)
+    mavlink_version: int = 3  # uint8
 
     MSG_ID = MsgId.HEARTBEAT
     PAYLOAD_FMT = "<IBBBBB"
@@ -63,13 +62,14 @@ class Heartbeat:
 @dataclass
 class Attitude:
     """MAVLink ATTITUDE message."""
-    time_boot_ms: int = 0    # uint32
-    roll: float = 0.0        # float rad
-    pitch: float = 0.0       # float rad
-    yaw: float = 0.0         # float rad
-    rollspeed: float = 0.0   # float rad/s
+
+    time_boot_ms: int = 0  # uint32
+    roll: float = 0.0  # float rad
+    pitch: float = 0.0  # float rad
+    yaw: float = 0.0  # float rad
+    rollspeed: float = 0.0  # float rad/s
     pitchspeed: float = 0.0  # float rad/s
-    yawspeed: float = 0.0    # float rad/s
+    yawspeed: float = 0.0  # float rad/s
 
     MSG_ID = MsgId.ATTITUDE
     PAYLOAD_FMT = "<Iffffff"
@@ -79,21 +79,22 @@ class Attitude:
 @dataclass
 class HighresImu:
     """MAVLink HIGHRES_IMU message."""
-    time_usec: int = 0          # uint64
-    xacc: float = 0.0           # float m/s^2
+
+    time_usec: int = 0  # uint64
+    xacc: float = 0.0  # float m/s^2
     yacc: float = 0.0
     zacc: float = 0.0
-    xgyro: float = 0.0          # float rad/s
+    xgyro: float = 0.0  # float rad/s
     ygyro: float = 0.0
     zgyro: float = 0.0
-    xmag: float = 0.0           # float gauss
+    xmag: float = 0.0  # float gauss
     ymag: float = 0.0
     zmag: float = 0.0
-    abs_pressure: float = 0.0   # float millibar
+    abs_pressure: float = 0.0  # float millibar
     diff_pressure: float = 0.0  # float millibar
-    pressure_alt: float = 0.0   # float m
-    temperature: float = 0.0    # float degC
-    fields_updated: int = 0     # uint16 bitmask
+    pressure_alt: float = 0.0  # float m
+    temperature: float = 0.0  # float degC
+    fields_updated: int = 0  # uint16 bitmask
 
     MSG_ID = MsgId.HIGHRES_IMU
     PAYLOAD_FMT = "<QfffffffffffffH"
@@ -103,8 +104,9 @@ class HighresImu:
 @dataclass
 class Timesync:
     """MAVLink TIMESYNC message."""
-    tc1: int = 0   # int64 ns
-    ts1: int = 0   # int64 ns
+
+    tc1: int = 0  # int64 ns
+    ts1: int = 0  # int64 ns
 
     MSG_ID = MsgId.TIMESYNC
     PAYLOAD_FMT = "<qq"
@@ -114,17 +116,18 @@ class Timesync:
 @dataclass
 class Odometry:
     """MAVLink ODOMETRY message (simplified core fields)."""
-    time_usec: int = 0       # uint64
-    frame_id: int = 0        # uint8  MAV_FRAME
+
+    time_usec: int = 0  # uint64
+    frame_id: int = 0  # uint8  MAV_FRAME
     child_frame_id: int = 0  # uint8  MAV_FRAME
-    x: float = 0.0           # float m  (NED)
+    x: float = 0.0  # float m  (NED)
     y: float = 0.0
     z: float = 0.0
     q: tuple = (1.0, 0.0, 0.0, 0.0)  # quaternion (w, x, y, z)
-    vx: float = 0.0          # float m/s
+    vx: float = 0.0  # float m/s
     vy: float = 0.0
     vz: float = 0.0
-    rollspeed: float = 0.0   # float rad/s
+    rollspeed: float = 0.0  # float rad/s
     pitchspeed: float = 0.0
     yawspeed: float = 0.0
 
@@ -147,6 +150,7 @@ MSG_TYPES = {
 
 # --- CRC (X.25) ---
 
+
 def _crc_accumulate(byte: int, crc: int) -> int:
     tmp = byte ^ (crc & 0xFF)
     tmp ^= (tmp << 4) & 0xFF
@@ -164,28 +168,47 @@ def mavlink_crc(data: bytes, extra: int) -> int:
 
 # --- Encoder ---
 
+
 def _pack_payload(msg) -> bytes:
     """Pack a message dataclass into its wire payload bytes."""
     if isinstance(msg, Heartbeat):
         return struct.pack(
             Heartbeat.PAYLOAD_FMT,
-            msg.custom_mode, msg.type, msg.autopilot,
-            msg.base_mode, msg.system_status, msg.mavlink_version,
+            msg.custom_mode,
+            msg.type,
+            msg.autopilot,
+            msg.base_mode,
+            msg.system_status,
+            msg.mavlink_version,
         )
     elif isinstance(msg, Attitude):
         return struct.pack(
             Attitude.PAYLOAD_FMT,
-            msg.time_boot_ms, msg.roll, msg.pitch, msg.yaw,
-            msg.rollspeed, msg.pitchspeed, msg.yawspeed,
+            msg.time_boot_ms,
+            msg.roll,
+            msg.pitch,
+            msg.yaw,
+            msg.rollspeed,
+            msg.pitchspeed,
+            msg.yawspeed,
         )
     elif isinstance(msg, HighresImu):
         return struct.pack(
             HighresImu.PAYLOAD_FMT.replace(" ", ""),
-            msg.time_usec, msg.xacc, msg.yacc, msg.zacc,
-            msg.xgyro, msg.ygyro, msg.zgyro,
-            msg.xmag, msg.ymag, msg.zmag,
-            msg.abs_pressure, msg.diff_pressure,
-            msg.pressure_alt, msg.temperature,
+            msg.time_usec,
+            msg.xacc,
+            msg.yacc,
+            msg.zacc,
+            msg.xgyro,
+            msg.ygyro,
+            msg.zgyro,
+            msg.xmag,
+            msg.ymag,
+            msg.zmag,
+            msg.abs_pressure,
+            msg.diff_pressure,
+            msg.pressure_alt,
+            msg.temperature,
             msg.fields_updated,
         )
     elif isinstance(msg, Timesync):
@@ -194,11 +217,21 @@ def _pack_payload(msg) -> bytes:
         return struct.pack(
             Odometry.PAYLOAD_FMT.replace(" ", ""),
             msg.time_usec,
-            msg.x, msg.y, msg.z,
-            msg.q[0], msg.q[1], msg.q[2], msg.q[3],
-            msg.vx, msg.vy, msg.vz,
-            msg.rollspeed, msg.pitchspeed, msg.yawspeed,
-            msg.frame_id, msg.child_frame_id,
+            msg.x,
+            msg.y,
+            msg.z,
+            msg.q[0],
+            msg.q[1],
+            msg.q[2],
+            msg.q[3],
+            msg.vx,
+            msg.vy,
+            msg.vz,
+            msg.rollspeed,
+            msg.pitchspeed,
+            msg.yawspeed,
+            msg.frame_id,
+            msg.child_frame_id,
         )
     else:
         raise ValueError(f"Unknown message type: {type(msg)}")
@@ -221,14 +254,14 @@ def encode(msg, system_id: int = 1, component_id: int = 1) -> bytes:
     # MAVLink v2 header
     header = struct.pack(
         "<BBBBBBBHB",
-        MAVLINK_STX_V2,       # STX
-        len(payload),         # payload length
-        0,                    # incompat_flags
-        0,                    # compat_flags
+        MAVLINK_STX_V2,  # STX
+        len(payload),  # payload length
+        0,  # incompat_flags
+        0,  # compat_flags
         _seq_counter & 0xFF,  # sequence
         system_id,
         component_id,
-        msg_id & 0xFFFF,      # msg_id low 16 bits
+        msg_id & 0xFFFF,  # msg_id low 16 bits
         (msg_id >> 16) & 0xFF,  # msg_id high 8 bits
     )
 
@@ -243,7 +276,8 @@ def encode(msg, system_id: int = 1, component_id: int = 1) -> bytes:
 
 # --- Decoder ---
 
-def decode(data: bytes) -> Optional[object]:
+
+def decode(data: bytes) -> object | None:
     """
     Decode a MAVLink v2 frame from bytes.
 
@@ -261,8 +295,7 @@ def decode(data: bytes) -> Optional[object]:
         return None
 
     # Parse header
-    (stx, plen, incompat, compat, seq,
-     sys_id, comp_id, msg_id_low, msg_id_high) = struct.unpack(
+    (stx, plen, incompat, compat, seq, sys_id, comp_id, msg_id_low, msg_id_high) = struct.unpack(
         "<BBBBBBBHB", data[:MAVLINK_HEADER_LEN]
     )
     msg_id = msg_id_low | (msg_id_high << 16)
@@ -271,9 +304,10 @@ def decode(data: bytes) -> Optional[object]:
         return None
 
     # Verify CRC
-    payload = data[MAVLINK_HEADER_LEN:MAVLINK_HEADER_LEN + payload_len]
-    received_crc = struct.unpack("<H", data[MAVLINK_HEADER_LEN + payload_len:
-                                            MAVLINK_HEADER_LEN + payload_len + 2])[0]
+    payload = data[MAVLINK_HEADER_LEN : MAVLINK_HEADER_LEN + payload_len]
+    received_crc = struct.unpack(
+        "<H", data[MAVLINK_HEADER_LEN + payload_len : MAVLINK_HEADER_LEN + payload_len + 2]
+    )[0]
     computed_crc = mavlink_crc(data[1:MAVLINK_HEADER_LEN] + payload, CRC_EXTRA[msg_id])
 
     if received_crc != computed_crc:
@@ -285,25 +319,42 @@ def decode(data: bytes) -> Optional[object]:
     if msg_id_enum == MsgId.HEARTBEAT:
         vals = struct.unpack(Heartbeat.PAYLOAD_FMT, payload)
         return Heartbeat(
-            custom_mode=vals[0], type=vals[1], autopilot=vals[2],
-            base_mode=vals[3], system_status=vals[4], mavlink_version=vals[5],
+            custom_mode=vals[0],
+            type=vals[1],
+            autopilot=vals[2],
+            base_mode=vals[3],
+            system_status=vals[4],
+            mavlink_version=vals[5],
         )
     elif msg_id_enum == MsgId.ATTITUDE:
         vals = struct.unpack(Attitude.PAYLOAD_FMT, payload)
         return Attitude(
-            time_boot_ms=vals[0], roll=vals[1], pitch=vals[2], yaw=vals[3],
-            rollspeed=vals[4], pitchspeed=vals[5], yawspeed=vals[6],
+            time_boot_ms=vals[0],
+            roll=vals[1],
+            pitch=vals[2],
+            yaw=vals[3],
+            rollspeed=vals[4],
+            pitchspeed=vals[5],
+            yawspeed=vals[6],
         )
     elif msg_id_enum == MsgId.HIGHRES_IMU:
         fmt = HighresImu.PAYLOAD_FMT.replace(" ", "")
         vals = struct.unpack(fmt, payload)
         return HighresImu(
             time_usec=vals[0],
-            xacc=vals[1], yacc=vals[2], zacc=vals[3],
-            xgyro=vals[4], ygyro=vals[5], zgyro=vals[6],
-            xmag=vals[7], ymag=vals[8], zmag=vals[9],
-            abs_pressure=vals[10], diff_pressure=vals[11],
-            pressure_alt=vals[12], temperature=vals[13],
+            xacc=vals[1],
+            yacc=vals[2],
+            zacc=vals[3],
+            xgyro=vals[4],
+            ygyro=vals[5],
+            zgyro=vals[6],
+            xmag=vals[7],
+            ymag=vals[8],
+            zmag=vals[9],
+            abs_pressure=vals[10],
+            diff_pressure=vals[11],
+            pressure_alt=vals[12],
+            temperature=vals[13],
             fields_updated=vals[14],
         )
     elif msg_id_enum == MsgId.TIMESYNC:
@@ -314,11 +365,18 @@ def decode(data: bytes) -> Optional[object]:
         vals = struct.unpack(fmt, payload)
         return Odometry(
             time_usec=vals[0],
-            x=vals[1], y=vals[2], z=vals[3],
+            x=vals[1],
+            y=vals[2],
+            z=vals[3],
             q=(vals[4], vals[5], vals[6], vals[7]),
-            vx=vals[8], vy=vals[9], vz=vals[10],
-            rollspeed=vals[11], pitchspeed=vals[12], yawspeed=vals[13],
-            frame_id=vals[14], child_frame_id=vals[15],
+            vx=vals[8],
+            vy=vals[9],
+            vz=vals[10],
+            rollspeed=vals[11],
+            pitchspeed=vals[12],
+            yawspeed=vals[13],
+            frame_id=vals[14],
+            child_frame_id=vals[15],
         )
 
     return None
