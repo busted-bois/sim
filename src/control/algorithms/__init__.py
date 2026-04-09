@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import airsim
+
 _registry: dict[str, type[Algorithm]] = {}
 
 
@@ -13,7 +18,7 @@ class Algorithm:
     def __init__(self, config: dict) -> None:
         self._config = config
 
-    def run(self, client) -> None:
+    def run(self, client: airsim.MultirotorClient) -> None:
         """Execute the algorithm with full control over the AirSim client."""
         raise NotImplementedError
 
