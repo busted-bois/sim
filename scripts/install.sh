@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo
 
 echo "Setting up venv..."
 uv sync
