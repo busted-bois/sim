@@ -17,7 +17,7 @@ def launch() -> None:
     sim_cfg = config["simulator"]
 
     colosseum = sim_cfg.get("colosseum_path", "")
-    project = sim_cfg.get("project_path", "")
+    project = os.environ.get("PROJECT_PATH", "")
     windowed = sim_cfg.get("windowed", True)
     res_x = sim_cfg.get("res_x", 1280)
     res_y = sim_cfg.get("res_y", 720)
