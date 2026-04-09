@@ -2,13 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import airsim
-    from src.comms.state import DroneState
-    from src.planning.waypoint import VelocityCommand
-
 _registry: dict[str, type[Algorithm]] = {}
 
 
@@ -20,12 +13,8 @@ class Algorithm:
     def __init__(self, config: dict) -> None:
         self._config = config
 
-    def run(self, client: airsim.MultirotorClient) -> None:
+    def run(self, client) -> None:
         """Execute the algorithm with full control over the AirSim client."""
-        raise NotImplementedError
-
-    def compute(self, state: DroneState) -> VelocityCommand | None:
-        """Optional tick-based method. Algorithms can use this internally if needed."""
         raise NotImplementedError
 
 
