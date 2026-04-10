@@ -16,7 +16,6 @@ dev = [
 target-version = "py310"
 line-length = 100
 exclude = [
-    "airsim/",
     "packages/",
     "manual_flight_gui.py",
     "test_square.py",
