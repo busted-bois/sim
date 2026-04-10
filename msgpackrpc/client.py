@@ -10,9 +10,7 @@ from .message import REQUEST, RESPONSE
 
 
 class Client:
-    def __init__(
-        self, address, timeout=3600, pack_encoding="utf-8", unpack_encoding=None, **kwargs
-    ):
+    def __init__(self, address, timeout=3600, pack_encoding="utf-8", unpack_encoding=None):
         self._address = address
         self._timeout = timeout
         self._msgid = 0
