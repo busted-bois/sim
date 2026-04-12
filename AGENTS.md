@@ -1,26 +1,39 @@
 # AGENTS.md
 
-Instructions for AI coding agents working with this codebase.
+## Tooling
 
-<!-- opensrc:start -->
+- **Python:** `uv` for all operations (`uv run`, `uv sync`). No bare `python3`.
+- **Linter:** Ruff (`uvx ruff check --fix`). Runs via lefthook pre-commit on staged `*.{py,toml}`.
+- **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
 
-## Source Code Reference
-
-Source code for dependencies is available in `opensrc/` for deeper understanding of implementation details.
-
-See `opensrc/sources.json` for the list of available packages and their versions.
-
-Use this source code when you need to understand how a package works internally, not just its types/interface.
-
-### Fetching Additional Source Code
-
-To fetch source code for a package or repository you need to understand, run:
+## Running
 
 ```bash
-npx opensrc <package>           # npm package (e.g., npx opensrc zod)
-npx opensrc pypi:<package>      # Python package (e.g., npx opensrc pypi:requests)
-npx opensrc crates:<package>    # Rust crate (e.g., npx opensrc crates:serde)
-npx opensrc <owner>/<repo>      # GitHub repo (e.g., npx opensrc vercel/ai)
+uv run main.py                          # Run drone client (needs simulator running)
+uv run scripts/launch.py                # Launch UE5 sim + main.py (needs .env.local)
+bash scripts/launch.sh                  # Same, with .env.local auto-loaded
 ```
 
-<!-- opensrc:end -->
+## Project Layout
+
+- `main.py` — Entry point. Connects to AirSim RPC, loads algorithm from config, runs it.
+- `sim.config.json` — Runtime config (algorithm name, sim ports, waypoints, control limits).
+- `.env.local` — `PROJECT_PATH` to UE5 project. Loaded by `launch.sh`. Not committed.
+- `src/config.py` — Reads `sim.config.json` from project root.
+- `src/control/algorithms/` — Pluggable flight algorithms via `@register("name")` decorator.
+- `airsim/` — Vendored AirSim Python RPC client. **Do not modify.**
+- `msgpackrpc/` — Custom msgpack-rpc shim for Python 3.12 compat. **Do not modify.**
+- `opensrc/` — Gitignored external sources. Not part of the project.
+- `scripts/` — Install (`install.sh`) and launch (`launch.sh`, `launch.py`) scripts.
+
+## Adding a New Algorithm
+
+1. Create `src/control/algorithms/my_algo.py`
+2. Extend `Algorithm`, implement `run(self, client: airsim.MultirotorClient)`
+3. Decorate with `@register("my_algo")`
+4. Set `"algorithm": "my_algo"` in `sim.config.json`
+5. New module must be imported at bottom of `algorithms/__init__.py` to trigger registration
+
+## Coordinate Frame
+
+**NED** (North-East-Down). Negative z = above ground. Drone at 5m altitude → `z = -5.0`.
