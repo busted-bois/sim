@@ -273,7 +273,6 @@ class VehicleClient:
         )
 
     # time-of-day control
-    # time - of - day control
     def simSetTimeOfDay(
         self,
         is_enabled,

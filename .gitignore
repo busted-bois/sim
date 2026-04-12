@@ -8,3 +8,4 @@ __pycache__/
 .sisyphus/
 opensrc/
 *.egg-info/
+.ruff_cache/
