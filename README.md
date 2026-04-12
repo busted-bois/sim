@@ -1,8 +1,22 @@
-# 🚁 AI Grand Prix — Autonomous Drone Challenge
+# AIGP Drone Challenge
 
-A Python-based autonomy stack for the [AI Grand Prix](https://theaigrandprix.com) global autonomous drone racing competition, organized by Anduril in partnership with DCL and Neros Technologies.
+Autonomous drone navigating the Colosseum (UE5/AirSim) simulator for the [AI Grand Prix](https://theaigrandprix.com).
+AirSim Python RPC client for drone control, pluggable flight algorithms.
 
----
+## Quick Start
+
+**Prerequisites:** Python 3.10+, [uv](https://docs.astral.sh/uv/)
+
+```bash
+# Install
+bash scripts/install.sh          # or pwsh scripts/install.ps1
+
+# Configure — copy and edit
+cp .env.local.example .env.local # set PROJECT_PATH to your UE5 install
+
+# Launch simulator + drone
+bash scripts/launch.sh           # or pwsh scripts/launch.ps1
+```
 
 ## 👥 Team
 
@@ -21,75 +35,107 @@ A Python-based autonomy stack for the [AI Grand Prix](https://theaigrandprix.com
 - Samyak Kakatur
 - David Vayntrub
 - Ram Rao
+
 ---
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
-aigp/
-├── comms/          # MAVLink/MAVSDK communication layer
-├── perception/     # Gate detection & vision pipeline
-├── planning/       # Path planning & trajectory generation
-├── control/        # Drone dynamics & control loop
-├── main.py         # Integration entry point
-└── requirements.txt
+main.py                          # Entry point — AirSim RPC client
+sim.config.json                  # Runtime config
+src/
+  config.py                      # Config loader
+  control/
+    algorithms/                  # ← custom algorithms go here
+      __init__.py                # Algorithm base class + registry
+      six_directions.py          # Default: 6-direction test pattern
+airsim/                          # Vendored AirSim Python client
+msgpackrpc/                      # Custom msgpack-rpc shim (Python 3.12 compat)
+scripts/                         # Install/launch scripts
 ```
 
----
+## Writing a Custom Algorithm
 
-## 🛠️ Tech Stack
+1. Create `src/control/algorithms/my_algo.py`
+2. Extend `Algorithm`, implement `run(client)` receiving an `airsim.MultirotorClient`
+3. Add `@register("my_algo")` decorator
+4. Set `"algorithm": "my_algo"` in `sim.config.json`
 
-- **Language:** Python 3.14.2
-- **Simulator:** Colosseum (Unreal Engine 5.2)
-- **Communication:** MAVLink v2 via MAVSDK over UDP
-- **Control Interface:** SET_POSITION_TARGET_LOCAL_NED / SET_ATTITUDE_TARGET
+```python
+from src.control.algorithms import Algorithm, register
 
----
+@register("my_algo")
+class MyAlgo(Algorithm):
+    def run(self, client):
+        client.takeoffAsync().join()
+        client.moveByVelocityAsync(1.0, 0.0, 0.0, 5.0).join()
+        client.hoverAsync().join()
+```
 
-## ⚙️ Setup
+`run()` receives the AirSim `MultirotorClient` and has full control over the flight. Use `moveByVelocityAsync(vx, vy, vz, duration).join()` for timed velocity commands (NED frame).
+
+## Configuration
+
+**`sim.config.json`** top-level sections:
+
+| Section | Purpose |
+|---|---|
+| `algorithm` | Name of registered algorithm to run |
+| `simulator` | UE5/AirSim paths and ports (`airsim_port` for RPC) |
+| `control` | `command_rate_hz`, `max_speed_ms`, `max_altitude_m` |
+| `waypoints` | NED coordinate waypoints |
+| `logging` | Log level, telemetry logging toggle |
+
+**`.env.local`** — `PROJECT_PATH` pointing to your UE5 Colosseum project.
+
+Coordinate frame: **NED** (North-East-Down). Negative z = above ground. Drone at 5m altitude → `z = -5.0`.
+
+## Key Modules
+
+- **airsim/** — Vendored AirSim Python RPC client (`msgpackrpc` on port 41451)
+- **msgpackrpc/** — Custom msgpack-rpc shim for Python 3.12 compatibility
+- **control/algorithms/** — Pluggable flight algorithms via decorator registry
+
+| Field | Default | Description |
+|---|---|---|
+| `command_rate_hz` | `50` | Control loop frequency (Hz) |
+| `max_speed_ms` | `10.0` | Maximum ground speed (m/s) |
+| `max_altitude_m` | `50.0` | Ceiling altitude (meters) |
+
+### `waypoints`
+
+Array of `{x, y, z}` coordinates in NED frame (**N**orth **E**ast **D**own — negative z is above ground).
+
+### `logging`
+
+| Field | Default | Description |
+|---|---|---|
+| `level` | `INFO` | Python log level |
+| `telemetry_log_enabled` | `false` | Log every received telemetry packet |
+
+## Prerequisites
+
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
+
+## Quick Start
 
 ```bash
-# Clone the repo
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
-cd YOUR_REPO_NAME
+# Install dependencies and git hooks
+pwsh scripts/install.ps1        # PowerShell
+bash scripts/install.sh         # Bash
 
-# Create and activate virtual environment
-python -m venv venv
-venv\Scripts\activate  # Windows
-
-# Install dependencies
-pip install -r requirements.txt
+# Launch simulator and run main.py
+pwsh scripts/launch.ps1         # PowerShell
+bash scripts/launch.sh          # Bash
 ```
 
-### Manual flight in sim (Windows)
+## Development Notes
 
-If the AirSim / Colosseum **Python client already connects**, teammates can add **keyboard or gamepad manual control** (vJoy, `settings.json` under **Documents** or **OneDrive\Documents**, `RemoteControlID`). Step-by-step guide:
+**Coordinate frame:** NED (North-East-Down). A drone at 5m altitude has `z = -5.0`.
 
-**[docs/MANUAL_FLIGHT_WINDOWS.md](docs/MANUAL_FLIGHT_WINDOWS.md)**
+**Protocol:** MAVLink v2 over UDP. Custom parser in `src/comms/mavlink_parser.py` — no pymavlink dependency.
 
----
+**Telemetry:** Threaded UDP listener (not asyncio). The client runs a background thread that continuously receives and parses MAVLink messages, updating `DroneState` in real time.
 
-## 🏁 Competition Overview
-
-The AI Grand Prix is a global autonomous drone racing competition with a **$500,000 prize pool**.
-
-| Phase | Format | Timeline |
-|---|---|---|
-| Virtual Qualifier | Simulated racecourse, MAVLink interface | Spring 2026 |
-| In-Person Qualifier | Real drone, simulation-to-real transfer | TBD |
-| Final Race | Live head-to-head | November 2026, Columbus OH |
-
-**Rules:** No human interaction during timed runs. Fully autonomous flight only.
-
----
-
-## 📡 Interface Spec
-
-Based on VADR-TS-001 (Issue 00.01):
-
-- Transport: UDP
-- Protocol: MAVLink v2 / MAVSDK
-- Physics update rate: 120 Hz
-- Recommended command rate: 50–120 Hz
-- No GPS — local Cartesian coordinate system only
-- Max run duration: 8 minutes
+**Dependencies:** Managed with `uv`. See `pyproject.toml`. No pymavlink, matplotlib, or pytest in the dep list.

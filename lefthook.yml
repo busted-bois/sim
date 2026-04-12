@@ -1,0 +1,6 @@
+pre-commit:
+  jobs:
+    - name: ruff check
+      glob: "*.{py,toml}"
+      run: uvx ruff check --fix {staged_files}
+      stage_fixed: true

@@ -1,43 +1,28 @@
-"""
-Main entry point — connects to simulator and prints live telemetry.
-
-Usage:
-    # Terminal 1: start mock simulator
-    python -m comms.mock_simulator
-
-    # Terminal 2: run this
-    python main.py
-"""
-
-import time
-
-from comms.mavlink_client import TelemetryClient
+import airsim
+from src.config import load_config
+from src.control.algorithms import get_algorithm
 
 
 def main() -> None:
-    client = TelemetryClient(port=14550)
-    client.start()
+    config = load_config()
+    sim_cfg = config["simulator"]
 
-    print("Waiting for telemetry (start mock_simulator in another terminal)...")
-    try:
-        while True:
-            state = client.get_state()
-            if client.is_connected:
-                print(
-                    f"pos=({state.x:7.2f}, {state.y:7.2f}, {state.z:7.2f})  "
-                    f"att=({state.roll:6.3f}, {state.pitch:6.3f}, {state.yaw:6.3f})  "
-                    f"vel=({state.vx:6.2f}, {state.vy:6.2f}, {state.vz:6.2f})  "
-                    f"armed={state.armed}"
-                )
-            else:
-                print("No connection — waiting for heartbeat...")
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        print("\nStopped.")
-    finally:
-        client.stop()
+    client = airsim.MultirotorClient(
+        ip=sim_cfg.get("host", "127.0.0.1"),
+        port=sim_cfg.get("airsim_port", 41451),
+    )
+    client.confirmConnection()
+    client.enableApiControl(True)
+    client.armDisarm(True)
+
+    algo_name = config.get("algorithm", "six_directions")
+    algo = get_algorithm(algo_name, config)
+    print(f"Algorithm: {algo_name}")
+    algo.run(client)
+
+    client.armDisarm(False)
+    client.enableApiControl(False)
 
 
 if __name__ == "__main__":
     main()
-
