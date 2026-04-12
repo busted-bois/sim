@@ -1,0 +1,32 @@
+[project]
+name = "aigp-drone"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "msgpack",
+    "numpy",
+]
+
+[dependency-groups]
+dev = [
+    "lefthook",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+exclude = [
+    "packages/",
+    "manual_flight_gui.py",
+    "test_square.py",
+    ".venv/",
+    "opensrc/",
+    ".claude/",
+    ".sisyphus/",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
