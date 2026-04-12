@@ -9,3 +9,5 @@ __pycache__/
 opensrc/
 *.egg-info/
 .ruff_cache/
+.opencode*
+.claude*
