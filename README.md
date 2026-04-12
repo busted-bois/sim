@@ -44,19 +44,13 @@ bash scripts/launch.sh           # or pwsh scripts/launch.ps1
 main.py                          # Entry point — AirSim RPC client
 sim.config.json                  # Runtime config
 src/
-  comms/                         # MAVLink code (for future PX4 use)
-    mavlink_parser.py            # MAVLink v2 encode/decode (no pymavlink)
-    telemetry.py                 # Threaded UDP telemetry listener
-    state.py                     # DroneState dataclass (NED frame)
-    command.py                   # Velocity command sender (SET_POSITION_TARGET_LOCAL_NED)
+  config.py                      # Config loader
   control/
     algorithms/                  # ← custom algorithms go here
       __init__.py                # Algorithm base class + registry
       six_directions.py          # Default: 6-direction test pattern
-  planning/
-    waypoint.py                  # WaypointFollower + VelocityCommand
-  config.py                      # Config loader
 airsim/                          # Vendored AirSim Python client
+msgpackrpc/                      # Custom msgpack-rpc shim (Python 3.12 compat)
 scripts/                         # Install/launch scripts
 ```
 
@@ -99,8 +93,8 @@ Coordinate frame: **NED** (North-East-Down). Negative z = above ground. Drone at
 ## Key Modules
 
 - **airsim/** — Vendored AirSim Python RPC client (`msgpackrpc` on port 41451)
+- **msgpackrpc/** — Custom msgpack-rpc shim for Python 3.12 compatibility
 - **control/algorithms/** — Pluggable flight algorithms via decorator registry
-- **comms/** — MAVLink code retained for future PX4 SITL integration
 
 | Field | Default | Description |
 |---|---|---|
