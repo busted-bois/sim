@@ -1,5 +1,5 @@
 {
-  "algorithm": "six_directions",
+  "algorithm": "attitude_four_motion",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -47,5 +48,6 @@ def list_algorithms() -> list[str]:
     return sorted(_registry.keys())
 
 
-# Import built-in algorithms to trigger registration
-from src.control.algorithms import six_directions  # noqa: E402, F401
+# Import built-in algorithms to trigger registration.
+importlib.import_module("src.control.algorithms.six_directions")
+importlib.import_module("src.control.algorithms.attitude_four_motion")
