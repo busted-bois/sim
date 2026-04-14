@@ -12,6 +12,24 @@ cp .env.local.example .env.local # set PROJECT_PATH to your UE5 install
 uv run sim                       # one command: simulator + drone (from repo root)
 ```
 
+## Operations checklist
+
+| Step | What to do |
+| ---- | ---------- |
+| **Start** | From repo root: `uv run preflight` (optional), then `uv run sim`. Ensure `.env.local` has `PROJECT_PATH` to your `.uproject`. |
+| **Stop** | In the terminal running the client, press `Ctrl+C`. Then close Unreal. Closing Unreal first may disconnect the client with errors; that is usually harmless. |
+| **Reset** | Restart the Unreal/AirSim session if the drone or API state acts stuck; run `uv run sim` again. |
+| **Softer landing** | `uv run sim-very-soft` uses the gentle landing profile. |
+| **Landing telemetry** | With `landing.telemetry_log.enabled` true in `sim.config.json`, each run writes `logs/landing_telemetry.csv` (`t_s`, `altitude_m`, `vz_ms`, `command`) during the landing phase for tuning. |
+
+### Common errors
+
+| Symptom | Likely cause | Fix |
+| ------- | ------------ | --- |
+| Unreal asks for a project file first | `PROJECT_PATH` missing or wrong | Set `PROJECT_PATH` in `.env.local` or `simulator.project_path`, or run `pwsh scripts/fix_project_path.ps1`. |
+| Connection / RPC errors | Simulator not up or wrong port | Start Unreal; check `simulator.airsim_port` matches AirSim. |
+| Preflight warns “AirSim RPC not reachable” | Normal if UE is not running yet | Start the sim, or set `preflight.require_airsim_reachable` to `false` (default) to only warn. |
+
 ## Project Structure
 
 ```
@@ -19,6 +37,7 @@ main.py                          # Entry point — AirSim RPC client
 sim.config.json                  # Runtime config
 src/
   config.py                      # Config loader
+  landing_telemetry.py           # Optional CSV samples during landing
   control/algorithms/            # ← custom algorithms go here
     __init__.py                  # Algorithm base class + registry
     six_directions.py            # Default: 6-direction test pattern
@@ -56,6 +75,9 @@ class MyAlgo(Algorithm):
 | `control`   | `command_rate_hz` (50), `max_speed_ms` (10), `max_altitude_m` (50) |
 | `waypoints` | NED coordinate waypoints                                           |
 | `logging`   | Log level, telemetry logging toggle                                |
+| `landing`   | Landing profile, safety caps, optional CSV telemetry during landing |
+| `preflight` | Optional strict AirSim reachability before flight |
+| `safety`    | Algorithm timeout / failsafe                                       |
 
 **`.env.local`** — `PROJECT_PATH` pointing to your UE5 Colosseum project.
 
