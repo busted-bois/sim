@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 sim = "src.sim_launch:main"
+sim-very-soft = "src.sim_launch:main_very_soft"
 
 [dependency-groups]
 dev = [
