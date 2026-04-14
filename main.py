@@ -15,13 +15,18 @@ def main() -> None:
     client.enableApiControl(True)
     client.armDisarm(True)
 
-    algo_name = config.get("algorithm", "six_directions")
-    algo = get_algorithm(algo_name, config)
-    print(f"Algorithm: {algo_name}")
-    algo.run(client)
+    try:
+        algo_name = config.get("algorithm", "six_directions")
+        algo = get_algorithm(algo_name, config)
+        print(f"Algorithm: {algo_name}")
+        algo.run(client)
 
-    client.armDisarm(False)
-    client.enableApiControl(False)
+        print("Algorithm complete. Stabilizing before landing...")
+        client.hoverAsync().join()
+        client.landAsync().join()
+    finally:
+        client.armDisarm(False)
+        client.enableApiControl(False)
 
 
 if __name__ == "__main__":
