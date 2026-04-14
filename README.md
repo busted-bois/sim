@@ -6,11 +6,78 @@ Autonomous drone navigating the Colosseum (UE5/AirSim) simulator for the [AI Gra
 
 **Prerequisites:** Python 3.10+, [uv](https://docs.astral.sh/uv/)
 
+See `How to Launch Drone on Unreal Engine 5.4` for the full step-by-step startup flow.
+
+For a quick return run after setup:
+
 ```bash
-pwsh scripts/install.ps1         # install deps (or bash scripts/install.sh)
-cp .env.local.example .env.local # set PROJECT_PATH to your UE5 install
-uv run sim                       # one command: simulator + drone (from repo root)
+uv run sim
 ```
+
+## How to Launch Drone on Unreal Engine 5.4
+
+From a fresh Cursor session, use this exact sequence.
+
+1. **Open project in Cursor**
+   - `File -> Open Folder...`
+   - Choose: `C:\Users\yourName\Downloads\Drone Project\anduril-agp_drone-challenge`
+
+2. **Open terminal in Cursor**
+   - Press ``Ctrl+` ``
+   - Run:
+     ```bash
+     cd "C:\Users\yourName\Downloads\Drone Project\anduril-agp_drone-challenge"
+     ```
+
+3. **One-time path fix (safe to rerun)**
+   - Run:
+     ```bash
+     powershell -ExecutionPolicy Bypass -File ".\scripts\fix_project_path.ps1"
+     ```
+
+4. **Install/sync dependencies**
+   - Run:
+     ```bash
+     uv sync
+     ```
+
+5. **(Optional) Verify lint is clean**
+   - Run:
+     ```bash
+     uvx ruff check --fix
+     ```
+
+6. **Preferred launch (new): one command**
+   - Run:
+     ```bash
+     uv run sim
+     ```
+   - This now loads `.env.local`, attempts to auto-fix `PROJECT_PATH` on Windows when missing, launches UE5 if configured, waits for startup, then runs `main.py`.
+
+7. **Optional safety check before launch (new)**
+   - Run:
+     ```bash
+     uv run preflight
+     ```
+
+8. **Optional gentler landing profile (new)**
+   - Run:
+     ```bash
+     uv run sim-very-soft
+     ```
+
+9. **Manual mode (if you start simulator yourself)**
+   - Start your AirSim/Unreal environment first and wait until loaded.
+   - Then run only the drone controller:
+     ```bash
+     uv run main.py
+     ```
+
+10. **Confirm successful start in terminal output**
+    - Look for:
+      - `Connected!`
+      - `Algorithm: attitude_four_motion`
+      - phase logs like `phase_start name=stabilize`
 
 ## Operations checklist
 
