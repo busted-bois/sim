@@ -1,10 +1,31 @@
 import os
 import threading
 import time
+from pathlib import Path
 
 import airsim
 from src.config import load_config
 from src.control.algorithms import get_algorithm
+from src.landing_telemetry import LandingTelemetrySampler
+
+ROOT = Path(__file__).resolve().parent
+
+
+def _landing_telemetry_if_enabled(
+    client: airsim.MultirotorClient, landing_cfg: dict
+) -> LandingTelemetrySampler | None:
+    tel_cfg = landing_cfg.get("telemetry_log", {})
+    if not tel_cfg.get("enabled", False):
+        return None
+    raw_path = str(tel_cfg.get("path", "logs/landing_telemetry.csv")).strip()
+    out_path = Path(raw_path)
+    if not out_path.is_absolute():
+        out_path = ROOT / out_path
+    sample_hz = float(tel_cfg.get("sample_hz", 20.0))
+    sampler = LandingTelemetrySampler(client, out_path, sample_hz)
+    sampler.set_command("start")
+    sampler.start()
+    return sampler
 
 
 def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
@@ -16,34 +37,52 @@ def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
     min_hover_seconds = max(0.5, float(landing_cfg.get("min_hover_seconds", 1.0)))
     max_descent_speed_ms = max(0.5, float(landing_cfg.get("max_descent_speed_ms", 2.5)))
 
-    print(f"Landing profile: {profile}")
-    client.hoverAsync().join()
-    if min_hover_seconds > 0:
-        print(f"Hover settle: {min_hover_seconds:.2f}s")
-        time.sleep(min_hover_seconds)
-
-    if profile == "very_soft":
-        client.landAsync().join()
-        return
-
-    descent_speed_ms = max(0.5, float(landing_cfg.get("descent_speed_ms", 2.0)))
-    descent_speed_ms = min(descent_speed_ms, max_descent_speed_ms)
-    final_land_altitude_m = max(0.3, float(landing_cfg.get("final_land_altitude_m", 1.0)))
-
-    state = client.getMultirotorState().kinematics_estimated
-    altitude_m = max(0.0, -float(state.position.z_val))
-    if altitude_m > final_land_altitude_m:
-        descent_distance = altitude_m - final_land_altitude_m
-        descent_duration_s = descent_distance / descent_speed_ms
-        print(
-            f"Controlled descent: speed={descent_speed_ms:.2f} m/s "
-            f"for {descent_duration_s:.2f}s before final land."
-        )
-        # NED frame: +vz commands downward motion.
-        client.moveByVelocityAsync(0.0, 0.0, descent_speed_ms, descent_duration_s).join()
+    sampler = _landing_telemetry_if_enabled(client, landing_cfg)
+    try:
+        print(f"Landing profile: {profile}")
+        if sampler:
+            sampler.set_command("hover_async")
         client.hoverAsync().join()
+        if min_hover_seconds > 0:
+            if sampler:
+                sampler.set_command("hover_settle")
+            print(f"Hover settle: {min_hover_seconds:.2f}s")
+            time.sleep(min_hover_seconds)
 
-    client.landAsync().join()
+        if profile == "very_soft":
+            if sampler:
+                sampler.set_command("land_async")
+            client.landAsync().join()
+            return
+
+        descent_speed_ms = max(0.5, float(landing_cfg.get("descent_speed_ms", 2.0)))
+        descent_speed_ms = min(descent_speed_ms, max_descent_speed_ms)
+        final_land_altitude_m = max(0.3, float(landing_cfg.get("final_land_altitude_m", 1.0)))
+
+        state = client.getMultirotorState().kinematics_estimated
+        altitude_m = max(0.0, -float(state.position.z_val))
+        if altitude_m > final_land_altitude_m:
+            descent_distance = altitude_m - final_land_altitude_m
+            descent_duration_s = descent_distance / descent_speed_ms
+            print(
+                f"Controlled descent: speed={descent_speed_ms:.2f} m/s "
+                f"for {descent_duration_s:.2f}s before final land."
+            )
+            if sampler:
+                sampler.set_command(f"move_by_velocity vz_ms={descent_speed_ms:.3f}")
+            # NED frame: +vz commands downward motion.
+            client.moveByVelocityAsync(0.0, 0.0, descent_speed_ms, descent_duration_s).join()
+            if sampler:
+                sampler.set_command("hover_async")
+            client.hoverAsync().join()
+
+        if sampler:
+            sampler.set_command("land_async")
+        client.landAsync().join()
+    finally:
+        if sampler is not None:
+            sampler.stop()
+            print(f"Landing telemetry saved: {sampler.out_path}")
 
 
 def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
