@@ -9,7 +9,7 @@ Autonomous drone navigating the Colosseum (UE5/AirSim) simulator for the [AI Gra
 ```bash
 pwsh scripts/install.ps1         # install deps (or bash scripts/install.sh)
 cp .env.local.example .env.local # set PROJECT_PATH to your UE5 install
-pwsh scripts/launch.ps1          # launch simulator + drone (or bash scripts/launch.sh)
+uv run sim                       # one command: simulator + drone (from repo root)
 ```
 
 ## Project Structure
