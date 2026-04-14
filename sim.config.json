@@ -12,7 +12,23 @@
   "landing": {
     "profile": "faster_soft",
     "descent_speed_ms": 2.0,
+    "max_descent_speed_ms": 2.5,
+    "min_hover_seconds": 1.0,
     "final_land_altitude_m": 1.0
+  },
+  "safety": {
+    "algorithm_timeout_seconds": 180
+  },
+  "preflight": {
+    "require_airsim_reachable": false
+  },
+  "test_profile": {
+    "name": "baseline_repeatable",
+    "map_name": "BlocksV2",
+    "algorithm": "attitude_four_motion",
+    "cruise_speed_ms": 2.5,
+    "segment_duration_s": 3.0,
+    "startup_delay_seconds": 30
   },
   "control": {
     "command_rate_hz": 50,
