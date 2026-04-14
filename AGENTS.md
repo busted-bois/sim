@@ -9,16 +9,17 @@
 ## Running
 
 ```bash
+uv run sim                              # One command: .env.local, UE5 (if configured), main.py
 uv run main.py                          # Run drone client (needs simulator running)
-uv run scripts/launch.py                # Launch UE5 sim + main.py (needs .env.local)
-bash scripts/launch.sh                  # Same, with .env.local auto-loaded
+uv run scripts/launch.py                # Same as uv run sim
+bash scripts/launch.sh                  # Shell loads .env.local then runs launch.py
 ```
 
 ## Project Layout
 
 - `main.py` — Entry point. Connects to AirSim RPC, loads algorithm from config, runs it.
 - `sim.config.json` — Runtime config (algorithm name, sim ports, waypoints, control limits).
-- `.env.local` — `PROJECT_PATH` to UE5 project. Loaded by `launch.sh`. Not committed.
+- `.env.local` — `PROJECT_PATH` to UE5 project. Loaded by `uv run sim` / `launch.sh` / `launch.ps1`. Not committed.
 - `src/config.py` — Reads `sim.config.json` from project root.
 - `src/control/algorithms/` — Pluggable flight algorithms via `@register("name")` decorator.
 - `airsim/` — Vendored AirSim Python RPC client. **Do not modify.**
