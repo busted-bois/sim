@@ -44,6 +44,22 @@
     "segment_duration_s": 3.0,
     "startup_delay_seconds": 30
   },
+  "low_end_profile": {
+    "algorithm": "attitude_four_motion",
+    "command_rate_hz": 25.0,
+    "algorithm_timeout_seconds": 90.0,
+    "sim_res_x": 854,
+    "sim_res_y": 480,
+    "vision_enabled": false,
+    "segment_duration_s": 1.2,
+    "speed_ms": 1.6,
+    "direction_labels": ["+X", "-X", "+Y", "-Y"]
+  },
+  "six_directions": {
+    "duration_s": 5.0,
+    "speed_ms": 2.0,
+    "direction_labels": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
+  },
   "control": {
     "command_rate_hz": 50,
     "latency_tuning": {

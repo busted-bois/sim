@@ -16,21 +16,37 @@ def _apply_low_end_overrides(config: dict) -> None:
     if os.environ.get("AIGP_LOW_END", "").strip() != "1":
         return
     print("Low-end mode enabled: prioritizing smooth flight over detailed logging.")
+    low_end_cfg = config.setdefault("low_end_profile", {})
 
     vision_cfg = config.setdefault("vision", {})
-    vision_cfg["enabled"] = False
+    vision_cfg["enabled"] = bool(low_end_cfg.get("vision_enabled", False))
+    if vision_cfg["enabled"]:
+        vision_cfg["fps"] = float(low_end_cfg.get("vision_fps", 8.0))
 
     control_cfg = config.setdefault("control", {})
-    control_cfg["command_rate_hz"] = min(35.0, float(control_cfg.get("command_rate_hz", 35.0)))
+    command_rate_hz = float(low_end_cfg.get("command_rate_hz", 25.0))
+    control_cfg["command_rate_hz"] = max(10.0, min(35.0, command_rate_hz))
     latency_cfg = control_cfg.setdefault("latency_tuning", {})
     latency_cfg["enabled"] = False
     latency_cfg.setdefault("autotuner", {})["enabled"] = False
 
     landing_cfg = config.setdefault("landing", {})
     landing_cfg.setdefault("telemetry_log", {})["enabled"] = False
+    landing_cfg["min_hover_seconds"] = min(0.6, float(landing_cfg.get("min_hover_seconds", 1.0)))
 
     log_cfg = config.setdefault("logging", {})
     log_cfg["basic_flight_logs"] = True
+    config["algorithm"] = str(low_end_cfg.get("algorithm", "attitude_four_motion"))
+    config.setdefault("safety", {})["algorithm_timeout_seconds"] = float(
+        low_end_cfg.get("algorithm_timeout_seconds", 90.0)
+    )
+
+    six_cfg = config.setdefault("six_directions", {})
+    six_cfg["duration_s"] = float(low_end_cfg.get("segment_duration_s", 1.2))
+    six_cfg["speed_ms"] = float(low_end_cfg.get("speed_ms", 1.6))
+    six_cfg["direction_labels"] = list(
+        low_end_cfg.get("direction_labels", ["+X", "-X", "+Y", "-Y"])
+    )
 
 
 def _landing_telemetry_if_enabled(
