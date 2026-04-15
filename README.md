@@ -139,7 +139,8 @@ class MyAlgo(Algorithm):
 | ----------- | ------------------------------------------------------------------ |
 | `algorithm` | Name of registered algorithm to run                                |
 | `simulator` | UE5/AirSim paths and ports                                         |
-| `control`   | `command_rate_hz` (50), `max_speed_ms` (10), `max_altitude_m` (50) |
+| `control`   | `command_rate_hz`, optional `latency_tuning` (`commands_per_frame`, `max_command_rate_hz`), `max_speed_ms`, `max_altitude_m` |
+| `vision`    | FPV feed config (`enabled`, `camera_name`, `fps`, `fov_degrees`, optional debug frame dumps) |
 | `waypoints` | NED coordinate waypoints                                           |
 | `logging`   | Log level, telemetry logging toggle                                |
 | `landing`   | Landing profile, safety caps, optional CSV telemetry during landing |
@@ -149,6 +150,13 @@ class MyAlgo(Algorithm):
 **`.env.local`** — `PROJECT_PATH` pointing to your UE5 Colosseum project.
 
 **Coordinate frame:** NED (North-East-Down). Negative z = above ground. Drone at 5m altitude → `z = -5.0`.
+
+### Latency tuning notes
+
+- Keep `vision.fps` and `control.command_rate_hz` coordinated so commands are based on fresh pixels.
+- `control.latency_tuning.commands_per_frame=2.0` means up to two control updates per captured frame.
+- Runtime logs from `attitude_four_motion` now include loop timing (`avg_ms`, `max_ms`, `overruns`) and vision drops (`sched_drop`, `consumer_drop`) for tuning.
+- Optional auto-tuner pass: `control.latency_tuning.autotuner` runs for `duration_seconds` and prints recommended `vision.fps` and `control.command_rate_hz` from measured overrun/drop ratios.
 
 ## 👥 Team
 
