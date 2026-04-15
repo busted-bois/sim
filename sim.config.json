@@ -51,7 +51,7 @@
       "commands_per_frame": 2.0,
       "max_command_rate_hz": 60,
       "autotuner": {
-        "enabled": true,
+        "enabled": false,
         "duration_seconds": 8.0,
         "warmup_seconds": 1.0,
         "max_vision_fps": 40.0,

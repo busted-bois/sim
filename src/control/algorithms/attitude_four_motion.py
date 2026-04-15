@@ -17,6 +17,7 @@ def _clamp(value: float, lower: float, upper: float) -> float:
 @register("attitude_four_motion")
 class AttitudeFourMotion(Algorithm):
     def run(self, client):
+        basic_flight_logs = bool(self._config.get("logging", {}).get("basic_flight_logs", False))
         control_cfg = self._config.get("control", {})
         vision_cfg = self._config.get("vision", {})
         rate_hz = float(control_cfg.get("command_rate_hz", 50.0))
@@ -60,6 +61,8 @@ class AttitudeFourMotion(Algorithm):
         if current_z > -1.0:
             target_z = min(target_z, -4.0)
         log_every_steps = max(1, int(rate_hz // 2))
+        if basic_flight_logs:
+            log_every_steps = 10_000_000
 
         print(
             "[attitude_four_motion] init "
@@ -123,7 +126,8 @@ class AttitudeFourMotion(Algorithm):
                 roll_deg = _clamp(roll_sign * roll_cmd, -roll_max_deg, roll_max_deg)
                 apply_control(roll_deg, pitch_deg, yaw_deg, throttle)
 
-                if step == 0 or step == steps - 1 or step % log_every_steps == 0:
+                should_log_step = step == 0 or step == steps - 1 or step % log_every_steps == 0
+                if should_log_step and not basic_flight_logs:
                     frame = self.latest_frame()
                     frame_log = ""
                     if frame is not None:
