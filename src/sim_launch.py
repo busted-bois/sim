@@ -61,7 +61,7 @@ def _resolve_project_path(sim_cfg: dict) -> str:
     return ""
 
 
-def launch(*, landing_profile: str | None = None) -> None:
+def launch(*, landing_profile: str | None = None, low_end: bool = False) -> None:
     _load_env_local()
 
     # Import after env so PROJECT_PATH is visible to any import-time reads
@@ -107,6 +107,8 @@ def launch(*, landing_profile: str | None = None) -> None:
     env["AIRSIM_PORT"] = str(airsim_port)
     if landing_profile:
         env["AIGP_LANDING_PROFILE"] = landing_profile
+    if low_end:
+        env["AIGP_LOW_END"] = "1"
 
     print("Starting main.py...")
     subprocess.run(
@@ -116,11 +118,16 @@ def launch(*, landing_profile: str | None = None) -> None:
 
 
 def main() -> None:
-    launch()
+    run_low_end = any(arg.strip().lower() == "low-end" for arg in sys.argv[1:])
+    launch(low_end=run_low_end)
 
 
 def main_very_soft() -> None:
     launch(landing_profile="very_soft")
+
+
+def main_low_end() -> None:
+    launch(low_end=True)
 
 
 if __name__ == "__main__":

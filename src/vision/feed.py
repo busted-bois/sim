@@ -175,11 +175,18 @@ class VisionFeed:
                 "compress=True is not supported without an image decoder dependency; "
                 "set vision.compress=false"
             )
-        if data.size != width * height * 3:
+        expected_size = width * height * 3
+        if isinstance(data, bytes):
+            actual_size = len(data)
+            data_array = np.frombuffer(data, dtype=np.uint8)
+        else:
+            data_array = np.asarray(data, dtype=np.uint8).reshape(-1)
+            actual_size = int(data_array.size)
+        if actual_size != expected_size:
             raise RuntimeError(
-                f"unexpected uncompressed image size={data.size}, expected={width * height * 3}"
+                f"unexpected uncompressed image size={actual_size}, expected={expected_size}"
             )
-        return np.frombuffer(data, dtype=np.uint8).reshape(height, width, 3).copy()
+        return data_array.reshape(height, width, 3).copy()
 
     def _write_debug_frame(self, frame: VisionFrame) -> None:
         self._debug_output_dir.mkdir(parents=True, exist_ok=True)

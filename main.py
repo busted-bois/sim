@@ -12,6 +12,27 @@ from src.vision import VisionFeed
 ROOT = Path(__file__).resolve().parent
 
 
+def _apply_low_end_overrides(config: dict) -> None:
+    if os.environ.get("AIGP_LOW_END", "").strip() != "1":
+        return
+    print("Low-end mode enabled: prioritizing smooth flight over detailed logging.")
+
+    vision_cfg = config.setdefault("vision", {})
+    vision_cfg["enabled"] = False
+
+    control_cfg = config.setdefault("control", {})
+    control_cfg["command_rate_hz"] = min(35.0, float(control_cfg.get("command_rate_hz", 35.0)))
+    latency_cfg = control_cfg.setdefault("latency_tuning", {})
+    latency_cfg["enabled"] = False
+    latency_cfg.setdefault("autotuner", {})["enabled"] = False
+
+    landing_cfg = config.setdefault("landing", {})
+    landing_cfg.setdefault("telemetry_log", {})["enabled"] = False
+
+    log_cfg = config.setdefault("logging", {})
+    log_cfg["basic_flight_logs"] = True
+
+
 def _landing_telemetry_if_enabled(
     client: airsim.MultirotorClient, landing_cfg: dict
 ) -> LandingTelemetrySampler | None:
@@ -108,6 +129,7 @@ def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
 
 def main() -> None:
     config = load_config()
+    _apply_low_end_overrides(config)
     sim_cfg = config["simulator"]
 
     client = airsim.MultirotorClient(
