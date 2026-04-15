@@ -9,6 +9,15 @@
     "airsim_port": 41451,
     "startup_delay_seconds": 30
   },
+  "vision": {
+    "enabled": true,
+    "camera_name": "0",
+    "fps": 25,
+    "fov_degrees": 90,
+    "compress": false,
+    "save_debug_frames": false,
+    "debug_output_dir": "logs/vision_frames"
+  },
   "landing": {
     "profile": "faster_soft",
     "descent_speed_ms": 2.0,
@@ -37,6 +46,17 @@
   },
   "control": {
     "command_rate_hz": 50,
+    "latency_tuning": {
+      "enabled": true,
+      "commands_per_frame": 2.0,
+      "max_command_rate_hz": 60,
+      "autotuner": {
+        "enabled": true,
+        "duration_seconds": 8.0,
+        "warmup_seconds": 1.0,
+        "max_vision_fps": 40.0
+      }
+    },
     "max_speed_ms": 10.0,
     "max_altitude_m": 50.0
   },

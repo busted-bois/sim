@@ -7,6 +7,7 @@ import airsim
 from src.config import load_config
 from src.control.algorithms import get_algorithm
 from src.landing_telemetry import LandingTelemetrySampler
+from src.vision import VisionFeed
 
 ROOT = Path(__file__).resolve().parent
 
@@ -116,10 +117,13 @@ def main() -> None:
     client.confirmConnection()
     client.enableApiControl(True)
     client.armDisarm(True)
+    vision_feed = VisionFeed(client, config.get("vision", {}))
 
     try:
+        vision_feed.start()
         algo_name = config.get("algorithm", "six_directions")
         algo = get_algorithm(algo_name, config)
+        algo.set_vision_feed(vision_feed if vision_feed.enabled else None)
         safety_cfg = config.get("safety", {})
         algo_timeout_seconds = max(5.0, float(safety_cfg.get("algorithm_timeout_seconds", 180.0)))
 
@@ -133,6 +137,7 @@ def main() -> None:
         print("Attempting hover and landing for safe recovery...")
         _run_landing(client, config)
     finally:
+        vision_feed.stop()
         client.armDisarm(False)
         client.enableApiControl(False)
 
