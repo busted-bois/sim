@@ -77,7 +77,7 @@ From a fresh Cursor session, use this exact sequence.
      ```bash
      uv run sim low-end
      ```
-   - This disables vision capture, disables landing telemetry logging, reduces command rate, and prints basic flight logs only.
+   - This launches a lower-resolution simulator window, keeps `attitude_four_motion`, disables heavy telemetry/vision paths by default, and prints basic flight logs only.
 
 10. **Manual mode (if you start simulator yourself)**
    - Start your AirSim/Unreal environment first and wait until loaded.
@@ -172,6 +172,11 @@ class MyAlgo(Algorithm):
 - Runtime logs from `attitude_four_motion` now include loop timing (`avg_ms`, `max_ms`, `overruns`) and vision drops (`sched_drop`, `consumer_drop`) for tuning.
 - Optional auto-tuner pass: `control.latency_tuning.autotuner` (disabled by default) runs for `duration_seconds` and prints recommended `vision.fps` and `control.command_rate_hz` from measured overrun/drop ratios.
 - Set `control.latency_tuning.autotuner.output_json.enabled=true` to write results to `logs/latency_tuning_recommendation.json` (or a custom path) for run-to-run comparisons.
+
+### Quick test tuning (low-end mode)
+
+- `low_end_profile` in `sim.config.json` controls `uv run sim low-end` behavior (algorithm, reduced command rate, simulator resolution, and lightweight logging/telemetry).
+- `six_directions` settings (`duration_s`, `speed_ms`, `direction_labels`) are used by normal runs and can be overridden by low-end mode for fast sanity checks.
 
 ## 👥 Team
 
