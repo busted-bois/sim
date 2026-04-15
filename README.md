@@ -20,6 +20,12 @@ For smoother flight on lower-end laptops (reduced telemetry/logging):
 uv run sim low-end
 ```
 
+To run with the old third-person chase camera:
+
+```bash
+uv run sim 3rd-person
+```
+
 ## How to Launch Drone on Unreal Engine 5.4
 
 From a fresh Cursor session, use this exact sequence.
@@ -79,14 +85,21 @@ From a fresh Cursor session, use this exact sequence.
      ```
    - This launches a lower-resolution simulator window, keeps `attitude_four_motion`, disables heavy telemetry/vision paths by default, and prints basic flight logs only.
 
-10. **Manual mode (if you start simulator yourself)**
+10. **Optional third-person camera mode (new)**
+   - Run:
+     ```bash
+     uv run sim 3rd-person
+     ```
+   - This keeps the old third-person (`FlyWithMe`) viewport mode while still running the same drone stack.
+
+11. **Manual mode (if you start simulator yourself)**
    - Start your AirSim/Unreal environment first and wait until loaded.
    - Then run only the drone controller:
      ```bash
      uv run main.py
      ```
 
-11. **Confirm successful start in terminal output**
+12. **Confirm successful start in terminal output**
     - Look for:
       - `Connected!`
       - `Algorithm: attitude_four_motion`

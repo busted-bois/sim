@@ -12,6 +12,20 @@ from src.vision import VisionFeed
 ROOT = Path(__file__).resolve().parent
 
 
+def _set_front_camera_pose(client: airsim.MultirotorClient, config: dict) -> None:
+    vision_cfg = config.get("vision", {})
+    camera_name = str(vision_cfg.get("camera_name", "0"))
+    # NED frame: +X is forward, +Y is right, +Z is down.
+    front_pose = airsim.Pose(
+        airsim.Vector3r(0.35, 0.0, -0.05),
+        airsim.Quaternionr(0.0, 0.0, 0.0, 1.0),
+    )
+    try:
+        client.simSetCameraPose(camera_name, front_pose)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
+
+
 def _apply_low_end_overrides(config: dict) -> None:
     if os.environ.get("AIGP_LOW_END", "").strip() != "1":
         return
@@ -155,6 +169,7 @@ def main() -> None:
     client.confirmConnection()
     client.enableApiControl(True)
     client.armDisarm(True)
+    _set_front_camera_pose(client, config)
     vision_feed = VisionFeed(client, config.get("vision", {}))
 
     try:
