@@ -75,6 +75,11 @@ def launch(*, landing_profile: str | None = None, low_end: bool = False) -> None
     windowed = sim_cfg.get("windowed", True)
     res_x = sim_cfg.get("res_x", 1280)
     res_y = sim_cfg.get("res_y", 720)
+    if low_end:
+        low_end_cfg = config.get("low_end_profile", {})
+        windowed = True
+        res_x = int(low_end_cfg.get("sim_res_x", 854))
+        res_y = int(low_end_cfg.get("sim_res_y", 480))
     airsim_port = sim_cfg.get("airsim_port", 41451)
     delay = sim_cfg.get("startup_delay_seconds", 30)
 
@@ -87,7 +92,10 @@ def launch(*, landing_profile: str | None = None, low_end: bool = False) -> None
                 "  2) adding simulator.project_path in sim.config.json, or\n"
                 "  3) running: pwsh scripts/fix_project_path.ps1\n"
             )
-        print(f"Launching Colosseum: {colosseum}")
+        if low_end:
+            print(f"Launching Colosseum (low-end): {colosseum}")
+        else:
+            print(f"Launching Colosseum: {colosseum}")
         cmd = [colosseum]
         cmd.append(project)
         cmd.append("-game")
