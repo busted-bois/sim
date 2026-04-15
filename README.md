@@ -14,6 +14,12 @@ For a quick return run after setup:
 uv run sim
 ```
 
+For smoother flight on lower-end laptops (reduced telemetry/logging):
+
+```bash
+uv run sim low-end
+```
+
 ## How to Launch Drone on Unreal Engine 5.4
 
 From a fresh Cursor session, use this exact sequence.
@@ -66,14 +72,21 @@ From a fresh Cursor session, use this exact sequence.
      uv run sim-very-soft
      ```
 
-9. **Manual mode (if you start simulator yourself)**
+9. **Optional low-end smooth-flight mode (new)**
+   - Run:
+     ```bash
+     uv run sim low-end
+     ```
+   - This disables vision capture, disables landing telemetry logging, reduces command rate, and prints basic flight logs only.
+
+10. **Manual mode (if you start simulator yourself)**
    - Start your AirSim/Unreal environment first and wait until loaded.
    - Then run only the drone controller:
      ```bash
      uv run main.py
      ```
 
-10. **Confirm successful start in terminal output**
+11. **Confirm successful start in terminal output**
     - Look for:
       - `Connected!`
       - `Algorithm: attitude_four_motion`
@@ -84,6 +97,7 @@ From a fresh Cursor session, use this exact sequence.
 | Step | What to do |
 | ---- | ---------- |
 | **Start** | From repo root: `uv run preflight` (optional), then `uv run sim`. Ensure `.env.local` has `PROJECT_PATH` to your `.uproject`. |
+| **Low-end smooth mode** | Use `uv run sim low-end` to prioritize smoother control on weaker hardware by reducing runtime logging and telemetry load. |
 | **Stop** | In the terminal running the client, press `Ctrl+C`. Then close Unreal. Closing Unreal first may disconnect the client with errors; that is usually harmless. |
 | **Reset** | Restart the Unreal/AirSim session if the drone or API state acts stuck; run `uv run sim` again. |
 | **Softer landing** | `uv run sim-very-soft` uses the gentle landing profile. |
@@ -156,7 +170,7 @@ class MyAlgo(Algorithm):
 - Keep `vision.fps` and `control.command_rate_hz` coordinated so commands are based on fresh pixels.
 - `control.latency_tuning.commands_per_frame=2.0` means up to two control updates per captured frame.
 - Runtime logs from `attitude_four_motion` now include loop timing (`avg_ms`, `max_ms`, `overruns`) and vision drops (`sched_drop`, `consumer_drop`) for tuning.
-- Optional auto-tuner pass: `control.latency_tuning.autotuner` runs for `duration_seconds` and prints recommended `vision.fps` and `control.command_rate_hz` from measured overrun/drop ratios.
+- Optional auto-tuner pass: `control.latency_tuning.autotuner` (disabled by default) runs for `duration_seconds` and prints recommended `vision.fps` and `control.command_rate_hz` from measured overrun/drop ratios.
 - Set `control.latency_tuning.autotuner.output_json.enabled=true` to write results to `logs/latency_tuning_recommendation.json` (or a custom path) for run-to-run comparisons.
 
 ## 👥 Team
