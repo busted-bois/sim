@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import airsim
+    from src.vision import VisionFeed, VisionFrame, VisionStats
 
 _registry: dict[str, type[Algorithm]] = {}
 
@@ -18,10 +19,24 @@ class Algorithm:
 
     def __init__(self, config: dict) -> None:
         self._config = config
+        self._vision_feed: VisionFeed | None = None
 
     def run(self, client: airsim.MultirotorClient) -> None:
         """Execute the algorithm with full control over the AirSim client."""
         raise NotImplementedError
+
+    def set_vision_feed(self, vision_feed: VisionFeed | None) -> None:
+        self._vision_feed = vision_feed
+
+    def latest_frame(self) -> VisionFrame | None:
+        if self._vision_feed is None:
+            return None
+        return self._vision_feed.get_latest()
+
+    def vision_stats(self) -> VisionStats | None:
+        if self._vision_feed is None:
+            return None
+        return self._vision_feed.get_stats()
 
 
 def register(name: str):
