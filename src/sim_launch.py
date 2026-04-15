@@ -1,12 +1,101 @@
 """Start UE5 Colosseum (if configured), wait, then run main.py."""
 
+import json
 import os
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _airsim_settings_path() -> Path:
+    if sys.platform == "win32":
+        documents = Path.home() / "Documents"
+    else:
+        documents = Path.home() / "Documents"
+    return documents / "AirSim" / "settings.json"
+
+
+def _deep_merge_dict(base: dict, update: dict) -> dict:
+    for key, value in update.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge_dict(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def _normalize_view_mode(view_mode: str) -> str:
+    mode = view_mode.strip().lower()
+    if mode in {"3rd-person", "third-person", "flywithme"}:
+        return "FlyWithMe"
+    return "Fpv"
+
+
+def _ensure_camera_settings(airsim_port: int, view_mode: str) -> None:
+    settings_path = _airsim_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    settings: dict = {}
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print(f"Warning: invalid AirSim settings JSON at {settings_path}; rewriting file.")
+
+    # Cleanup legacy camera block from earlier launcher versions if present.
+    vehicles = settings.get("Vehicles")
+    if isinstance(vehicles, dict):
+        drone1 = vehicles.get("Drone1")
+        if isinstance(drone1, dict):
+            keys = set(drone1.keys())
+            cameras = drone1.get("Cameras")
+            if (
+                keys <= {"VehicleType", "Cameras"}
+                and isinstance(cameras, dict)
+                and {"0", "front_center"}.issubset(set(cameras.keys()))
+            ):
+                vehicles.pop("Drone1", None)
+        if not vehicles:
+            settings.pop("Vehicles", None)
+
+    # Keep settings minimal so we do not accidentally override map-specific vehicle configs.
+    normalized_view_mode = _normalize_view_mode(view_mode)
+    required_settings = {
+        "SettingsVersion": 1.2,
+        "SimMode": "Multirotor",
+        "ViewMode": normalized_view_mode,
+        "ApiServerPort": int(airsim_port),
+        "Recording": {
+            "Cameras": [
+                {"CameraName": "0", "ImageType": 0, "PixelsAsFloat": False, "Compress": False}
+            ]
+        },
+        "SubWindows": [{"WindowID": 0, "ImageType": 0, "CameraName": "0", "Visible": True}],
+    }
+    merged = _deep_merge_dict(settings, required_settings)
+    settings_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    print(f"Configured AirSim ViewMode={normalized_view_mode} in {settings_path}")
+
+
+def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
+
+def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
+    deadline = time.time() + max(1.0, timeout_s)
+    while time.time() < deadline:
+        if _is_port_open(host, port):
+            return True
+        time.sleep(1.0)
+    return False
 
 
 def _load_env_local() -> None:
@@ -61,7 +150,9 @@ def _resolve_project_path(sim_cfg: dict) -> str:
     return ""
 
 
-def launch(*, landing_profile: str | None = None, low_end: bool = False) -> None:
+def launch(
+    *, landing_profile: str | None = None, low_end: bool = False, view_mode: str = "Fpv"
+) -> None:
     _load_env_local()
 
     # Import after env so PROJECT_PATH is visible to any import-time reads
@@ -82,6 +173,7 @@ def launch(*, landing_profile: str | None = None, low_end: bool = False) -> None
         res_y = int(low_end_cfg.get("sim_res_y", 480))
     airsim_port = sim_cfg.get("airsim_port", 41451)
     delay = sim_cfg.get("startup_delay_seconds", 30)
+    _ensure_camera_settings(airsim_port, view_mode)
 
     if colosseum and Path(colosseum).exists():
         if not project:
@@ -99,6 +191,7 @@ def launch(*, landing_profile: str | None = None, low_end: bool = False) -> None
         cmd = [colosseum]
         cmd.append(project)
         cmd.append("-game")
+        cmd.append(f"-settings={_airsim_settings_path()}")
         if windowed:
             cmd.extend(["-windowed", f"-resx={res_x}", f"-resy={res_y}"])
 
@@ -108,6 +201,14 @@ def launch(*, landing_profile: str | None = None, low_end: bool = False) -> None
         )
         print(f"Waiting {delay}s for simulator to start...")
         time.sleep(delay)
+        wait_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
+        if _wait_for_airsim_rpc("127.0.0.1", int(airsim_port), wait_timeout_s):
+            print(f"AirSim RPC is ready on 127.0.0.1:{airsim_port}")
+        else:
+            raise SystemExit(
+                f"AirSim RPC did not become ready on 127.0.0.1:{airsim_port} "
+                f"within {wait_timeout_s:.0f}s. Ensure Unreal finished loading the map."
+            )
     else:
         print(f"Colosseum not found at '{colosseum}', skipping simulator launch.")
 
@@ -126,8 +227,11 @@ def launch(*, landing_profile: str | None = None, low_end: bool = False) -> None
 
 
 def main() -> None:
-    run_low_end = any(arg.strip().lower() == "low-end" for arg in sys.argv[1:])
-    launch(low_end=run_low_end)
+    normalized_args = {arg.strip().lower() for arg in sys.argv[1:]}
+    run_low_end = "low-end" in normalized_args
+    run_third_person = "3rd-person" in normalized_args or "third-person" in normalized_args
+    view_mode = "FlyWithMe" if run_third_person else "Fpv"
+    launch(low_end=run_low_end, view_mode=view_mode)
 
 
 def main_very_soft() -> None:
