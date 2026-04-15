@@ -54,7 +54,11 @@
         "enabled": true,
         "duration_seconds": 8.0,
         "warmup_seconds": 1.0,
-        "max_vision_fps": 40.0
+        "max_vision_fps": 40.0,
+        "output_json": {
+          "enabled": true,
+          "path": "logs/latency_tuning_recommendation.json"
+        }
       }
     },
     "max_speed_ms": 10.0,

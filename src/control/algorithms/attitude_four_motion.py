@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import math
 import time
+from pathlib import Path
 
 from src.control.algorithms import Algorithm, register
+
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -312,3 +316,38 @@ class AttitudeFourMotion(Algorithm):
             f"recommend(vision.fps={recommended_vision_fps:.1f},"
             f"control.command_rate_hz={recommended_command_hz:.1f})"
         )
+        output_cfg = autotuner_cfg.get("output_json", {})
+        if bool(output_cfg.get("enabled", False)):
+            output_path = Path(
+                str(
+                    output_cfg.get(
+                        "path",
+                        "logs/latency_tuning_recommendation.json",
+                    )
+                )
+            )
+            if not output_path.is_absolute():
+                output_path = ROOT / output_path
+            payload = {
+                "timestamp_unix_s": time.time(),
+                "algorithm": "attitude_four_motion",
+                "autotuner": {
+                    "duration_seconds": duration_s,
+                    "warmup_seconds": warmup_s,
+                    "max_vision_fps": max_vision_fps,
+                },
+                "measured": {
+                    "control_hz": achieved_hz,
+                    "capture_hz": baseline_capture_hz,
+                    "overrun_ratio": overrun_ratio,
+                    "scheduler_drop_ratio": scheduler_drop_ratio,
+                    "consumer_drop_ratio": consumer_drop_ratio,
+                },
+                "recommendation": {
+                    "vision_fps": recommended_vision_fps,
+                    "command_rate_hz": recommended_command_hz,
+                },
+            }
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            print(f"[attitude_four_motion] autotuner_output path={output_path}")

@@ -157,6 +157,7 @@ class MyAlgo(Algorithm):
 - `control.latency_tuning.commands_per_frame=2.0` means up to two control updates per captured frame.
 - Runtime logs from `attitude_four_motion` now include loop timing (`avg_ms`, `max_ms`, `overruns`) and vision drops (`sched_drop`, `consumer_drop`) for tuning.
 - Optional auto-tuner pass: `control.latency_tuning.autotuner` runs for `duration_seconds` and prints recommended `vision.fps` and `control.command_rate_hz` from measured overrun/drop ratios.
+- Set `control.latency_tuning.autotuner.output_json.enabled=true` to write results to `logs/latency_tuning_recommendation.json` (or a custom path) for run-to-run comparisons.
 
 ## 👥 Team
 
