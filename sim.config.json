@@ -12,9 +12,15 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-    "fps": 25,
-    "fov_degrees": 90,
-    "compress": false,
+    "fps": 18,
+    "min_fps": 5,
+    "fov_degrees": 100,
+    "compress": true,
+    "resolution": [640, 360],
+    "startup_autotune_enabled": true,
+    "startup_autotune_seconds": 3.0,
+    "startup_autotune_min_samples": 8,
+    "startup_autotune_headroom": 0.9,
     "save_debug_frames": false,
     "debug_output_dir": "logs/vision_frames"
   },
