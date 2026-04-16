@@ -167,7 +167,7 @@ class MyAlgo(Algorithm):
 | `algorithm` | Name of registered algorithm to run                                |
 | `simulator` | UE5/AirSim paths and ports                                         |
 | `control`   | `command_rate_hz`, optional `latency_tuning` (`commands_per_frame`, `max_command_rate_hz`), `max_speed_ms`, `max_altitude_m` |
-| `vision`    | FPV feed config (`enabled`, `camera_name`, `fps`, `fov_degrees`, optional debug frame dumps) |
+| `vision`    | FPV feed config (`enabled`, `camera_name`, `fps`, `min_fps`, `fov_degrees`, `compress`, optional `resolution` or `width/height`, startup auto-tune knobs, optional debug frame dumps) |
 | `waypoints` | NED coordinate waypoints                                           |
 | `logging`   | Log level, telemetry logging toggle                                |
 | `landing`   | Landing profile, safety caps, optional CSV telemetry during landing |
@@ -181,6 +181,8 @@ class MyAlgo(Algorithm):
 ### Latency tuning notes
 
 - Keep `vision.fps` and `control.command_rate_hz` coordinated so commands are based on fresh pixels.
+- Start from `vision.fps=18`, `vision.fov_degrees=100`, and `vision.resolution=[640, 360]` for a low-latency baseline before pushing quality or field-of-view higher.
+- Startup auto-adaptation is enabled by default (`vision.startup_autotune_enabled=true`): during the first few seconds, runtime capture throughput is measured and `vision.fps` is clamped down (never below `vision.min_fps`) so slower machines avoid frame-age buildup.
 - `control.latency_tuning.commands_per_frame=2.0` means up to two control updates per captured frame.
 - Runtime logs from `attitude_four_motion` now include loop timing (`avg_ms`, `max_ms`, `overruns`) and vision drops (`sched_drop`, `consumer_drop`) for tuning.
 - Optional auto-tuner pass: `control.latency_tuning.autotuner` (disabled by default) runs for `duration_seconds` and prints recommended `vision.fps` and `control.command_rate_hz` from measured overrun/drop ratios.

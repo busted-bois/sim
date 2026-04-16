@@ -167,6 +167,7 @@ class AttitudeFourMotion(Algorithm):
                     f" vision(captured={produced},sched_drop={dropped_sched},"
                     "consumer_drop="
                     f"{dropped_consumer},"
+                    f"fps(cfg={vision_end.configured_fps:.1f},active={vision_end.active_fps:.1f}),"
                     f"frame_age_ms={vision_end.latest_frame_age_s * 1000.0:.1f},"
                     f"cap_hz={vision_end.effective_capture_hz:.1f})"
                 )

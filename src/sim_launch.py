@@ -35,7 +35,9 @@ def _normalize_view_mode(view_mode: str) -> str:
     return "Fpv"
 
 
-def _ensure_camera_settings(airsim_port: int, view_mode: str) -> None:
+def _ensure_camera_settings(
+    airsim_port: int, view_mode: str, *, corner_chase_pip: bool
+) -> None:
     settings_path = _airsim_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -74,9 +76,29 @@ def _ensure_camera_settings(airsim_port: int, view_mode: str) -> None:
                 {"CameraName": "0", "ImageType": 0, "PixelsAsFloat": False, "Compress": False}
             ]
         },
-        "SubWindows": [{"WindowID": 0, "ImageType": 0, "CameraName": "0", "Visible": True}],
+        # Corner Chase PIP: only for `uv run sim 3rd-person` (FlyWithMe).
+        # FPV / low-end leave it off.
+        "SubWindows": [
+            {
+                "WindowID": 0,
+                "ImageType": 0,
+                "CameraName": "Chase",
+                "External": True,
+                "Visible": bool(corner_chase_pip),
+            }
+        ],
     }
+    # FPV only: extra chase pull-back for the (hidden) external
+    # camera / prior PiP tuning.
+    # `uv run sim 3rd-person` (FlyWithMe) uses stock AirSim
+    # CameraDirector defaults - no FollowDistance override.
+    if normalized_view_mode == "Fpv":
+        required_settings["CameraDirector"] = {"FollowDistance": -50.0}
+
     merged = _deep_merge_dict(settings, required_settings)
+    if normalized_view_mode == "FlyWithMe":
+        merged.pop("CameraDirector", None)
+
     settings_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     print(f"Configured AirSim ViewMode={normalized_view_mode} in {settings_path}")
 
@@ -151,7 +173,11 @@ def _resolve_project_path(sim_cfg: dict) -> str:
 
 
 def launch(
-    *, landing_profile: str | None = None, low_end: bool = False, view_mode: str = "Fpv"
+    *,
+    landing_profile: str | None = None,
+    low_end: bool = False,
+    view_mode: str = "Fpv",
+    corner_chase_pip: bool = False,
 ) -> None:
     _load_env_local()
 
@@ -173,7 +199,7 @@ def launch(
         res_y = int(low_end_cfg.get("sim_res_y", 480))
     airsim_port = sim_cfg.get("airsim_port", 41451)
     delay = sim_cfg.get("startup_delay_seconds", 30)
-    _ensure_camera_settings(airsim_port, view_mode)
+    _ensure_camera_settings(airsim_port, view_mode, corner_chase_pip=corner_chase_pip)
 
     if colosseum and Path(colosseum).exists():
         if not project:
@@ -231,7 +257,11 @@ def main() -> None:
     run_low_end = "low-end" in normalized_args
     run_third_person = "3rd-person" in normalized_args or "third-person" in normalized_args
     view_mode = "FlyWithMe" if run_third_person else "Fpv"
-    launch(low_end=run_low_end, view_mode=view_mode)
+    launch(
+        low_end=run_low_end,
+        view_mode=view_mode,
+        corner_chase_pip=run_third_person,
+    )
 
 
 def main_very_soft() -> None:
@@ -239,7 +269,7 @@ def main_very_soft() -> None:
 
 
 def main_low_end() -> None:
-    launch(low_end=True)
+    launch(low_end=True, corner_chase_pip=False)
 
 
 if __name__ == "__main__":
