@@ -26,6 +26,34 @@ def _set_front_camera_pose(client: airsim.MultirotorClient, config: dict) -> Non
         print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
 
 
+def _apply_trace_style(client: airsim.MultirotorClient, config: dict) -> None:
+    sim_cfg = config.get("simulator", {})
+    trace_cfg = sim_cfg.get("trace", {})
+    trace_enabled = os.environ.get("AIGP_ENABLE_TRACE", "").strip() == "1"
+    trace_enabled = bool(trace_cfg.get("enabled", trace_enabled))
+    if not trace_enabled:
+        return
+
+    raw_color = trace_cfg.get("color_rgba", [1.0, 0.0, 1.0, 1.0])
+    default_color = [1.0, 0.0, 1.0, 1.0]
+    color = default_color
+    if isinstance(raw_color, list) and len(raw_color) == 4:
+        try:
+            color = [max(0.0, min(1.0, float(v))) for v in raw_color]
+        except (TypeError, ValueError):
+            color = default_color
+
+    try:
+        thickness = float(trace_cfg.get("thickness", 4.0))
+    except (TypeError, ValueError):
+        thickness = 4.0
+    thickness = max(1.0, thickness)
+
+    vehicle_name = str(trace_cfg.get("vehicle_name", "")).strip()
+    client.simSetTraceLine(color, thickness, vehicle_name)
+    print(f"Trace style applied: color={color}, thickness={thickness:.1f}")
+
+
 def _apply_low_end_overrides(config: dict) -> None:
     if os.environ.get("AIGP_LOW_END", "").strip() != "1":
         return
@@ -170,6 +198,7 @@ def main() -> None:
     client.enableApiControl(True)
     client.armDisarm(True)
     _set_front_camera_pose(client, config)
+    _apply_trace_style(client, config)
     vision_feed = VisionFeed(client, config.get("vision", {}))
 
     try:

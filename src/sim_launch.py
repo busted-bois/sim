@@ -36,7 +36,7 @@ def _normalize_view_mode(view_mode: str) -> str:
 
 
 def _ensure_camera_settings(
-    airsim_port: int, view_mode: str, *, corner_chase_pip: bool
+    airsim_port: int, view_mode: str, *, corner_chase_pip: bool, enable_trace: bool
 ) -> None:
     settings_path = _airsim_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,6 +55,10 @@ def _ensure_camera_settings(
         if isinstance(drone1, dict):
             keys = set(drone1.keys())
             cameras = drone1.get("Cameras")
+            # Old launcher-created vehicle block can override map defaults and
+            # break camera discovery in some AirSim/Colosseum builds.
+            if keys == {"EnableTrace"}:
+                vehicles.pop("Drone1", None)
             if (
                 keys <= {"VehicleType", "Cameras"}
                 and isinstance(cameras, dict)
@@ -76,18 +80,23 @@ def _ensure_camera_settings(
                 {"CameraName": "0", "ImageType": 0, "PixelsAsFloat": False, "Compress": False}
             ]
         },
-        # Corner Chase PIP: only for `uv run sim 3rd-person` (FlyWithMe).
-        # FPV / low-end leave it off.
-        "SubWindows": [
+    }
+    if corner_chase_pip:
+        # Safe PiP: use the forward camera instead of "Chase" to avoid
+        # map-dependent external camera lookup crashes in some builds.
+        required_settings["SubWindows"] = [
             {
                 "WindowID": 0,
                 "ImageType": 0,
-                "CameraName": "Chase",
-                "External": True,
-                "Visible": bool(corner_chase_pip),
+                "CameraName": "0",
+                "External": False,
+                "Visible": True,
             }
-        ],
-    }
+        ]
+    # NOTE: Some Colosseum/AirSim builds crash during HUD init when a SubWindows
+    # camera entry references a camera name that is unavailable for the current map.
+    # Keep launcher-generated settings conservative and avoid injecting SubWindows.
+    # `uv run sim 3rd-person` still uses ViewMode=FlyWithMe for third-person view.
     # FPV only: extra chase pull-back for the (hidden) external
     # camera / prior PiP tuning.
     # `uv run sim 3rd-person` (FlyWithMe) uses stock AirSim
@@ -96,6 +105,23 @@ def _ensure_camera_settings(
         required_settings["CameraDirector"] = {"FollowDistance": -50.0}
 
     merged = _deep_merge_dict(settings, required_settings)
+    # Deep merge preserves unknown keys, so explicitly drop stale HUD camera
+    # subwindow entries from prior runs, then re-add only the safe PiP above.
+    merged.pop("SubWindows", None)
+    if "SubWindows" in required_settings:
+        merged["SubWindows"] = required_settings["SubWindows"]
+    if enable_trace:
+        # Enable AirSim built-in trace for third-person mode.
+        # Use a complete Drone1 block so AirSim picks up EnableTrace reliably.
+        merged_vehicles = merged.get("Vehicles")
+        if not isinstance(merged_vehicles, dict):
+            merged_vehicles = {}
+            merged["Vehicles"] = merged_vehicles
+        merged_drone1 = merged_vehicles.get("Drone1")
+        if not isinstance(merged_drone1, dict):
+            merged_drone1 = {"VehicleType": "SimpleFlight"}
+            merged_vehicles["Drone1"] = merged_drone1
+        merged_drone1["EnableTrace"] = True
     if normalized_view_mode == "FlyWithMe":
         merged.pop("CameraDirector", None)
 
@@ -178,6 +204,7 @@ def launch(
     low_end: bool = False,
     view_mode: str = "Fpv",
     corner_chase_pip: bool = False,
+    enable_trace: bool = False,
 ) -> None:
     _load_env_local()
 
@@ -199,7 +226,12 @@ def launch(
         res_y = int(low_end_cfg.get("sim_res_y", 480))
     airsim_port = sim_cfg.get("airsim_port", 41451)
     delay = sim_cfg.get("startup_delay_seconds", 30)
-    _ensure_camera_settings(airsim_port, view_mode, corner_chase_pip=corner_chase_pip)
+    _ensure_camera_settings(
+        airsim_port,
+        view_mode,
+        corner_chase_pip=corner_chase_pip,
+        enable_trace=enable_trace,
+    )
 
     if colosseum and Path(colosseum).exists():
         if not project:
@@ -244,6 +276,8 @@ def launch(
         env["AIGP_LANDING_PROFILE"] = landing_profile
     if low_end:
         env["AIGP_LOW_END"] = "1"
+    if enable_trace:
+        env["AIGP_ENABLE_TRACE"] = "1"
 
     print("Starting main.py...")
     subprocess.run(
@@ -261,6 +295,7 @@ def main() -> None:
         low_end=run_low_end,
         view_mode=view_mode,
         corner_chase_pip=run_third_person,
+        enable_trace=run_third_person,
     )
 
 

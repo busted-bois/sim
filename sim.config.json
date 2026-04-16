@@ -7,7 +7,12 @@
     "res_x": 1280,
     "res_y": 720,
     "airsim_port": 41451,
-    "startup_delay_seconds": 30
+    "startup_delay_seconds": 30,
+    "trace": {
+      "enabled": true,
+      "color_rgba": [1.0, 0.0, 1.0, 1.0],
+      "thickness": 4.0
+    }
   },
   "vision": {
     "enabled": true,
