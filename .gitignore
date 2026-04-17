@@ -12,3 +12,4 @@ opensrc/
 logs/
 .opencode*
 .claude*
+.cursor/
