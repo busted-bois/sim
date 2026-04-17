@@ -26,9 +26,7 @@ class AttitudeFourMotion(Algorithm):
         auto_tune_enabled = bool(latency_tuning_cfg.get("enabled", True))
         if auto_tune_enabled and vision_cfg.get("enabled", False):
             vision_fps = max(1.0, float(vision_cfg.get("fps", 20.0)))
-            commands_per_frame = max(
-                1.0, float(latency_tuning_cfg.get("commands_per_frame", 2.0))
-            )
+            commands_per_frame = max(1.0, float(latency_tuning_cfg.get("commands_per_frame", 2.0)))
             max_command_rate_hz = float(
                 latency_tuning_cfg.get("max_command_rate_hz", configured_rate_hz)
             )
@@ -113,8 +111,6 @@ class AttitudeFourMotion(Algorithm):
                 vz = float(s.linear_velocity.z_val)
                 z = float(s.position.z_val)
 
-                # AirSim uses NED: more negative z means higher altitude.
-                # Positive error should increase throttle when we need to climb.
                 ex_z = z - z_ref
                 ev_z = vz
                 z_integral = _clamp(z_integral + ex_z * dt, -6.0, 6.0)
@@ -183,7 +179,6 @@ class AttitudeFourMotion(Algorithm):
 
         client.takeoffAsync().join()
 
-        # Settle at target altitude with no lateral motion.
         run_phase("stabilize", 0.0, 0.0, target_z, 2.5)
         self._run_latency_auto_tuner(
             client=client,
@@ -192,7 +187,6 @@ class AttitudeFourMotion(Algorithm):
             latency_tuning_cfg=latency_tuning_cfg,
         )
 
-        # Sign calibration so command polarity matches observed body response.
         x0 = float(client.getMultirotorState().kinematics_estimated.position.x_val)
         run_phase("cal_pitch", 1.2, 0.0, target_z, 0.8)
         x1 = float(client.getMultirotorState().kinematics_estimated.position.x_val)
@@ -209,11 +203,9 @@ class AttitudeFourMotion(Algorithm):
         if y1 < y0:
             roll_sign = -1.0
         print(
-            "[attitude_four_motion] calibration "
-            f"roll_sign={roll_sign:+.0f} y0={y0:.2f} y1={y1:.2f}"
+            f"[attitude_four_motion] calibration roll_sign={roll_sign:+.0f} y0={y0:.2f} y1={y1:.2f}"
         )
 
-        # Six-direction style motion using RPYT only.
         run_phase("+X", cruise_speed, 0.0, target_z, 3.0)
         run_phase("-X", -cruise_speed, 0.0, target_z, 3.0)
         run_phase("+Y", 0.0, cruise_speed, target_z, 3.0)
