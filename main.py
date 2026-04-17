@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parent
 def _set_front_camera_pose(client: airsim.MultirotorClient, config: dict) -> None:
     vision_cfg = config.get("vision", {})
     camera_name = str(vision_cfg.get("camera_name", "0"))
-    # NED frame: +X is forward, +Y is right, +Z is down.
     front_pose = airsim.Pose(
         airsim.Vector3r(0.35, 0.0, -0.05),
         airsim.Quaternionr(0.0, 0.0, 0.0, 1.0),
@@ -29,25 +28,16 @@ def _set_front_camera_pose(client: airsim.MultirotorClient, config: dict) -> Non
 def _apply_trace_style(client: airsim.MultirotorClient, config: dict) -> None:
     sim_cfg = config.get("simulator", {})
     trace_cfg = sim_cfg.get("trace", {})
-    trace_enabled = os.environ.get("AIGP_ENABLE_TRACE", "").strip() == "1"
-    trace_enabled = bool(trace_cfg.get("enabled", trace_enabled))
+    trace_enabled = bool(
+        trace_cfg.get("enabled", os.environ.get("AIGP_ENABLE_TRACE", "").strip() == "1")
+    )
     if not trace_enabled:
         return
 
     raw_color = trace_cfg.get("color_rgba", [1.0, 0.0, 1.0, 1.0])
-    default_color = [1.0, 0.0, 1.0, 1.0]
-    color = default_color
-    if isinstance(raw_color, list) and len(raw_color) == 4:
-        try:
-            color = [max(0.0, min(1.0, float(v))) for v in raw_color]
-        except (TypeError, ValueError):
-            color = default_color
+    color = [max(0.0, min(1.0, float(v))) for v in raw_color]
 
-    try:
-        thickness = float(trace_cfg.get("thickness", 4.0))
-    except (TypeError, ValueError):
-        thickness = 4.0
-    thickness = max(1.0, thickness)
+    thickness = max(1.0, float(trace_cfg.get("thickness", 4.0)))
 
     vehicle_name = str(trace_cfg.get("vehicle_name", "")).strip()
     client.simSetTraceLine(color, thickness, vehicle_name)
@@ -150,7 +140,6 @@ def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
             )
             if sampler:
                 sampler.set_command(f"move_by_velocity vz_ms={descent_speed_ms:.3f}")
-            # NED frame: +vz commands downward motion.
             client.moveByVelocityAsync(0.0, 0.0, descent_speed_ms, descent_duration_s).join()
             if sampler:
                 sampler.set_command("hover_async")

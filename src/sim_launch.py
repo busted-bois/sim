@@ -48,15 +48,12 @@ def _ensure_camera_settings(
         except json.JSONDecodeError:
             print(f"Warning: invalid AirSim settings JSON at {settings_path}; rewriting file.")
 
-    # Cleanup legacy camera block from earlier launcher versions if present.
     vehicles = settings.get("Vehicles")
     if isinstance(vehicles, dict):
         drone1 = vehicles.get("Drone1")
         if isinstance(drone1, dict):
             keys = set(drone1.keys())
             cameras = drone1.get("Cameras")
-            # Old launcher-created vehicle block can override map defaults and
-            # break camera discovery in some AirSim/Colosseum builds.
             if keys == {"EnableTrace"}:
                 vehicles.pop("Drone1", None)
             if (
@@ -68,7 +65,6 @@ def _ensure_camera_settings(
         if not vehicles:
             settings.pop("Vehicles", None)
 
-    # Keep settings minimal so we do not accidentally override map-specific vehicle configs.
     normalized_view_mode = _normalize_view_mode(view_mode)
     required_settings = {
         "SettingsVersion": 1.2,
@@ -82,8 +78,7 @@ def _ensure_camera_settings(
         },
     }
     if corner_chase_pip:
-        # Safe PiP: use the forward camera instead of "Chase" to avoid
-        # map-dependent external camera lookup crashes in some builds.
+        # Use forward camera for PiP; "Chase" crashes on some builds.
         required_settings["SubWindows"] = [
             {
                 "WindowID": 0,
@@ -93,26 +88,18 @@ def _ensure_camera_settings(
                 "Visible": True,
             }
         ]
-    # NOTE: Some Colosseum/AirSim builds crash during HUD init when a SubWindows
-    # camera entry references a camera name that is unavailable for the current map.
-    # Keep launcher-generated settings conservative and avoid injecting SubWindows.
-    # `uv run sim 3rd-person` still uses ViewMode=FlyWithMe for third-person view.
-    # FPV only: extra chase pull-back for the (hidden) external
-    # camera / prior PiP tuning.
-    # `uv run sim 3rd-person` (FlyWithMe) uses stock AirSim
-    # CameraDirector defaults - no FollowDistance override.
+    # Avoid SubWindows — camera name lookup crashes on some builds.
+    # FPV: pull back external camera. FlyWithMe uses stock defaults.
     if normalized_view_mode == "Fpv":
         required_settings["CameraDirector"] = {"FollowDistance": -50.0}
 
     merged = _deep_merge_dict(settings, required_settings)
-    # Deep merge preserves unknown keys, so explicitly drop stale HUD camera
-    # subwindow entries from prior runs, then re-add only the safe PiP above.
+    # Drop stale SubWindows, re-add only the safe PiP above.
     merged.pop("SubWindows", None)
     if "SubWindows" in required_settings:
         merged["SubWindows"] = required_settings["SubWindows"]
     if enable_trace:
-        # Enable AirSim built-in trace for third-person mode.
-        # Use a complete Drone1 block so AirSim picks up EnableTrace reliably.
+        # Enable AirSim trace for third-person mode.
         merged_vehicles = merged.get("Vehicles")
         if not isinstance(merged_vehicles, dict):
             merged_vehicles = {}
@@ -168,7 +155,6 @@ def _load_env_local() -> None:
 
 def _resolve_project_path(sim_cfg: dict) -> str:
     project = os.environ.get("PROJECT_PATH", "").strip()
-    # Trust a non-empty PROJECT_PATH; UE will error clearly if it's wrong.
     if project:
         return project
 
@@ -177,7 +163,6 @@ def _resolve_project_path(sim_cfg: dict) -> str:
         os.environ["PROJECT_PATH"] = config_project
         return config_project
 
-    # Best-effort auto-fix on Windows using the existing helper script.
     fix_script = ROOT / "scripts" / "fix_project_path.ps1"
     if sys.platform == "win32" and fix_script.is_file():
         subprocess.run(
@@ -208,7 +193,6 @@ def launch(
 ) -> None:
     _load_env_local()
 
-    # Import after env so PROJECT_PATH is visible to any import-time reads
     from src.config import load_config
 
     config = load_config()
