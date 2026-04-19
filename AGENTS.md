@@ -17,6 +17,8 @@ bash scripts/launch.sh                  # Shell loads .env.local then runs launc
 
 After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once AirSim RPC accepts connections on the configured host/port, up to `simulator.rpc_ready_timeout_seconds`.
 
+**Ctrl+C** (SIGINT) while `uv run sim` is running stops the drone client (`main.py`) and, if this launcher started Unreal, terminates that editor process as well. **SIGTERM** (e.g. some IDE Stop actions) is not wired to that cleanup, so Unreal may stay open unless you stop it yourself.
+
 ## Project Layout
 
 - `main.py` — Entry point. Connects to AirSim RPC, loads algorithm from config, runs it.

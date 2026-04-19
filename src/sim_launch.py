@@ -2,13 +2,70 @@
 
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+@dataclass
+class _LaunchHandles:
+    """Processes started by this launcher (for Ctrl+C / SIGINT cleanup)."""
+
+    ue: subprocess.Popen | None = None
+    main: subprocess.Popen | None = None
+    cleanup_done: bool = False
+
+
+_handles = _LaunchHandles()
+_signals_registered: bool = False
+
+
+def _cleanup_on_interrupt() -> None:
+    """Terminate drone client, then Unreal if we launched it."""
+    if _handles.cleanup_done:
+        return
+    _handles.cleanup_done = True
+    print("\nInterrupt received — stopping drone client and simulator...", file=sys.stderr)
+    if _handles.main is not None and _handles.main.poll() is None:
+        _handles.main.terminate()
+        try:
+            _handles.main.wait(timeout=8.0)
+        except subprocess.TimeoutExpired:
+            _handles.main.kill()
+            try:
+                _handles.main.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                pass
+    if _handles.ue is not None and _handles.ue.poll() is None:
+        _handles.ue.terminate()
+        try:
+            _handles.ue.wait(timeout=15.0)
+        except subprocess.TimeoutExpired:
+            _handles.ue.kill()
+            try:
+                _handles.ue.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                pass
+
+
+def _sigint_handler(_signum: int, _frame) -> None:
+    """SIGINT (Ctrl+C) runs full teardown; SIGTERM is not handled here."""
+    _cleanup_on_interrupt()
+    raise SystemExit(130)
+
+
+def _register_signal_handlers_once() -> None:
+    global _signals_registered
+    if _signals_registered:
+        return
+    signal.signal(signal.SIGINT, _sigint_handler)
+    _signals_registered = True
 
 
 def _airsim_settings_path() -> Path:
@@ -191,6 +248,11 @@ def launch(
     corner_chase_pip: bool = False,
     enable_trace: bool = False,
 ) -> None:
+    _register_signal_handlers_once()
+    _handles.ue = None
+    _handles.main = None
+    _handles.cleanup_done = False
+
     _load_env_local()
 
     from src.config import load_config
@@ -253,28 +315,34 @@ def launch(
                 "add simulator.extra_ue_args (e.g. -map=/Game/...) to force a map at launch."
             )
 
-        subprocess.Popen(
+        _handles.ue = subprocess.Popen(
             cmd,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
         )
         print(f"Waiting for AirSim RPC on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
-        if _wait_for_airsim_rpc(host, airsim_port, rpc_ready_timeout_s):
-            print(f"AirSim RPC is ready on {host}:{airsim_port}")
-        else:
-            raise SystemExit(
-                f"AirSim RPC did not become ready on {host}:{airsim_port} "
-                f"within {rpc_ready_timeout_s:.0f}s. Ensure Unreal finished loading the map."
-            )
+        try:
+            if not _wait_for_airsim_rpc(host, airsim_port, rpc_ready_timeout_s):
+                raise SystemExit(
+                    f"AirSim RPC did not become ready on {host}:{airsim_port} "
+                    f"within {rpc_ready_timeout_s:.0f}s. Ensure Unreal finished loading the map."
+                )
+        except KeyboardInterrupt:
+            _cleanup_on_interrupt()
+            raise SystemExit(130) from None
+        print(f"AirSim RPC is ready on {host}:{airsim_port}")
     else:
         print(f"Colosseum not found at '{colosseum}', skipping simulator launch.")
         print(f"Waiting for AirSim RPC on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
-        if _wait_for_airsim_rpc(host, airsim_port, rpc_ready_timeout_s):
-            print(f"AirSim RPC is ready on {host}:{airsim_port}")
-        else:
-            raise SystemExit(
-                f"AirSim RPC did not become ready on {host}:{airsim_port} "
-                f"within {rpc_ready_timeout_s:.0f}s. Start the simulator and map, then try again."
-            )
+        try:
+            if not _wait_for_airsim_rpc(host, airsim_port, rpc_ready_timeout_s):
+                raise SystemExit(
+                    f"AirSim RPC did not become ready on {host}:{airsim_port} "
+                    f"within {rpc_ready_timeout_s:.0f}s. Start the simulator, then try again."
+                )
+        except KeyboardInterrupt:
+            _cleanup_on_interrupt()
+            raise SystemExit(130) from None
+        print(f"AirSim RPC is ready on {host}:{airsim_port}")
 
     env = os.environ.copy()
     env["AIRSIM_PORT"] = str(airsim_port)
@@ -286,10 +354,21 @@ def launch(
         env["AIGP_ENABLE_TRACE"] = "1"
 
     print("Starting main.py...")
-    subprocess.run(
+    # Do not use CREATE_NEW_PROCESS_GROUP for main.py on Windows: it correlated with the
+    # child exiting almost immediately while the launcher kept running; Ctrl+C still goes
+    # to the launcher first in typical Cursor/terminal setups.
+    _handles.main = subprocess.Popen(
         [sys.executable, str(ROOT / "main.py")],
         env=env,
     )
+    try:
+        rc = _handles.main.wait()
+    except KeyboardInterrupt:
+        _cleanup_on_interrupt()
+        raise SystemExit(130) from None
+    finally:
+        _handles.main = None
+    raise SystemExit(rc)
 
 
 def main() -> None:
