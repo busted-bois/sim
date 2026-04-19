@@ -15,6 +15,8 @@ uv run scripts/launch.py                # Same as uv run sim
 bash scripts/launch.sh                  # Shell loads .env.local then runs launch.py
 ```
 
+After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once AirSim RPC accepts connections on the configured host/port, up to `simulator.rpc_ready_timeout_seconds`.
+
 ## Project Layout
 
 - `main.py` — Entry point. Connects to AirSim RPC, loads algorithm from config, runs it.

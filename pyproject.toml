@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     "msgpack",
     "numpy",
-    "pillow>=12.2.0",
+    "opencv-python-headless>=4.8,<5",
 ]
 
 [project.scripts]

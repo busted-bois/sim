@@ -3,11 +3,10 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 
+import cv2
 import numpy as np
-from PIL import Image
 
 import airsim
 
@@ -226,13 +225,18 @@ class VisionFeed:
         if self._compress:
             if not isinstance(data, bytes):
                 data = bytes(np.asarray(data, dtype=np.uint8).reshape(-1))
-            image = Image.open(BytesIO(data)).convert("RGB")
+            buf = np.frombuffer(data, dtype=np.uint8)
+            bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+            if bgr is None:
+                raise RuntimeError("vision: failed to decode compressed image")
             if self._target_width is not None and self._target_height is not None:
-                image = image.resize(
+                bgr = cv2.resize(
+                    bgr,
                     (self._target_width, self._target_height),
-                    Image.Resampling.BILINEAR,
+                    interpolation=cv2.INTER_LINEAR,
                 )
-            return np.asarray(image, dtype=np.uint8).copy()
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            return np.ascontiguousarray(rgb, dtype=np.uint8)
         expected_size = width * height * 3
         if isinstance(data, bytes):
             actual_size = len(data)
@@ -246,11 +250,14 @@ class VisionFeed:
             )
         image_rgb = data_array.reshape(height, width, 3).copy()
         if self._target_width is not None and self._target_height is not None:
-            image = Image.fromarray(image_rgb, mode="RGB").resize(
+            bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+            bgr = cv2.resize(
+                bgr,
                 (self._target_width, self._target_height),
-                Image.Resampling.BILINEAR,
+                interpolation=cv2.INTER_LINEAR,
             )
-            return np.asarray(image, dtype=np.uint8).copy()
+            image_rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            return np.ascontiguousarray(image_rgb, dtype=np.uint8)
         return image_rgb
 
     def _parse_target_resolution(self, config: dict) -> tuple[int | None, int | None]:
