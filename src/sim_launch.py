@@ -399,8 +399,7 @@ def launch(
     if rc == 0:
         print(
             "main.py exited successfully. If this launcher started Unreal/Colosseum, "
-            "that process may still be running — close it from the editor or Task Manager "
-            "if needed.",
+            "that process may still be running — close it from the editor or Task Manager if needed.",
             file=sys.stderr,
         )
     else:

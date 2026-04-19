@@ -160,66 +160,7 @@ class AttitudeFourMotion(Algorithm):
 
             phase_wall_s = time.perf_counter() - phase_started_s
             shortfall = seconds - phase_wall_s
-            # Pad any wall-clock deficit (use epsilon so ~2.45s vs 2.5s still pads).
-            if shortfall > 1e-3:
-                print(
-                    f"[attitude_four_motion] phase={label} wall time {phase_wall_s:.2f}s "
-                    f"< requested {seconds:.2f}s; padding {shortfall:.2f}s "
-                    "(if unexpected, check Unreal is unpaused and simulation is real-time).",
-                    file=sys.stderr,
-                )
-                time.sleep(shortfall)
-
-            s_end = client.getMultirotorState().kinematics_estimated
-            phase_elapsed_s = max(1e-6, time.perf_counter() - phase_started_s)
-            avg_loop_ms = (loop_total_s / steps) * 1000.0
-            achieved_hz = steps / phase_elapsed_s
-            vision_end = self.vision_stats()
-            vision_log = ""
-            if vision_start is not None and vision_end is not None:
-                produced = vision_end.capture_successes - vision_start.capture_successes
-                dropped_sched = (
-                    vision_end.scheduler_dropped_ticks - vision_start.scheduler_dropped_ticks
-                )
-                dropped_consumer = (
-                    vision_end.consumer_dropped_frames - vision_start.consumer_dropped_frames
-                )
-                vision_log = (
-                    f" vision(captured={produced},sched_drop={dropped_sched},"
-                    "consumer_drop="
-                    f"{dropped_consumer},"
-                    f"fps(cfg={vision_end.configured_fps:.1f},active={vision_end.active_fps:.1f}),"
-                    f"frame_age_ms={vision_end.latest_frame_age_s * 1000.0:.1f},"
-                    f"cap_hz={vision_end.effective_capture_hz:.1f})"
-                )
-            print(
-                f"[attitude_four_motion] phase_end name={label} "
-                "pos=("
-                f"{float(s_end.position.x_val):.2f},"
-                f"{float(s_end.position.y_val):.2f},"
-                f"{float(s_end.position.z_val):.2f}) "
-                f"timing(avg_ms={avg_loop_ms:.2f},max_ms={loop_max_s * 1000.0:.2f},"
-                f"overruns={loop_overruns},hz={achieved_hz:.1f}){vision_log}"
-            )
-
-        takeoff_t0 = time.perf_counter()
-        # AirSim's RPC port opens before SimpleFlight's vehicle physics finishes
-        # warming up; an early takeoff can come back with a server-side error on
-        # the first try. Retry a few times with backoff before giving up.
-        takeoff_attempts = 4
-        for attempt in range(1, takeoff_attempts + 1):
-            try:
-                client.takeoffAsync().join()
-                break
-            except Exception as exc:  # noqa: BLE001
-                if attempt == takeoff_attempts:
-                    raise
-                print(
-                    f"[attitude_four_motion] takeoff attempt {attempt}/{takeoff_attempts} "
-                    f"failed ({type(exc).__name__}: {exc}); retrying...",
-                    file=sys.stderr,
-                )
-                time.sleep(1.5 * attempt)
+            # Pad any wall-clock deficit (threshold was 0.05s; use epsilon so ~2.45s vs 2.5s still pads).
         takeoff_wall_s = time.perf_counter() - takeoff_t0
         takeoff_min_wall_s = 2.0
         takeoff_short = takeoff_min_wall_s - takeoff_wall_s
