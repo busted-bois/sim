@@ -208,8 +208,10 @@ def launch(
         windowed = True
         res_x = int(low_end_cfg.get("sim_res_x", 854))
         res_y = int(low_end_cfg.get("sim_res_y", 480))
-    airsim_port = sim_cfg.get("airsim_port", 41451)
-    delay = sim_cfg.get("startup_delay_seconds", 30)
+    host = str(sim_cfg.get("host", "127.0.0.1")).strip() or "127.0.0.1"
+    airsim_port = int(sim_cfg.get("airsim_port", 41451))
+    rpc_ready_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
+    rpc_tout_label = f"{rpc_ready_timeout_s:.0f}"
     _ensure_camera_settings(
         airsim_port,
         view_mode,
@@ -255,18 +257,24 @@ def launch(
             cmd,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
         )
-        print(f"Waiting {delay}s for simulator to start...")
-        time.sleep(delay)
-        wait_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
-        if _wait_for_airsim_rpc("127.0.0.1", int(airsim_port), wait_timeout_s):
-            print(f"AirSim RPC is ready on 127.0.0.1:{airsim_port}")
+        print(f"Waiting for AirSim RPC on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
+        if _wait_for_airsim_rpc(host, airsim_port, rpc_ready_timeout_s):
+            print(f"AirSim RPC is ready on {host}:{airsim_port}")
         else:
             raise SystemExit(
-                f"AirSim RPC did not become ready on 127.0.0.1:{airsim_port} "
-                f"within {wait_timeout_s:.0f}s. Ensure Unreal finished loading the map."
+                f"AirSim RPC did not become ready on {host}:{airsim_port} "
+                f"within {rpc_ready_timeout_s:.0f}s. Ensure Unreal finished loading the map."
             )
     else:
         print(f"Colosseum not found at '{colosseum}', skipping simulator launch.")
+        print(f"Waiting for AirSim RPC on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
+        if _wait_for_airsim_rpc(host, airsim_port, rpc_ready_timeout_s):
+            print(f"AirSim RPC is ready on {host}:{airsim_port}")
+        else:
+            raise SystemExit(
+                f"AirSim RPC did not become ready on {host}:{airsim_port} "
+                f"within {rpc_ready_timeout_s:.0f}s. Start the simulator and map, then try again."
+            )
 
     env = os.environ.copy()
     env["AIRSIM_PORT"] = str(airsim_port)

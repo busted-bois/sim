@@ -54,7 +54,7 @@ def run_preflight() -> int:
         "algorithm",
         "simulator.colosseum_path",
         "simulator.airsim_port",
-        "simulator.startup_delay_seconds",
+        "simulator.rpc_ready_timeout_seconds",
         "control.command_rate_hz",
         "control.max_speed_ms",
     ]

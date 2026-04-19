@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from src.control.algorithms import Algorithm, register
+from src.vision.frame_metrics import mean_rgb_summary
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -141,6 +142,7 @@ class AttitudeFourMotion(Algorithm):
                             f" frame(seq={frame.seq},age_ms={frame.frame_age_s * 1000.0:.1f},"
                             f"shape={frame.height}x{frame.width})"
                         )
+                        frame_log += mean_rgb_summary(frame.image_rgb)
                     loop_elapsed_ms = (time.perf_counter() - loop_started_s) * 1000.0
                     print(
                         f"[attitude_four_motion] phase={label} step={step + 1}/{steps} "
