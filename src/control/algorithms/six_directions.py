@@ -1,3 +1,6 @@
+import sys
+import time
+
 from src.control.algorithms import Algorithm, register
 
 DIRECTIONS = [
@@ -29,12 +32,23 @@ class SixDirections(Algorithm):
 
         for label, vx, vy, vz in selected:
             print(f"[six_directions] Moving {label} for {duration_s:.1f}s")
+            t0 = time.perf_counter()
             client.moveByVelocityAsync(
                 vx * speed_ms / SPEED_MS,
                 vy * speed_ms / SPEED_MS,
                 vz * speed_ms / SPEED_MS,
                 duration_s,
             ).join()
+            elapsed = time.perf_counter() - t0
+            shortfall = duration_s - elapsed
+            if shortfall > 1e-3:
+                print(
+                    f"[six_directions] segment={label} wall time {elapsed:.2f}s "
+                    f"< requested {duration_s:.1f}s; padding {shortfall:.2f}s "
+                    "(if unexpected, check Unreal is unpaused and simulation is real-time).",
+                    file=sys.stderr,
+                )
+                time.sleep(shortfall)
 
         print("[six_directions] Complete — hovering")
         client.hoverAsync().join()

@@ -34,7 +34,7 @@
     "profile": "faster_soft",
     "descent_speed_ms": 2.0,
     "max_descent_speed_ms": 2.5,
-    "min_hover_seconds": 1.0,
+    "min_hover_seconds": 2.0,
     "final_land_altitude_m": 1.0,
     "telemetry_log": {
       "enabled": true,

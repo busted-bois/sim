@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import time
 from pathlib import Path
 
@@ -157,6 +158,18 @@ class AttitudeFourMotion(Algorithm):
                 if loop_elapsed_s > dt * 1.10:
                     loop_overruns += 1
 
+            phase_wall_s = time.perf_counter() - phase_started_s
+            shortfall = seconds - phase_wall_s
+            # Pad any wall-clock deficit (threshold was 0.05s; use epsilon so ~2.45s vs 2.5s still pads).
+            if shortfall > 1e-3:
+                print(
+                    f"[attitude_four_motion] phase={label} wall time {phase_wall_s:.2f}s "
+                    f"< requested {seconds:.2f}s; padding {shortfall:.2f}s "
+                    "(if unexpected, check Unreal is unpaused and simulation is real-time).",
+                    file=sys.stderr,
+                )
+                time.sleep(shortfall)
+
             s_end = client.getMultirotorState().kinematics_estimated
             phase_elapsed_s = max(1e-6, time.perf_counter() - phase_started_s)
             avg_loop_ms = (loop_total_s / steps) * 1000.0
@@ -189,7 +202,19 @@ class AttitudeFourMotion(Algorithm):
                 f"overruns={loop_overruns},hz={achieved_hz:.1f}){vision_log}"
             )
 
+        takeoff_t0 = time.perf_counter()
         client.takeoffAsync().join()
+        takeoff_wall_s = time.perf_counter() - takeoff_t0
+        takeoff_min_wall_s = 2.0
+        takeoff_short = takeoff_min_wall_s - takeoff_wall_s
+        if takeoff_short > 1e-3:
+            print(
+                f"[attitude_four_motion] takeoff wall time {takeoff_wall_s:.2f}s "
+                f"< {takeoff_min_wall_s:.1f}s; padding {takeoff_short:.2f}s "
+                "(async takeoff returned quickly — check sim is unpaused / real-time).",
+                file=sys.stderr,
+            )
+            time.sleep(takeoff_short)
 
         run_phase("stabilize", 0.0, 0.0, target_z, stabilize_s)
         self._run_latency_auto_tuner(

@@ -368,6 +368,14 @@ def launch(
         raise SystemExit(130) from None
     finally:
         _handles.main = None
+    if rc == 0:
+        print(
+            "main.py exited successfully. If this launcher started Unreal/Colosseum, "
+            "that process may still be running — close it from the editor or Task Manager if needed.",
+            file=sys.stderr,
+        )
+    else:
+        print(f"main.py exited with code {rc}. See logs above.", file=sys.stderr)
     raise SystemExit(rc)
 
 
