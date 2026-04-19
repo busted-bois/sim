@@ -21,7 +21,7 @@ def _set_front_camera_pose(client: airsim.MultirotorClient, config: dict) -> Non
     )
     try:
         client.simSetCameraPose(camera_name, front_pose)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
 
 
@@ -160,7 +160,7 @@ def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
     def _target() -> None:
         try:
             algo.run(client)
-        except BaseException as exc:  # noqa: BLE001
+        except BaseException as exc:
             error_holder["error"] = exc
 
     worker = threading.Thread(target=_target, name="algorithm_runner", daemon=True)

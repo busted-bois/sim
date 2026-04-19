@@ -89,7 +89,7 @@ class VisionFeed:
         self._start_monotonic_s = time.monotonic()
         try:
             self._client.simSetCameraFov(self._camera_name, self._fov_degrees)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[vision] warning: failed to set camera FOV: {exc}")
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._capture_loop, name="vision_feed", daemon=True)
@@ -177,7 +177,7 @@ class VisionFeed:
                     self._latest = frame
                 if self._save_debug_frames:
                     self._write_debug_frame(frame)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._capture_failures += 1
                 now_s = time.time()
                 if now_s - self._last_warning_s > 1.0:
