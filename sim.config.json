@@ -1,5 +1,5 @@
 {
-  "algorithm": "attitude_four_motion",
+  "algorithm": "obstacle_stop",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -97,6 +97,15 @@
     { "x": 0.0, "y": 10.0, "z": -5.0 },
     { "x": 0.0, "y": 0.0, "z": -5.0 }
   ],
+  "obstacle_stop": {
+    "cruise_speed_ms": 1.5,
+    "stop_distance_m": 5.0,
+    "altitude_ned_m": -5.0,
+    "flight_duration_s": 20.0,
+    "scan_hz": 10.0,
+    "roi_fraction": 0.4,
+    "camera_name": "0"
+  },
   "logging": {
     "level": "INFO",
     "telemetry_log_enabled": false
