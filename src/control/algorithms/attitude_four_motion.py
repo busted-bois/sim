@@ -37,7 +37,15 @@ class AttitudeFourMotion(Algorithm):
 
         max_altitude_m = float(control_cfg.get("max_altitude_m", 50.0))
         max_speed_ms = max(0.5, float(control_cfg.get("max_speed_ms", 10.0)))
-        cruise_speed = min(2.5, max_speed_ms * 0.5)
+        afm_cfg = self._config.get("attitude_four_motion", {})
+        default_cruise = min(2.5, max_speed_ms * 0.5)
+        cruise_speed = max(
+            0.3,
+            min(float(afm_cfg.get("cruise_speed_ms", default_cruise)), max_speed_ms),
+        )
+        segment_duration_s = max(0.5, float(afm_cfg.get("segment_duration_s", 3.0)))
+        calibration_move_s = max(0.2, float(afm_cfg.get("calibration_move_s", 0.8)))
+        stabilize_s = max(0.5, float(afm_cfg.get("stabilize_s", 2.5)))
 
         roll_max_deg = 12.0
         pitch_max_deg = 12.0
@@ -65,6 +73,8 @@ class AttitudeFourMotion(Algorithm):
         print(
             "[attitude_four_motion] init "
             f"rate_hz={rate_hz:.1f} dt={dt:.3f} cruise_speed={cruise_speed:.2f} "
+            f"segment_duration_s={segment_duration_s:.2f} cal_move_s={calibration_move_s:.2f} "
+            f"stabilize_s={stabilize_s:.2f} "
             f"target_z={target_z:.2f} z_bounds=[{z_floor:.2f},{z_ceiling:.2f}] "
             f"configured_rate_hz={configured_rate_hz:.1f}"
         )
@@ -179,7 +189,7 @@ class AttitudeFourMotion(Algorithm):
 
         client.takeoffAsync().join()
 
-        run_phase("stabilize", 0.0, 0.0, target_z, 2.5)
+        run_phase("stabilize", 0.0, 0.0, target_z, stabilize_s)
         self._run_latency_auto_tuner(
             client=client,
             current_rate_hz=rate_hz,
@@ -188,7 +198,7 @@ class AttitudeFourMotion(Algorithm):
         )
 
         x0 = float(client.getMultirotorState().kinematics_estimated.position.x_val)
-        run_phase("cal_pitch", 1.2, 0.0, target_z, 0.8)
+        run_phase("cal_pitch", 1.2, 0.0, target_z, calibration_move_s)
         x1 = float(client.getMultirotorState().kinematics_estimated.position.x_val)
         if x1 < x0:
             pitch_sign = -1.0
@@ -198,7 +208,7 @@ class AttitudeFourMotion(Algorithm):
         )
 
         y0 = float(client.getMultirotorState().kinematics_estimated.position.y_val)
-        run_phase("cal_roll", 0.0, 1.2, target_z, 0.8)
+        run_phase("cal_roll", 0.0, 1.2, target_z, calibration_move_s)
         y1 = float(client.getMultirotorState().kinematics_estimated.position.y_val)
         if y1 < y0:
             roll_sign = -1.0
@@ -206,12 +216,18 @@ class AttitudeFourMotion(Algorithm):
             f"[attitude_four_motion] calibration roll_sign={roll_sign:+.0f} y0={y0:.2f} y1={y1:.2f}"
         )
 
-        run_phase("+X", cruise_speed, 0.0, target_z, 3.0)
-        run_phase("-X", -cruise_speed, 0.0, target_z, 3.0)
-        run_phase("+Y", 0.0, cruise_speed, target_z, 3.0)
-        run_phase("-Y", 0.0, -cruise_speed, target_z, 3.0)
-        run_phase("+Z", 0.0, 0.0, _clamp(target_z - 1.5, z_floor, z_ceiling), 3.0)
-        run_phase("-Z", 0.0, 0.0, target_z, 3.0)
+        run_phase("+X", cruise_speed, 0.0, target_z, segment_duration_s)
+        run_phase("-X", -cruise_speed, 0.0, target_z, segment_duration_s)
+        run_phase("+Y", 0.0, cruise_speed, target_z, segment_duration_s)
+        run_phase("-Y", 0.0, -cruise_speed, target_z, segment_duration_s)
+        run_phase(
+            "+Z",
+            0.0,
+            0.0,
+            _clamp(target_z - 1.5, z_floor, z_ceiling),
+            segment_duration_s,
+        )
+        run_phase("-Z", 0.0, 0.0, target_z, segment_duration_s)
 
         print("[attitude_four_motion] Completed 6-segment attitude routine")
 

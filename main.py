@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 import airsim
-from src.config import load_config
+from src.config import load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm
 from src.landing_telemetry import LandingTelemetrySampler
 from src.vision import VisionFeed
@@ -178,11 +178,18 @@ def main() -> None:
     config = load_config()
     _apply_low_end_overrides(config)
     sim_cfg = config["simulator"]
-
-    client = airsim.MultirotorClient(
-        ip=sim_cfg.get("host", "127.0.0.1"),
-        port=sim_cfg.get("airsim_port", 41451),
+    host, port = simulator_endpoint(config)
+    profile = os.environ.get("AIGP_PROFILE", "").strip()
+    map_name = str(sim_cfg.get("map_name", "")).strip()
+    print(
+        "Flight session: "
+        f"algorithm={config.get('algorithm', 'six_directions')!r} "
+        f"rpc={host}:{port}"
+        + (f" profile={profile!r}" if profile else "")
+        + (f" map={map_name!r}" if map_name else "")
     )
+
+    client = airsim.MultirotorClient(ip=host, port=port)
     client.confirmConnection()
     client.enableApiControl(True)
     client.armDisarm(True)
