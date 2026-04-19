@@ -71,3 +71,21 @@ def find_large_grey_wall(frame: VisionFrame, threshold: float = 0.95) -> bool:
     grey_percentage = np.sum(mask > 0) / (frame.width * frame.height)
 
     return grey_percentage > threshold
+
+
+def red_target_offset_normalized(frame: VisionFrame) -> tuple[float, float] | None:
+    """
+    Largest red circle vs image center, normalized to roughly [-1, 1].
+
+    Returns None if no circle; (nx, ny) where positive nx means target is right of center.
+    """
+    circles = find_red_circles(frame)
+    if not circles:
+        return None
+    x, y, _r = max(circles, key=lambda c: c[2])
+    w, h = float(frame.width), float(frame.height)
+    if w <= 0 or h <= 0:
+        return None
+    nx = (x - 0.5 * w) / (0.5 * w)
+    ny = (y - 0.5 * h) / (0.5 * h)
+    return (float(nx), float(ny))
