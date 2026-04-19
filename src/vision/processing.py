@@ -49,7 +49,7 @@ def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:
     return []
 
 
-def find_large_grey_wall(frame: VisionFrame, threshold: float = 0.8) -> bool:
+def find_large_grey_wall(frame: VisionFrame, threshold: float = 0.95) -> bool:
     """
     Detects if a large grey wall is in the frame.
 
