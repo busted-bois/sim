@@ -7,7 +7,7 @@
     "res_x": 1280,
     "res_y": 720,
     "airsim_port": 41451,
-    "startup_delay_seconds": 30,
+    "startup_delay_seconds": 15,
     "trace": {
       "enabled": true,
       "color_rgba": [1.0, 0.0, 1.0, 1.0],
@@ -53,7 +53,7 @@
     "algorithm": "attitude_four_motion",
     "cruise_speed_ms": 2.5,
     "segment_duration_s": 3.0,
-    "startup_delay_seconds": 30
+    "startup_delay_seconds": 15
   },
   "low_end_profile": {
     "algorithm": "attitude_four_motion",
