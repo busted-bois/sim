@@ -30,10 +30,12 @@ class OpenCvLanding(Algorithm):
                     print(f"[opencv_landing] Target at ({target_x}, {target_y}) with radius {radius}.")
                     found_target = True
                 else:
-                    # If no target is found, we can implement a search pattern
-                    # For now, we'll just hover.
-                    print("[opencv_landing] No target found, hovering...")
-                    client.hoverAsync().join()
+                    # If no target is found, fly in a square pattern
+                    print("[opencv_landing] No target found, searching...")
+                    client.moveByVelocityAsync(2, 0, 0, 2).join()  # Move forward
+                    client.moveByVelocityAsync(0, 2, 0, 2).join()  # Move right
+                    client.moveByVelocityAsync(-2, 0, 0, 2).join() # Move back
+                    client.moveByVelocityAsync(0, -2, 0, 2).join() # Move left
             else:
                 print("[opencv_landing] No vision frame available.")
                 client.hoverAsync().join()
