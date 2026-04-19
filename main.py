@@ -1,3 +1,4 @@
+import errno
 import os
 import sys
 import threading
@@ -5,12 +6,28 @@ import time
 from pathlib import Path
 
 import airsim
+from msgpackrpc.error import RPCError, TransportError
+
 from src.config import load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm
 from src.landing_telemetry import LandingTelemetrySampler
 from src.vision import VisionFeed
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _suppress_api_cleanup_warning(exc: BaseException) -> bool:
+    """True when disarm/API cleanup failed because the sim or socket is already gone (e.g. after Ctrl+C)."""
+    if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
+        return True
+    if isinstance(exc, (RPCError, TransportError)):
+        return True
+    if isinstance(exc, OSError):
+        if getattr(exc, "winerror", None) in (10053, 10054):  # WSAECONNABORTED / WSAECONNRESET
+            return True
+        if exc.errno in (errno.ECONNRESET, errno.EPIPE, errno.ECONNABORTED):
+            return True
+    return False
 
 
 def _set_front_camera_pose(client: airsim.MultirotorClient, config: dict) -> None:
@@ -41,8 +58,11 @@ def _apply_trace_style(client: airsim.MultirotorClient, config: dict) -> None:
     thickness = max(1.0, float(trace_cfg.get("thickness", 4.0)))
 
     vehicle_name = str(trace_cfg.get("vehicle_name", "")).strip()
-    client.simSetTraceLine(color, thickness, vehicle_name)
-    print(f"Trace style applied: color={color}, thickness={thickness:.1f}")
+    try:
+        client.simSetTraceLine(color, thickness, vehicle_name)
+        print(f"Trace style applied: color={color}, thickness={thickness:.1f}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: failed to set trace line style: {exc}")
 
 
 def _apply_low_end_overrides(config: dict) -> None:
@@ -121,11 +141,16 @@ def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
             time.sleep(min_hover_seconds)
 
         if profile == "very_soft":
+            print("Hover settle complete — starting final land.")
             if sampler:
                 sampler.set_command("land_async")
             client.landAsync().join()
             return
 
+        print(
+            "Hover settle complete — next: controlled descent if above final altitude, "
+            "then final land."
+        )
         descent_speed_ms = max(0.5, float(landing_cfg.get("descent_speed_ms", 2.0)))
         descent_speed_ms = min(descent_speed_ms, max_descent_speed_ms)
         final_land_altitude_m = max(0.3, float(landing_cfg.get("final_land_altitude_m", 1.0)))
@@ -164,11 +189,19 @@ def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
         except BaseException as exc:
             error_holder["error"] = exc
 
-    # Non-daemon: flight logic must finish before landing; daemon threads can be torn down early.
-    worker = threading.Thread(target=_target, name="algorithm_runner", daemon=False)
+    # Daemon: if the main thread exits (e.g. Ctrl+C), CPython must not hang waiting on this
+    # thread at interpreter shutdown. Main still blocks on join until the algorithm completes
+    # or times out.
+    worker = threading.Thread(target=_target, name="algorithm_runner", daemon=True)
     worker.start()
     started = time.perf_counter()
-    worker.join(timeout=timeout_seconds)
+    deadline = started + timeout_seconds
+    join_slice_s = 0.25
+    while worker.is_alive():
+        remaining = deadline - time.perf_counter()
+        if remaining <= 0:
+            break
+        worker.join(timeout=min(join_slice_s, remaining))
     elapsed_s = time.perf_counter() - started
 
     if worker.is_alive():
@@ -208,36 +241,48 @@ def main() -> None:
         + (f" profile={profile!r}" if profile else "")
         + (f" map={map_name!r}" if map_name else "")
     )
-
     client = airsim.MultirotorClient(ip=host, port=port)
-    client.confirmConnection()
-    client.enableApiControl(True)
-    client.armDisarm(True)
-    _set_front_camera_pose(client, config)
-    _apply_trace_style(client, config)
     vision_feed = VisionFeed(client, config.get("vision", {}))
 
     try:
-        vision_feed.start()
-        algo_name = config.get("algorithm", "six_directions")
-        algo = get_algorithm(algo_name, config)
-        algo.set_vision_feed(vision_feed if vision_feed.enabled else None)
-        safety_cfg = config.get("safety", {})
-        algo_timeout_seconds = max(5.0, float(safety_cfg.get("algorithm_timeout_seconds", 180.0)))
+        client.confirmConnection()
+        client.enableApiControl(True)
+        client.armDisarm(True)
+        _set_front_camera_pose(client, config)
+        _apply_trace_style(client, config)
 
-        print(f"Algorithm: {algo_name}")
-        _run_algorithm_with_timeout(algo, client, algo_timeout_seconds)
+        try:
+            vision_feed.start()
+            algo_name = config.get("algorithm", "six_directions")
+            algo = get_algorithm(algo_name, config)
+            algo.set_vision_feed(vision_feed if vision_feed.enabled else None)
+            safety_cfg = config.get("safety", {})
+            algo_timeout_seconds = max(5.0, float(safety_cfg.get("algorithm_timeout_seconds", 180.0)))
 
-        print("Algorithm complete. Starting landing sequence...")
-        _run_landing(client, config)
-    except Exception as exc:
-        print(f"Failsafe triggered: {exc}")
-        print("Attempting hover and landing for safe recovery...")
-        _run_landing(client, config)
+            print(f"Algorithm: {algo_name}")
+            _run_algorithm_with_timeout(algo, client, algo_timeout_seconds)
+
+            print("Algorithm complete. Starting landing sequence...")
+            _run_landing(client, config)
+            print("Flight client finished normally (landing complete).", file=sys.stderr)
+        except Exception as exc:
+            print(f"Failsafe triggered: {exc}")
+            print("Attempting hover and landing for safe recovery...")
+            _run_landing(client, config)
     finally:
         vision_feed.stop()
-        client.armDisarm(False)
-        client.enableApiControl(False)
+        try:
+            client.armDisarm(False)
+            client.enableApiControl(False)
+        except Exception as cleanup_exc:  # noqa: BLE001
+            if not _suppress_api_cleanup_warning(cleanup_exc):
+                print(
+                    f"Warning: API cleanup failed (often harmless if sim/editor already closed): {cleanup_exc}",
+                    file=sys.stderr,
+                )
+
+    if os.environ.get("AIGP_PAUSE_BEFORE_EXIT", "").strip() == "1":
+        input("AIGP_PAUSE_BEFORE_EXIT=1 — press Enter to exit the flight client...")
 
 
 if __name__ == "__main__":
