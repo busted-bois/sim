@@ -90,14 +90,14 @@ def sync_course_from_project_path(project_path: str, repo_root: Path, map_name: 
     raw_project = project_path.strip()
     if not raw_project:
         print(
-            f"Warning: simulator.map={raw_map!r} but PROJECT_PATH is unset; skipping course sync."
+            f"Warning: map={raw_map!r} but PROJECT_PATH is unset; skipping course sync."
         )
         return
 
     uproject = Path(raw_project)
     if not uproject.is_file() or uproject.suffix.lower() != ".uproject":
         print(
-            f"Warning: simulator.map={raw_map!r} but PROJECT_PATH is not a .uproject file; "
+            f"Warning: map={raw_map!r} but PROJECT_PATH is not a .uproject file; "
             "skipping course sync."
         )
         return
@@ -114,7 +114,7 @@ def sync_course_from_project_path(project_path: str, repo_root: Path, map_name: 
             else "No subfolders found in course/."
         )
         raise SystemExit(
-            f'simulator.map is "{raw_map}" but no matching folder under {course_root}. '
+            f"map={raw_map!r}: no matching folder under {course_root}. "
             f"Expected course/{raw_map}/{MAP_FOLDER}/... "
             f"(map folder name is matched case-insensitively). {hint}"
         )

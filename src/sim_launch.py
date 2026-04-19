@@ -11,6 +11,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _course_map_cli_override_from_argv(argv: list[str]) -> str | None:
+    """If any ``map=`` arg is present (last wins), return its value; else None (use sim.config).
+
+    Empty ``map=`` or whitespace-only value becomes ``none``.
+    """
+    found = False
+    chosen = ""
+    for arg in argv:
+        if "=" not in arg:
+            continue
+        key, _, val = arg.partition("=")
+        if key.strip().lower() != "map":
+            continue
+        found = True
+        chosen = val
+    if not found:
+        return None
+    out = chosen.strip()
+    return out if out else "none"
+
+
 def _airsim_settings_path() -> Path:
     if sys.platform == "win32":
         documents = Path.home() / "Documents"
@@ -211,7 +232,11 @@ def launch(
         res_y = int(low_end_cfg.get("sim_res_y", 480))
     airsim_port = sim_cfg.get("airsim_port", 41451)
     delay = sim_cfg.get("startup_delay_seconds", 30)
-    course_map = str(sim_cfg.get("map", "")).strip()
+    cli_map = _course_map_cli_override_from_argv(sys.argv[1:])
+    if cli_map is not None:
+        course_map = cli_map
+    else:
+        course_map = str(sim_cfg.get("map", "none")).strip() or "none"
     _ensure_camera_settings(
         airsim_port,
         view_mode,
