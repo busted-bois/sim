@@ -39,16 +39,31 @@ class ObstacleStop(Algorithm):
         flight_duration_s = float(cfg.get("flight_duration_s", 20.0))
         target_z = float(cfg.get("altitude_ned_m", -5.0))
         scan_hz = min(float(cfg.get("scan_hz", 10.0)), 20.0)
+        # Ignore depth readings below this — filters out drone body, propellers,
+        # spawn-point geometry, and near-field sensor noise.
+        min_valid_depth_m = float(cfg.get("min_valid_depth_m", 1.5))
+        # Fly forward for this many seconds before enabling obstacle detection,
+        # so the drone clears its spawn geometry and camera stabilises.
+        startup_grace_s = float(cfg.get("startup_grace_s", 2.0))
         dt = 1.0 / scan_hz
 
         print(
             f"[obstacle_stop] init cruise={cruise_speed_ms:.2f}m/s "
             f"stop_dist={stop_distance_m:.1f}m alt={target_z:.2f} "
-            f"roi={roi_fraction * 100:.0f}% scan_hz={scan_hz:.1f}"
+            f"roi={roi_fraction * 100:.0f}% scan_hz={scan_hz:.1f} "
+            f"min_valid_depth={min_valid_depth_m:.1f}m grace={startup_grace_s:.1f}s"
         )
 
         client.takeoffAsync().join()
         client.moveToZAsync(target_z, 1.0).join()
+
+        # Grace period — fly forward without scanning so the drone clears its
+        # spawn geometry and the depth camera has clean line-of-sight.
+        print(f"[obstacle_stop] grace period {startup_grace_s:.1f}s — flying forward, no scan")
+        grace_steps = max(1, int(startup_grace_s * scan_hz))
+        for _ in range(grace_steps):
+            client.moveByVelocityZAsync(cruise_speed_ms, 0.0, target_z, dt).join()
+
         print("[obstacle_stop] at altitude — starting forward obstacle scan")
 
         obstacle_detected = False
@@ -60,7 +75,7 @@ class ObstacleStop(Algorithm):
             t0 = time.perf_counter()
             step += 1
 
-            min_depth = self._scan_depth(client, camera_name, roi_fraction)
+            min_depth = self._scan_depth(client, camera_name, roi_fraction, min_valid_depth_m)
 
             if min_depth is not None and min_depth < stop_distance_m:
                 obstacle_detected = True
@@ -98,8 +113,13 @@ class ObstacleStop(Algorithm):
         client: airsim.MultirotorClient,
         camera_name: str,
         roi_fraction: float,
+        min_valid_depth_m: float = 1.5,
     ) -> float | None:
-        """Return the minimum depth (metres) in the central ROI, or None on error."""
+        """Return the minimum depth (metres) in the central ROI, or None on error.
+
+        Values below ``min_valid_depth_m`` are rejected as drone-body / spawn
+        noise; values above 1000 m are rejected as sky/infinity pixels.
+        """
         try:
             responses = client.simGetImages(
                 [
@@ -124,7 +144,7 @@ class ObstacleStop(Algorithm):
             x0 = int(w * (0.5 - roi_fraction / 2))
             x1 = int(w * (0.5 + roi_fraction / 2))
             roi = depth[y0:y1, x0:x1]
-            valid = roi[(roi > 0.1) & (roi < 1000.0)]
+            valid = roi[(roi >= min_valid_depth_m) & (roi < 1000.0)]
             if valid.size == 0:
                 return None
             return float(valid.min())

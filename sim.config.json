@@ -104,7 +104,9 @@
     "flight_duration_s": 20.0,
     "scan_hz": 10.0,
     "roi_fraction": 0.4,
-    "camera_name": "0"
+    "camera_name": "0",
+    "min_valid_depth_m": 1.5,
+    "startup_grace_s": 2.0
   },
   "logging": {
     "level": "INFO",
