@@ -194,6 +194,7 @@ def launch(
     _load_env_local()
 
     from src.config import load_config
+    from src.course_sync import sync_course_from_project_path
 
     config = load_config()
     sim_cfg = config["simulator"]
@@ -216,6 +217,8 @@ def launch(
         corner_chase_pip=corner_chase_pip,
         enable_trace=enable_trace,
     )
+
+    sync_course_from_project_path(project, ROOT)
 
     if colosseum and Path(colosseum).exists():
         if not project:
