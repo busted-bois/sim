@@ -211,6 +211,7 @@ def launch(
         res_y = int(low_end_cfg.get("sim_res_y", 480))
     airsim_port = sim_cfg.get("airsim_port", 41451)
     delay = sim_cfg.get("startup_delay_seconds", 30)
+    course_map = str(sim_cfg.get("map", "")).strip()
     _ensure_camera_settings(
         airsim_port,
         view_mode,
@@ -218,7 +219,7 @@ def launch(
         enable_trace=enable_trace,
     )
 
-    sync_course_from_project_path(project, ROOT)
+    sync_course_from_project_path(project, ROOT, course_map)
 
     if colosseum and Path(colosseum).exists():
         if not project:
