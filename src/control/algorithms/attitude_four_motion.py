@@ -206,14 +206,10 @@ class AttitudeFourMotion(Algorithm):
             f"[attitude_four_motion] calibration roll_sign={roll_sign:+.0f} y0={y0:.2f} y1={y1:.2f}"
         )
 
-        run_phase("+X", cruise_speed, 0.0, target_z, 3.0)
-        run_phase("-X", -cruise_speed, 0.0, target_z, 3.0)
-        run_phase("+Y", 0.0, cruise_speed, target_z, 3.0)
-        run_phase("-Y", 0.0, -cruise_speed, target_z, 3.0)
-        run_phase("+Z", 0.0, 0.0, _clamp(target_z - 1.5, z_floor, z_ceiling), 3.0)
-        run_phase("-Z", 0.0, 0.0, target_z, 3.0)
+        straight_duration_s = 12.0
+        run_phase("straight", cruise_speed, 0.0, target_z, straight_duration_s)
 
-        print("[attitude_four_motion] Completed 6-segment attitude routine")
+        print("[attitude_four_motion] Completed straight-line segment")
 
     def _run_latency_auto_tuner(
         self,
