@@ -236,6 +236,20 @@ def launch(
         cmd.append(f"-settings={_airsim_settings_path()}")
         if windowed:
             cmd.extend(["-windowed", f"-resx={res_x}", f"-resy={res_y}"])
+        extra = sim_cfg.get("extra_ue_args")
+        extra_list = extra if isinstance(extra, list) else []
+        extra_str = extra.strip() if isinstance(extra, str) else ""
+        if extra_list:
+            cmd.extend(str(arg) for arg in extra_list if str(arg).strip())
+        elif extra_str:
+            cmd.append(extra_str)
+        map_hint = str(sim_cfg.get("map_name", "")).strip()
+        has_map_launch_args = any(str(a).strip() for a in extra_list) or bool(extra_str)
+        if map_hint and not has_map_launch_args:
+            print(
+                f"Note: simulator.map_name={map_hint!r} is informational only; "
+                "add simulator.extra_ue_args (e.g. -map=/Game/...) to force a map at launch."
+            )
 
         subprocess.Popen(
             cmd,
