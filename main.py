@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -163,15 +164,34 @@ def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
         except BaseException as exc:
             error_holder["error"] = exc
 
-    worker = threading.Thread(target=_target, name="algorithm_runner", daemon=True)
+    # Non-daemon: flight logic must finish before landing; daemon threads can be torn down early.
+    worker = threading.Thread(target=_target, name="algorithm_runner", daemon=False)
     worker.start()
+    started = time.perf_counter()
     worker.join(timeout=timeout_seconds)
+    elapsed_s = time.perf_counter() - started
 
     if worker.is_alive():
         raise TimeoutError(f"Algorithm timed out after {timeout_seconds:.1f}s")
 
     if "error" in error_holder:
-        raise RuntimeError("Algorithm raised an exception") from error_holder["error"]
+        exc = error_holder["error"]
+        print(
+            f"Algorithm thread ended after {elapsed_s:.1f}s with error: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        raise RuntimeError(
+            f"Algorithm raised an exception after {elapsed_s:.1f}s"
+        ) from exc
+
+    if elapsed_s < 8.0:
+        print(
+            f"Warning: algorithm reported completion in {elapsed_s:.1f}s — much shorter than "
+            "a full attitude routine. If the drone barely moved, check Unreal is unpaused, "
+            "simulation is real-time, and watch for errors above.",
+            file=sys.stderr,
+        )
 
 
 def main() -> None:
