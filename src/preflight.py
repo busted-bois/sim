@@ -6,7 +6,8 @@ import os
 import socket
 from pathlib import Path
 
-from src.config import load_config
+from src.config import load_config, resolve_config_path, simulator_endpoint
+from src.control.algorithms import list_algorithms
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -63,6 +64,16 @@ def run_preflight() -> int:
     else:
         passes.append("Required config keys present")
 
+    algo = str(config.get("algorithm", "")).strip()
+    if algo:
+        registered = list_algorithms()
+        if algo not in registered:
+            errors.append(
+                f"Unknown algorithm {algo!r}; registered: {', '.join(registered) or '(none)'}"
+            )
+        else:
+            passes.append(f"Algorithm {algo!r} is registered")
+
     sim_cfg = config.get("simulator", {})
     colosseum_path = str(sim_cfg.get("colosseum_path", "")).strip()
     if not colosseum_path:
@@ -82,8 +93,7 @@ def run_preflight() -> int:
     else:
         passes.append("PROJECT_PATH exists")
 
-    host = str(sim_cfg.get("host", "127.0.0.1")).strip() or "127.0.0.1"
-    port = int(sim_cfg.get("airsim_port", 41451))
+    host, port = simulator_endpoint(config)
     require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1.5)
@@ -98,7 +108,8 @@ def run_preflight() -> int:
         else:
             warnings.append(f"{message} (warning only before simulator launch)")
 
-    print("== Preflight ==")
+    cfg_path = resolve_config_path()
+    print(f"== Preflight (config: {cfg_path}) ==")
     for line in passes:
         print(f"[PASS] {line}")
     for line in warnings:
