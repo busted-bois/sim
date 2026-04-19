@@ -47,3 +47,27 @@ def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:
         circles = np.round(circles[0, :]).astype("int")
         return [(x, y, r) for x, y, r in circles]
     return []
+
+
+def find_large_grey_wall(frame: VisionFrame, threshold: float = 0.7) -> bool:
+    """
+    Detects if a large grey wall is in the frame.
+
+    Args:
+        frame: The vision frame to process.
+        threshold: The percentage of the image that must be grey to be considered a wall.
+
+    Returns:
+        True if a large grey wall is detected, False otherwise.
+    """
+    gray_image = cv2.cvtColor(frame.image_rgb, cv2.COLOR_RGB2GRAY)
+
+    # Define range for grey color
+    lower_grey = 100
+    upper_grey = 200
+    mask = cv2.inRange(gray_image, lower_grey, upper_grey)
+
+    # Calculate the percentage of the image that is grey
+    grey_percentage = np.sum(mask > 0) / (frame.width * frame.height)
+
+    return grey_percentage > threshold
