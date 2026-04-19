@@ -15,6 +15,11 @@ class OpenCvLanding(Algorithm):
         client.takeoffAsync().join()
         print("[opencv_landing] Takeoff complete.")
 
+        # Rotate 180 degrees
+        print("[opencv_landing] Rotating 180 degrees...")
+        client.rotateByYawRateAsync(60, 3).join()
+        print("[opencv_landing] Rotation complete.")
+
         # 1. Search for the wall
         print("[opencv_landing] Searching for wall...")
         found_target = False
