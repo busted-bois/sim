@@ -69,11 +69,7 @@ def _register_signal_handlers_once() -> None:
 
 
 def _airsim_settings_path() -> Path:
-    if sys.platform == "win32":
-        documents = Path.home() / "Documents"
-    else:
-        documents = Path.home() / "Documents"
-    return documents / "AirSim" / "settings.json"
+    return Path.home() / "Documents" / "AirSim" / "settings.json"
 
 
 def _deep_merge_dict(base: dict, update: dict) -> dict:
