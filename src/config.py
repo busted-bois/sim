@@ -1,5 +1,9 @@
-"""Configuration loader — reads sim.config.json from project root."""
+"""Configuration loader for JSON config files.
 
+Resolves the config path from an explicit argument, ``AIGP_CONFIG``, or the
+default ``sim.config.json`` in the project root, and can apply a profile
+overlay via ``AIGP_PROFILE``.
+"""
 from __future__ import annotations
 
 import json
