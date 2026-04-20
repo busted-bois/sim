@@ -22,7 +22,21 @@ def _suppress_api_cleanup_warning(exc: BaseException) -> bool:
     if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
         return True
     if isinstance(exc, (RPCError, TransportError)):
-        return True
+        # RPC wrappers frequently carry plain strings/bytes from the wire.
+        # Only suppress clear connection-closed/reset cases.
+        msg = str(exc).lower()
+        return any(
+            token in msg
+            for token in (
+                "connection reset",
+                "connection aborted",
+                "broken pipe",
+                "forcibly closed",
+                "transport endpoint is not connected",
+                "not connected",
+                "failed to send request",
+            )
+        )
     if isinstance(exc, OSError):
         if getattr(exc, "winerror", None) in (10053, 10054):  # WSAECONNABORTED / WSAECONNRESET
             return True
