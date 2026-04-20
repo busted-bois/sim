@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 def _suppress_api_cleanup_warning(exc: BaseException) -> bool:
-    """True when disarm/API cleanup failed because the sim or socket is already gone (e.g. after Ctrl+C)."""
+    """True when disarm/API cleanup failed because the sim or socket is already gone."""
     if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
         return True
     if isinstance(exc, (RPCError, TransportError)):
@@ -259,7 +259,9 @@ def main() -> None:
             algo = get_algorithm(algo_name, config)
             algo.set_vision_feed(vision_feed if vision_feed.enabled else None)
             safety_cfg = config.get("safety", {})
-            algo_timeout_seconds = max(5.0, float(safety_cfg.get("algorithm_timeout_seconds", 180.0)))
+            algo_timeout_seconds = max(
+                5.0, float(safety_cfg.get("algorithm_timeout_seconds", 180.0))
+            )
 
             print(f"Algorithm: {algo_name}")
             _run_algorithm_with_timeout(algo, client, algo_timeout_seconds)
@@ -279,7 +281,8 @@ def main() -> None:
         except Exception as cleanup_exc:  # noqa: BLE001
             if not _suppress_api_cleanup_warning(cleanup_exc):
                 print(
-                    f"Warning: API cleanup failed (often harmless if sim/editor already closed): {cleanup_exc}",
+                    "Warning: API cleanup failed (often harmless if sim/editor already "
+                    f"closed): {cleanup_exc}",
                     file=sys.stderr,
                 )
 
