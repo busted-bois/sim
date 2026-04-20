@@ -211,7 +211,7 @@ class AttitudeFourMotion(Algorithm):
             try:
                 client.takeoffAsync().join()
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if attempt == takeoff_attempts:
                     raise
                 print(
