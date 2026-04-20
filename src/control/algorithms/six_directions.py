@@ -28,7 +28,20 @@ class SixDirections(Algorithm):
         if not selected:
             selected = DIRECTIONS
 
-        client.takeoffAsync().join()
+        takeoff_attempts = 4
+        for attempt in range(1, takeoff_attempts + 1):
+            try:
+                client.takeoffAsync().join()
+                break
+            except Exception as exc:  # noqa: BLE001
+                if attempt == takeoff_attempts:
+                    raise
+                print(
+                    f"[six_directions] takeoff attempt {attempt}/{takeoff_attempts} "
+                    f"failed ({type(exc).__name__}: {exc}); retrying...",
+                    file=sys.stderr,
+                )
+                time.sleep(1.5 * attempt)
 
         for label, vx, vy, vz in selected:
             print(f"[six_directions] Moving {label} for {duration_s:.1f}s")
