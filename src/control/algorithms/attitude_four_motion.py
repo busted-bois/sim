@@ -160,7 +160,7 @@ class AttitudeFourMotion(Algorithm):
 
             phase_wall_s = time.perf_counter() - phase_started_s
             shortfall = seconds - phase_wall_s
-            # Pad any wall-clock deficit (threshold was 0.05s; use epsilon so ~2.45s vs 2.5s still pads).
+            # Pad any wall-clock deficit (use epsilon so ~2.45s vs 2.5s still pads).
             if shortfall > 1e-3:
                 print(
                     f"[attitude_four_motion] phase={label} wall time {phase_wall_s:.2f}s "
@@ -203,7 +203,23 @@ class AttitudeFourMotion(Algorithm):
             )
 
         takeoff_t0 = time.perf_counter()
-        client.takeoffAsync().join()
+        # AirSim's RPC port opens before SimpleFlight's vehicle physics finishes
+        # warming up; an early takeoff can come back with a server-side error on
+        # the first try. Retry a few times with backoff before giving up.
+        takeoff_attempts = 4
+        for attempt in range(1, takeoff_attempts + 1):
+            try:
+                client.takeoffAsync().join()
+                break
+            except Exception as exc:  # noqa: BLE001
+                if attempt == takeoff_attempts:
+                    raise
+                print(
+                    f"[attitude_four_motion] takeoff attempt {attempt}/{takeoff_attempts} "
+                    f"failed ({type(exc).__name__}: {exc}); retrying...",
+                    file=sys.stderr,
+                )
+                time.sleep(1.5 * attempt)
         takeoff_wall_s = time.perf_counter() - takeoff_t0
         takeoff_min_wall_s = 2.0
         takeoff_short = takeoff_min_wall_s - takeoff_wall_s
