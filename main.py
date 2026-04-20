@@ -75,7 +75,6 @@ def _apply_trace_style(client: airsim.MultirotorClient, config: dict) -> None:
     try:
         client.simSetTraceLine(color, thickness, vehicle_name)
         print(f"Trace style applied: color={color}, thickness={thickness:.1f}")
-<<<<<<< HEAD
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: failed to set trace line style: {exc}")
 
