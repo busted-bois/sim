@@ -16,4 +16,4 @@ jobs:
       - name: Ruff Check
         run: |
           uv sync --frozen
-          uvx ruff check --fix --exit-non-zero-on-fix .
+          uvx ruff check .
