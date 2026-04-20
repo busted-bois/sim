@@ -182,10 +182,38 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
 
 
 def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
+    """Wait until AirSim is actually answering RPCs with a spawned multirotor.
+
+    The TCP port can open seconds before the vehicle is spawned in the Unreal
+    scene, so issuing real commands during that window produces flaky startup
+    errors. Probe both ping() and getMultirotorState() to cover the full ready
+    path. Use a throwaway client per attempt so a failed RPC can't leave dirty
+    state behind.
+    """
+    import airsim as _airsim  # local import: keep module load cheap
+
     deadline = time.time() + max(1.0, timeout_s)
+    port_seen_open = False
     while time.time() < deadline:
-        if _is_port_open(host, port):
-            return True
+        if not port_seen_open:
+            if not _is_port_open(host, port):
+                time.sleep(1.0)
+                continue
+            port_seen_open = True
+        probe_client = None
+        try:
+            probe_client = _airsim.MultirotorClient(ip=host, port=port, timeout_value=3)
+            if probe_client.ping() is True:
+                probe_client.getMultirotorState()
+                return True
+        except Exception:
+            pass
+        finally:
+            if probe_client is not None:
+                try:
+                    probe_client.client.close()
+                except Exception:
+                    pass
         time.sleep(1.0)
     return False
 
@@ -371,7 +399,8 @@ def launch(
     if rc == 0:
         print(
             "main.py exited successfully. If this launcher started Unreal/Colosseum, "
-            "that process may still be running — close it from the editor or Task Manager if needed.",
+            "that process may still be running — close it from the editor or Task Manager "
+            "if needed.",
             file=sys.stderr,
         )
     else:
