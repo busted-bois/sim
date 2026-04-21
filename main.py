@@ -8,7 +8,6 @@ from pathlib import Path
 
 import airsim
 from msgpackrpc.error import RPCError, TransportError
-
 from src.config import load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm
 from src.landing_telemetry import LandingTelemetrySampler
@@ -76,7 +75,7 @@ def _apply_trace_style(client: airsim.MultirotorClient, config: dict) -> None:
     try:
         client.simSetTraceLine(color, thickness, vehicle_name)
         print(f"Trace style applied: color={color}, thickness={thickness:.1f}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Warning: failed to set trace line style: {exc}")
 
 
@@ -292,7 +291,7 @@ def main() -> None:
         try:
             client.armDisarm(False)
             client.enableApiControl(False)
-        except Exception as cleanup_exc:  # noqa: BLE001
+        except Exception as cleanup_exc:
             if not _suppress_api_cleanup_warning(cleanup_exc):
                 print(
                     "Warning: API cleanup failed (often harmless if sim/editor already "
