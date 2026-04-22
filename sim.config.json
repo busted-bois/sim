@@ -1,4 +1,10 @@
 {
+  "backend": "airsim",
+  "mavlink": {
+    "connection": "udp:127.0.0.1:14550",
+    "source_system": 255,
+    "source_component": 0
+  },
   "algorithm": "attitude_four_motion",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",

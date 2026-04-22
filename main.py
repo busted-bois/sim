@@ -8,12 +8,23 @@ from pathlib import Path
 
 import airsim
 from msgpackrpc.error import RPCError, TransportError
+from src.backends import MavlinkClient
 from src.config import load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm
 from src.landing_telemetry import LandingTelemetrySampler
 from src.vision import VisionFeed
 
 ROOT = Path(__file__).resolve().parent
+
+
+class _NoopVisionFeed:
+    enabled = False
+
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
 
 
 def _suppress_api_cleanup_warning(exc: BaseException) -> bool:
@@ -247,17 +258,30 @@ def main() -> None:
     _apply_low_end_overrides(config)
     sim_cfg = config["simulator"]
     host, port = simulator_endpoint(config)
+    backend = str(config.get("backend", "airsim")).strip().lower() or "airsim"
     profile = os.environ.get("AIGP_PROFILE", "").strip()
     map_name = str(sim_cfg.get("map_name", "")).strip()
     print(
         "Flight session: "
         f"algorithm={config.get('algorithm', 'six_directions')!r} "
-        f"rpc={host}:{port}"
+        f"backend={backend!r} rpc={host}:{port}"
         + (f" profile={profile!r}" if profile else "")
         + (f" map={map_name!r}" if map_name else "")
     )
-    client = airsim.MultirotorClient(ip=host, port=port)
-    vision_feed = VisionFeed(client, config.get("vision", {}))
+    if backend == "mavlink":
+        mav_cfg = config.get("mavlink", {})
+        connection = str(mav_cfg.get("connection", "udp:127.0.0.1:14550")).strip()
+        source_system = int(mav_cfg.get("source_system", 255))
+        source_component = int(mav_cfg.get("source_component", 0))
+        client = MavlinkClient(
+            connection,
+            source_system=source_system,
+            source_component=source_component,
+        )
+        vision_feed = _NoopVisionFeed()
+    else:
+        client = airsim.MultirotorClient(ip=host, port=port)
+        vision_feed = VisionFeed(client, config.get("vision", {}))
 
     try:
         client.confirmConnection()
