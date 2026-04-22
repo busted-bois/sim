@@ -15,6 +15,22 @@ class _CompletedAction:
         return None
 
 
+def _euler_to_quaternion(roll: float, pitch: float, yaw: float) -> list[float]:
+    """ZYX intrinsic Euler (rad) -> quaternion [w, x, y, z] expected by MAVLink."""
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    return [
+        cr * cp * cy + sr * sp * sy,
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+    ]
+
+
 class MavlinkClient:
     """Minimal AirSim-like client surface backed by MAVLink."""
 
@@ -135,7 +151,7 @@ class MavlinkClient:
         vehicle_name: str = "",
     ) -> _CompletedAction:
         _ = vehicle_name
-        q = mavutil.mavlink.quaternion_from_euler(float(roll), float(pitch), float(yaw))
+        q = _euler_to_quaternion(float(roll), float(pitch), float(yaw))
         thrust = max(0.0, min(1.0, float(throttle)))
         self._master.mav.set_attitude_target_send(
             0,
@@ -156,6 +172,8 @@ class MavlinkClient:
         self, yaw_rate: float, duration: float, vehicle_name: str = ""
     ) -> _CompletedAction:
         _ = vehicle_name
+        # AirSim callers pass yaw_rate in deg/s; MAVLink body_yaw_rate is rad/s.
+        yaw_rate_rad_s = math.radians(float(yaw_rate))
         self._master.mav.set_attitude_target_send(
             0,
             self._target_system,
@@ -164,7 +182,7 @@ class MavlinkClient:
             [1.0, 0.0, 0.0, 0.0],
             0.0,
             0.0,
-            float(yaw_rate),
+            yaw_rate_rad_s,
             0.5,
         )
         if duration > 0:
@@ -189,6 +207,8 @@ class MavlinkClient:
     def simSetCameraPose(self, camera_name: str, pose: Any, vehicle_name: str = "") -> None:
         _ = (camera_name, pose, vehicle_name)
 
-    def simSetTraceLine(self, color_rgba: list[float], thickness: float, vehicle_name: str = "") -> None:
+    def simSetTraceLine(
+        self, color_rgba: list[float], thickness: float, vehicle_name: str = ""
+    ) -> None:
         _ = (color_rgba, thickness, vehicle_name)
 
