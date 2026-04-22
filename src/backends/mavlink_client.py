@@ -27,6 +27,7 @@ class MavlinkClient:
         self._target_system = 0
         self._target_component = 0
         self._last_local_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        self._last_local_vel: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
     def confirmConnection(self) -> None:
         hb = self._master.wait_heartbeat(timeout=15)
@@ -124,14 +125,64 @@ class MavlinkClient:
             time.sleep(float(duration))
         return _CompletedAction()
 
+    def moveByRollPitchYawThrottleAsync(
+        self,
+        roll: float,
+        pitch: float,
+        yaw: float,
+        throttle: float,
+        duration: float,
+        vehicle_name: str = "",
+    ) -> _CompletedAction:
+        _ = vehicle_name
+        q = mavutil.mavlink.quaternion_from_euler(float(roll), float(pitch), float(yaw))
+        thrust = max(0.0, min(1.0, float(throttle)))
+        self._master.mav.set_attitude_target_send(
+            0,
+            self._target_system,
+            self._target_component,
+            0b00000111,  # ignore body rates; use quaternion + thrust
+            q,
+            0.0,
+            0.0,
+            0.0,
+            thrust,
+        )
+        if duration > 0:
+            time.sleep(float(duration))
+        return _CompletedAction()
+
+    def rotateByYawRateAsync(
+        self, yaw_rate: float, duration: float, vehicle_name: str = ""
+    ) -> _CompletedAction:
+        _ = vehicle_name
+        self._master.mav.set_attitude_target_send(
+            0,
+            self._target_system,
+            self._target_component,
+            0b10000011,  # ignore roll/pitch rates + attitude; keep yaw rate + thrust
+            [1.0, 0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            float(yaw_rate),
+            0.5,
+        )
+        if duration > 0:
+            time.sleep(float(duration))
+        return _CompletedAction()
+
     def getMultirotorState(self) -> Any:
         msg = self._master.recv_match(type="LOCAL_POSITION_NED", blocking=False)
         if msg is not None:
             self._last_local_pos = (float(msg.x), float(msg.y), float(msg.z))
+            if hasattr(msg, "vx") and hasattr(msg, "vy") and hasattr(msg, "vz"):
+                self._last_local_vel = (float(msg.vx), float(msg.vy), float(msg.vz))
         x, y, z = self._last_local_pos
+        vx, vy, vz = self._last_local_vel
         return SimpleNamespace(
             kinematics_estimated=SimpleNamespace(
-                position=SimpleNamespace(x_val=x, y_val=y, z_val=z)
+                position=SimpleNamespace(x_val=x, y_val=y, z_val=z),
+                linear_velocity=SimpleNamespace(x_val=vx, y_val=vy, z_val=vz),
             )
         )
 
