@@ -27,20 +27,23 @@ def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:
 
     mask = mask1 + mask2
 
-    # Morphological transformations to reduce noise
-    mask = cv2.erode(mask, None, iterations=2)
+    # Lighter morphology so distant (small) targets survive the clean-up.
+    mask = cv2.erode(mask, None, iterations=1)
     mask = cv2.dilate(mask, None, iterations=2)
 
-    # Detect circles using Hough Circle Transform
+    # Detect circles using Hough Circle Transform. Lower param2 + minRadius
+    # makes the detector pick up small/faint circles at distance, which is
+    # what we want for finding a far-away red target before it's already
+    # under the drone.
     circles = cv2.HoughCircles(
         mask,
         cv2.HOUGH_GRADIENT,
         dp=1,
-        minDist=20,
+        minDist=15,
         param1=50,
-        param2=30,
-        minRadius=5,
-        maxRadius=100,
+        param2=18,
+        minRadius=2,
+        maxRadius=120,
     )
 
     if circles is not None:
