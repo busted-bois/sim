@@ -73,7 +73,7 @@
     "stabilize_s": 2.5
   },
   "vision_guided_control": {
-    "detector": "grey_wall",
+    "detector": "red_circle",
     "max_speed_ms": 3.0,
     "search_forward_speed_ms": 1.0,
     "approach_speed_ms": 2.2,
@@ -113,10 +113,10 @@
     "max_altitude_m": 50.0
   },
   "waypoints": [
-    { "x": 10.0, "y": 0.0, "z": -5.0 },
-    { "x": 10.0, "y": 10.0, "z": -5.0 },
-    { "x": 0.0, "y": 10.0, "z": -5.0 },
-    { "x": 0.0, "y": 0.0, "z": -5.0 }
+    { "x": 10.0, "y": 0.0, "z": -8.0 },
+    { "x": 10.0, "y": 10.0, "z": -8.0 },
+    { "x": 0.0, "y": 10.0, "z": -8.0 },
+    { "x": 0.0, "y": 0.0, "z": -8.0 }
   ],
   "logging": {
     "level": "INFO",

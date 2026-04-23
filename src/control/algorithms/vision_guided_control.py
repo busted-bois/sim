@@ -223,7 +223,17 @@ class VisionGuidedControl(Algorithm):
                         f"({now_s - last_close_seen_s:.2f}s <= {lost_after_close_s:.2f}s)"
                     )
                     break
-                client.moveByVelocityAsync(forward_v, 0.0, vz, dt).join()
+                # Search: cruise forward in the drone's current heading so it
+                # stays on its initial flight path after the 180° startup yaw.
+                state = client.getMultirotorState()
+                yaw_rad = _yaw_from_orientation(state.kinematics_estimated.orientation)
+                cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
+                client.moveByVelocityAsync(
+                    forward_v * cos_y,
+                    forward_v * sin_y,
+                    vz,
+                    dt,
+                ).join()
                 if steps % max(1, int(rate_hz)) == 0:
                     print("[vision_guided_control] searching (no target)")
 
