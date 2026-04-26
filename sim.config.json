@@ -28,7 +28,15 @@
     "startup_autotune_min_samples": 8,
     "startup_autotune_headroom": 0.9,
     "save_debug_frames": false,
-    "debug_output_dir": "logs/vision_frames"
+    "debug_output_dir": "logs/vision_frames",
+    "depth": {
+      "enabled": true,
+      "model_path": "models/midas_v21_small.onnx",
+      "calibration": {
+        "scale": 1.0,
+        "offset": 0.0
+      }
+    }
   },
   "landing": {
     "profile": "faster_soft",
