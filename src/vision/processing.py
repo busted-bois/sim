@@ -2,6 +2,21 @@ import cv2
 import numpy as np
 
 from src.vision.feed import VisionFrame
+from src.vision.depth_perception import DepthEstimator
+
+# Global or instance-based estimator could be used. 
+# For simplicity in this module, we provide a helper.
+_depth_estimator = None
+
+def get_depth_info(frame: VisionFrame, model_path: str = None) -> np.ndarray | None:
+    """
+    Computes depth map for the given frame.
+    """
+    global _depth_estimator
+    if _depth_estimator is None:
+        _depth_estimator = DepthEstimator(model_path)
+    
+    return _depth_estimator.get_metric_depth(frame)
 
 
 def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:
