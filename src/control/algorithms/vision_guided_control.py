@@ -13,8 +13,13 @@ import math
 import time
 
 import airsim
+import numpy as np
 from src.control.algorithms import Algorithm, register
-from src.vision.processing import grey_wall_info_normalized, red_target_info_normalized
+from src.vision.processing import (
+    get_depth_info,
+    grey_wall_info_normalized,
+    red_target_info_normalized,
+)
 
 
 def _yaw_from_orientation(orientation) -> float:
@@ -121,10 +126,33 @@ class VisionGuidedControl(Algorithm):
             frame = self.latest_frame()
             if inject_fake:
                 info: tuple[float, float, float] | None = (0.0, 0.0, arrival_r_frac)
+                depth_map = None
             elif frame is not None:
                 info = detect_fn(frame)
+                # DEBUG: Attempt to get depth info
+                try:
+                    depth_map = get_depth_info(frame)
+                    if depth_map is not None:
+                        # DEBUG: Print center depth stats every ~1s
+                        if steps % max(1, int(rate_hz)) == 0:
+                            h, w = depth_map.shape
+                            center_val = depth_map[h // 2, w // 2]
+                            min_d = np.min(depth_map)
+                            max_d = np.max(depth_map)
+                            print(
+                                f"[depth_debug] frame={frame.seq} center={center_val:.2f}m "
+                                f"range=[{min_d:.1f}, {max_d:.1f}]m"
+                            )
+                    else:
+                        if steps % max(1, int(rate_hz)) == 0:
+                            print("[depth_debug] depth_map is None")
+                except Exception as e:
+                    if steps % max(1, int(rate_hz)) == 0:
+                        print(f"[depth_debug] depth estimation error: {e}")
+                    depth_map = None
             else:
                 info = None
+                depth_map = None
 
             vz = vz_trim()
             now_s = time.monotonic()
