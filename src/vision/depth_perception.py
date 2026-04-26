@@ -56,35 +56,38 @@ class DepthEstimator:
             A 2D numpy array of relative depth values, or None if estimation fails.
         """
         if self.net is None:
+            print("[depth] Attempting to load model for the first time...")
             if not self.load_model():
+                print("[depth] Failed to load model in estimate()")
                 return None
                 
         img = frame.image_rgb
         h, w = img.shape[:2]
+        # print(f"[depth] Processing frame {frame.seq} ({w}x{h})") # High volume
         
-        # MiDaS v2.1 Small preprocessing:
-        # 1. Resize to 256x256
-        # 2. Normalize to [0, 1]
-        # 3. Mean subtraction and scaling (standard ImageNet-style or model-specific)
-        blob = cv2.dnn.blobFromImage(
-            img, 
-            1.0 / 255.0, 
-            self.INPUT_SIZE, 
-            (123.675, 116.28, 103.53), 
-            True, 
-            False
-        )
-        
-        self.net.setInput(blob)
-        output = self.net.forward()
-        
-        # Output is typically (1, 256, 256)
-        depth_map = output[0]
-        
-        # Resize back to original frame size
-        depth_map = cv2.resize(depth_map, (w, h), interpolation=cv2.INTER_CUBIC)
-        
-        return depth_map
+        try:
+            # MiDaS v2.1 Small preprocessing
+            blob = cv2.dnn.blobFromImage(
+                img, 
+                1.0 / 255.0, 
+                self.INPUT_SIZE, 
+                (123.675, 116.28, 103.53), 
+                True, 
+                False
+            )
+            
+            self.net.setInput(blob)
+            output = self.net.forward()
+            
+            depth_map = output[0]
+            
+            # Resize back to original frame size
+            depth_map = cv2.resize(depth_map, (w, h), interpolation=cv2.INTER_CUBIC)
+            
+            return depth_map
+        except Exception as e:
+            print(f"[depth] Inference error: {e}")
+            return None
 
     def get_metric_depth(self, frame: VisionFrame) -> np.ndarray | None:
         """
@@ -92,11 +95,14 @@ class DepthEstimator:
         """
         relative_depth = self.estimate(frame)
         if relative_depth is None:
+            # print("[depth] get_metric_depth: relative_depth is None") # High volume
             return None
             
         # MiDaS outputs are often inverse depth.
         # Simple linear calibration for now:
         metric_depth = (self.scale * relative_depth) + self.offset
+        
+        # print(f"[depth] frame {frame.seq} metric stats: min={np.min(metric_depth):.2f}, max={np.max(metric_depth):.2f}")
         
         # Ensure no negative depths
         return np.maximum(metric_depth, 0.1)
