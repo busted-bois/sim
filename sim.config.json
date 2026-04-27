@@ -1,7 +1,7 @@
 {
-  "backend": "airsim",
+  "backend": "mavlink",
   "mavlink": {
-    "connection": "udp:127.0.0.1:14550",
+    "connection": "udpin:0.0.0.0:14550",
     "source_system": 255,
     "source_component": 0
   },
