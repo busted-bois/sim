@@ -398,11 +398,22 @@ def launch(
         if not gui_path.is_file():
             print(f"Warning: Manual flight GUI not found at {gui_path}. Skipping.")
         else:
-            gui_cmd = [sys.executable, str(gui_path), "--vjoy"]
-            if manual_debug:
-                gui_cmd.append("--debug")
-            print(f"Starting manual_flight_gui.py ({' '.join(gui_cmd[2:])})...")
-            gui_proc = subprocess.Popen(gui_cmd, env=env)
+            probe = subprocess.run(
+                [sys.executable, "-c", "import pyvjoy, pynput, PySimpleGUI"],
+                capture_output=True,
+            )
+            if probe.returncode != 0:
+                print(
+                    "Warning: manual flight extras not installed in this venv "
+                    "(pyvjoy / pynput / PySimpleGUI). Skipping GUI. "
+                    "Run: uv sync --extra manual"
+                )
+            else:
+                gui_cmd = [sys.executable, str(gui_path), "--vjoy"]
+                if manual_debug:
+                    gui_cmd.append("--debug")
+                print(f"Starting manual_flight_gui.py ({' '.join(gui_cmd[2:])})...")
+                gui_proc = subprocess.Popen(gui_cmd, env=env)
 
     # Start the primary script
     print(f"Starting {script_path}...")
@@ -410,7 +421,7 @@ def launch(
         [sys.executable, str(ROOT / script_path)],
         env=env,
     )
-    
+
     try:
         rc = _handles.main.wait()
     except KeyboardInterrupt:
@@ -458,9 +469,9 @@ def main() -> None:
 def main_calibrate() -> None:
     # Calibration command always includes manual control GUI for ease of use
     launch(
-        view_mode="FlyWithMe", 
-        use_vjoy=True, 
-        manual_gui=True, 
+        view_mode="FlyWithMe",
+        use_vjoy=True,
+        manual_gui=True,
         script_path="scripts/calibrate_depth.py"
     )
 
