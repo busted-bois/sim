@@ -16,6 +16,13 @@ dependencies = [
     "pillow>=12.2.0",
 ]
 
+[project.optional-dependencies]
+manual = [
+    "pyvjoy",
+    "pynput",
+    "PySimpleGUI<5",
+]
+
 [project.scripts]
 sim = "src.sim_launch:main"
 sim-very-soft = "src.sim_launch:main_very_soft"

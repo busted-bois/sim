@@ -271,6 +271,8 @@ def launch(
     view_mode: str = "Fpv",
     corner_chase_pip: bool = False,
     enable_trace: bool = False,
+    manual_gui: bool = False,
+    manual_debug: bool = False,
 ) -> None:
     _register_signal_handlers_once()
     _handles.ue = None
@@ -377,14 +379,27 @@ def launch(
     if enable_trace:
         env["AIGP_ENABLE_TRACE"] = "1"
 
-    print("Starting main.py...")
-    # Do not use CREATE_NEW_PROCESS_GROUP for main.py on Windows: it correlated with the
-    # child exiting almost immediately while the launcher kept running; Ctrl+C still goes
-    # to the launcher first in typical Cursor/terminal setups.
-    _handles.main = subprocess.Popen(
-        [sys.executable, str(ROOT / "main.py")],
-        env=env,
-    )
+    if manual_gui:
+        gui_path = ROOT / "manual_flight_gui.py"
+        if not gui_path.is_file():
+            raise SystemExit(
+                f"Manual flight GUI not found at {gui_path}. "
+                "Run: git submodule update --init simple_airsim"
+            )
+        gui_cmd = [sys.executable, str(gui_path), "--vjoy"]
+        if manual_debug:
+            gui_cmd.append("--debug")
+        print(f"Starting manual_flight_gui.py ({' '.join(gui_cmd[2:])})...")
+        _handles.main = subprocess.Popen(gui_cmd, env=env)
+    else:
+        print("Starting main.py...")
+        # Do not use CREATE_NEW_PROCESS_GROUP for main.py on Windows: it correlated with the
+        # child exiting almost immediately while the launcher kept running; Ctrl+C still goes
+        # to the launcher first in typical Cursor/terminal setups.
+        _handles.main = subprocess.Popen(
+            [sys.executable, str(ROOT / "main.py")],
+            env=env,
+        )
     try:
         rc = _handles.main.wait()
     except KeyboardInterrupt:
@@ -404,25 +419,43 @@ def launch(
     raise SystemExit(rc)
 
 
+def _parse_manual_flags(args: set[str]) -> tuple[bool, bool]:
+    manual = "vjoy" in args or "manual" in args
+    debug = "debug" in args
+    return manual, debug
+
+
 def main() -> None:
     normalized_args = {arg.strip().lower() for arg in sys.argv[1:]}
     run_low_end = "low-end" in normalized_args
     run_third_person = "3rd-person" in normalized_args or "third-person" in normalized_args
+    manual_gui, manual_debug = _parse_manual_flags(normalized_args)
     view_mode = "FlyWithMe" if run_third_person else "Fpv"
     launch(
         low_end=run_low_end,
         view_mode=view_mode,
         corner_chase_pip=run_third_person,
         enable_trace=run_third_person,
+        manual_gui=manual_gui,
+        manual_debug=manual_debug,
     )
 
 
 def main_very_soft() -> None:
-    launch(landing_profile="very_soft")
+    normalized_args = {arg.strip().lower() for arg in sys.argv[1:]}
+    manual_gui, manual_debug = _parse_manual_flags(normalized_args)
+    launch(landing_profile="very_soft", manual_gui=manual_gui, manual_debug=manual_debug)
 
 
 def main_low_end() -> None:
-    launch(low_end=True, corner_chase_pip=False)
+    normalized_args = {arg.strip().lower() for arg in sys.argv[1:]}
+    manual_gui, manual_debug = _parse_manual_flags(normalized_args)
+    launch(
+        low_end=True,
+        corner_chase_pip=False,
+        manual_gui=manual_gui,
+        manual_debug=manual_debug,
+    )
 
 
 if __name__ == "__main__":
