@@ -55,7 +55,7 @@ def main():
     all_rel = []
     all_gt = []
     
-    samples_to_collect = 100
+    samples_to_collect = 1000
     collected = 0
     start_time = time.time()
     

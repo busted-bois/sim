@@ -160,8 +160,16 @@ def _ensure_camera_settings(
     merged.pop("SubWindows", None)
     if "SubWindows" in required_settings:
         merged["SubWindows"] = required_settings["SubWindows"]
-    if enable_trace:
-        # Enable AirSim trace for third-person mode.
+
+    if use_vjoy:
+        # Clear specific vehicles to prevent AirSim from spawning a second drone
+        # when 'Usage: vJoy' is also set at the top level.
+        merged.pop("Vehicles", None)
+        print("[launcher] Cleared 'Vehicles' from settings for vJoy mode.")
+
+    if enable_trace and not use_vjoy:
+        # Enable AirSim trace for third-person mode (only if not in vJoy mode
+        # to keep settings clean and avoid double-spawn).
         merged_vehicles = merged.get("Vehicles")
         if not isinstance(merged_vehicles, dict):
             merged_vehicles = {}
