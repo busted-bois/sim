@@ -1,7 +1,10 @@
 {
   "algorithm": "attitude_four_motion",
+  "maze_algorithm": "maze_straight_collision",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
+    "maze_colosseum_path": "C:\\Program Files\\Epic Games\\UE_4.16\\Engine\\Binaries\\Win64\\UE4Editor.exe",
+    "maze_project_path": "opensrc/AirsimSimulation/VehilceAdvanced.uproject",
     "map_name": "BlocksV2",
     "extra_ue_args": [],
     "windowed": true,
@@ -9,9 +12,15 @@
     "res_y": 720,
     "airsim_port": 41451,
     "rpc_ready_timeout_seconds": 120,
+    "maze_rpc_ready_timeout_seconds": 300,
     "trace": {
       "enabled": true,
-      "color_rgba": [1.0, 0.0, 1.0, 1.0],
+      "color_rgba": [
+        1.0,
+        0.0,
+        1.0,
+        1.0
+      ],
       "thickness": 4.0
     }
   },
@@ -22,7 +31,10 @@
     "min_fps": 5,
     "fov_degrees": 100,
     "compress": true,
-    "resolution": [640, 360],
+    "resolution": [
+      640,
+      360
+    ],
     "startup_autotune_enabled": true,
     "startup_autotune_seconds": 3.0,
     "startup_autotune_min_samples": 8,
@@ -36,6 +48,16 @@
     "max_descent_speed_ms": 2.5,
     "min_hover_seconds": 2.0,
     "final_land_altitude_m": 1.0,
+    "maze": {
+      "profile": "maze_soft",
+      "min_hover_seconds": 2.5,
+      "maze_descent_chunk_m": 0.35,
+      "maze_descent_speed_ms": 0.55,
+      "maze_settle_between_chunks_s": 0.4,
+      "maze_pre_land_hover_s": 1.2,
+      "final_land_altitude_m": 0.85,
+      "maze_soft_max_steps": 40
+    },
     "telemetry_log": {
       "enabled": true,
       "path": "logs/landing_telemetry.csv",
@@ -65,17 +87,40 @@
     "vision_enabled": false,
     "segment_duration_s": 1.2,
     "speed_ms": 1.6,
-    "direction_labels": ["+X", "-X", "+Y", "-Y"]
+    "direction_labels": [
+      "+X",
+      "-X",
+      "+Y",
+      "-Y"
+    ]
   },
   "attitude_four_motion": {
     "segment_duration_s": 3.0,
     "calibration_move_s": 0.8,
     "stabilize_s": 2.5
   },
+  "maze_straight_collision": {
+    "speed_ms": 1.8,
+    "command_chunk_s": 0.2,
+    "probe_duration_s": 0.5,
+    "target_altitude_m": 2.5,
+    "collision_confirm_ticks": 2,
+    "stall_confirm_ticks": 6,
+    "min_progress_m": 0.05,
+    "max_flight_s": 60.0,
+    "takeoff_timeout_sec": 60.0
+  },
   "six_directions": {
     "duration_s": 5.0,
     "speed_ms": 2.0,
-    "direction_labels": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
+    "direction_labels": [
+      "+X",
+      "-X",
+      "+Y",
+      "-Y",
+      "+Z",
+      "-Z"
+    ]
   },
   "control": {
     "command_rate_hz": 50,
@@ -98,10 +143,26 @@
     "max_altitude_m": 50.0
   },
   "waypoints": [
-    { "x": 10.0, "y": 0.0, "z": -5.0 },
-    { "x": 10.0, "y": 10.0, "z": -5.0 },
-    { "x": 0.0, "y": 10.0, "z": -5.0 },
-    { "x": 0.0, "y": 0.0, "z": -5.0 }
+    {
+      "x": 10.0,
+      "y": 0.0,
+      "z": -5.0
+    },
+    {
+      "x": 10.0,
+      "y": 10.0,
+      "z": -5.0
+    },
+    {
+      "x": 0.0,
+      "y": 10.0,
+      "z": -5.0
+    },
+    {
+      "x": 0.0,
+      "y": 0.0,
+      "z": -5.0
+    }
   ],
   "logging": {
     "level": "INFO",

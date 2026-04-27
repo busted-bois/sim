@@ -66,3 +66,4 @@ def list_algorithms() -> list[str]:
 # Import built-in algorithms to trigger registration.
 importlib.import_module("src.control.algorithms.six_directions")
 importlib.import_module("src.control.algorithms.attitude_four_motion")
+importlib.import_module("src.control.algorithms.maze_straight_collision")

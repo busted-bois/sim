@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 sim = "src.sim_launch:main"
+sim-maze = "src.sim_launch:main_maze"
 sim-very-soft = "src.sim_launch:main_very_soft"
 sim-low-end = "src.sim_launch:main_low_end"
 preflight = "src.preflight:main"

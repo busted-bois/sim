@@ -1,4 +1,4 @@
-from .client import MultirotorClient, VehicleClient
+from .client import MultirotorClient, VehicleClient, set_maze_default_vehicle
 from .types import (
     AngleLevelControllerGains,
     AngleRateControllerGains,
@@ -43,8 +43,6 @@ from .types import (
 __version__ = "1.8.1"
 
 __all__ = [
-    "MultirotorClient",
-    "VehicleClient",
     "AngleLevelControllerGains",
     "AngleRateControllerGains",
     "BarometerData",
@@ -70,6 +68,7 @@ __all__ = [
     "MagnetometerData",
     "MeshPositionVertexBuffersResponse",
     "MsgpackMixin",
+    "MultirotorClient",
     "MultirotorState",
     "PIDGains",
     "Pose",
@@ -80,8 +79,10 @@ __all__ = [
     "RotorStates",
     "Vector2r",
     "Vector3r",
+    "VehicleClient",
     "VelocityControllerGains",
     "WeatherParameter",
     "YawMode",
     "__version__",
+    "set_maze_default_vehicle",
 ]

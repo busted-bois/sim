@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 from pathlib import Path
 
 from src.config import load_config, resolve_config_path, simulator_endpoint
 from src.control.algorithms import list_algorithms
+from src.sim_launch import (
+    _guess_ue_416_editor,
+    _resolve_configured_maze_editor,
+    _resolve_maze_uproject_path,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -42,7 +48,7 @@ def _has_nested_key(data: dict, key_path: str) -> bool:
     return isinstance(current, dict) and parts[-1] in current
 
 
-def run_preflight() -> int:
+def run_preflight(*, maze_mode: bool = False) -> int:
     _load_env_local()
     config = load_config()
 
@@ -65,6 +71,8 @@ def run_preflight() -> int:
         passes.append("Required config keys present")
 
     algo = str(config.get("algorithm", "")).strip()
+    if maze_mode:
+        algo = str(config.get("maze_algorithm", algo)).strip()
     if algo:
         registered = list_algorithms()
         if algo not in registered:
@@ -92,6 +100,31 @@ def run_preflight() -> int:
         errors.append(f"Project file path not found: {project_path}")
     else:
         passes.append("PROJECT_PATH exists")
+
+    if maze_mode:
+        maze_editor_raw = (
+            os.environ.get("MAZE_COLLOSSEUM_PATH", "").strip()
+            or str(sim_cfg.get("maze_colosseum_path", "")).strip()
+        )
+        maze_editor = _resolve_configured_maze_editor(maze_editor_raw) if maze_editor_raw else ""
+        if not maze_editor:
+            maze_editor = _guess_ue_416_editor()
+        if not maze_editor:
+            errors.append(
+                "Maze editor not found (UE 4.16 UnrealEditor.exe/UE4Editor.exe). "
+                "Set MAZE_COLLOSSEUM_PATH or simulator.maze_colosseum_path."
+            )
+        else:
+            passes.append(f"Maze editor exists: {maze_editor}")
+
+        maze_project = _resolve_maze_uproject_path(sim_cfg)
+        if not maze_project:
+            errors.append(
+                "Maze .uproject not found. Run scripts/extract_airsim_maps.ps1 or set "
+                "MAZE_PROJECT_PATH / simulator.maze_project_path."
+            )
+        else:
+            passes.append(f"Maze .uproject exists: {maze_project}")
 
     host, port = simulator_endpoint(config)
     require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))
@@ -126,7 +159,8 @@ def run_preflight() -> int:
 
 
 def main() -> None:
-    raise SystemExit(run_preflight())
+    maze_mode = any(arg.strip().lower() == "maze" for arg in sys.argv[1:])
+    raise SystemExit(run_preflight(maze_mode=maze_mode))
 
 
 if __name__ == "__main__":

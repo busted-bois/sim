@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 
 import msgpackrpc  # install as admin: pip install msgpack-rpc-python
@@ -31,17 +32,165 @@ from .types import (
     YawMode,
 )
 
+_maze_effective_vehicle: str | None = None
+
+
+def set_maze_default_vehicle(vehicle_name: str) -> None:
+    """When using UE 4.16 / legacy maze, set the API vehicle name for all coerced empty calls."""
+    global _maze_effective_vehicle
+    _maze_effective_vehicle = (vehicle_name or "SimpleFlight").strip() or "SimpleFlight"
+
+
+def _airsim_legacy_default_vehicle() -> str:
+    if _maze_effective_vehicle is not None:
+        return _maze_effective_vehicle
+    name = os.environ.get("AIGP_AIRSIM_VEHICLE_NAME", "SimpleFlight").strip()
+    return name or "SimpleFlight"
+
+
+def _airsim_legacy_coerce_vehicle_rpc_args() -> bool:
+    """AirSim ~1.1-1.2 / UE 4.16: some rpclib stacks mishandle a trailing empty vehicle_name."""
+    return (
+        os.environ.get("AIGP_MAZE", "").strip() == "1"
+        or os.environ.get("AIGP_AIRSIM_LEGACY_RPC", "").strip() == "1"
+    )
+
+
+_LEGACY_RPC_TRAILING_VEHICLE_METHODS = frozenset(
+    {
+        "enableApiControl",
+        "isApiControlEnabled",
+        "armDisarm",
+        "getHomeGeoPoint",
+        "getMultirotorState",
+        "getRotorStates",
+        "cancelLastTask",
+        "takeoff",
+        "land",
+        "goHome",
+        "hover",
+        "moveByAngleZ",
+        "moveByAngleThrottle",
+        "moveByVelocity",
+        "moveByVelocityZ",
+        "moveByVelocityBodyFrame",
+        "moveByVelocityZBodyFrame",
+        "moveOnPath",
+        "moveToPosition",
+        "moveToGPS",
+        "moveToZ",
+        "moveByManual",
+        "rotateToYaw",
+        "rotateByYawRate",
+        "moveByMotorPWMs",
+        "moveByRollPitchYawZ",
+        "moveByRollPitchYawThrottle",
+        "moveByRollPitchYawrateThrottle",
+        "moveByRollPitchYawrateZ",
+        "moveByAngleRatesZ",
+        "moveByAngleRatesThrottle",
+        "moveByRC",
+        "setSafety",
+        "setAngleRateControllerGains",
+        "setAngleLevelControllerGains",
+        "setVelocityControllerGains",
+        "setPositionControllerGains",
+        "simGetCollisionInfo",
+        "simGetVehiclePose",
+        "simSetVehiclePose",
+        "simSetTraceLine",
+        "getImuData",
+        "getBarometerData",
+        "getMagnetometerData",
+        "getGpsData",
+        "getDistanceSensorData",
+        "getLidarData",
+        "simGetGroundTruthKinematics",
+        "simGetGroundTruthEnvironment",
+        "simSetKinematics",
+    }
+)
+
+_LEGACY_RPC_MOVEMENT_BYPASS_METHODS = frozenset(
+    {
+        "moveByVelocity",
+        "moveByVelocityZ",
+        "moveByVelocityBodyFrame",
+        "moveByVelocityZBodyFrame",
+        "moveOnPath",
+        "moveToPosition",
+        "moveToGPS",
+        "moveToZ",
+        "moveByManual",
+        "moveByRollPitchYawZ",
+        "moveByRollPitchYawThrottle",
+        "moveByRollPitchYawrateThrottle",
+        "moveByRollPitchYawrateZ",
+        "moveByAngleRatesZ",
+        "moveByAngleRatesThrottle",
+        "moveByRC",
+    }
+)
+
+
+def _maybe_coerce_legacy_vehicle_rpc_args(method: str, args: tuple) -> tuple:
+    if not _airsim_legacy_coerce_vehicle_rpc_args():
+        return args
+    # Keep movement payloads untouched; legacy forks are sensitive to exact arity.
+    if method in _LEGACY_RPC_MOVEMENT_BYPASS_METHODS:
+        return args
+    dv = _airsim_legacy_default_vehicle()
+
+    def _is_empty_vehicle_slot(v: object) -> bool:
+        if v is None:
+            return True
+        if isinstance(v, str) and not v.strip():
+            return True
+        return False
+
+    if not args:
+        return args
+    if method in _LEGACY_RPC_TRAILING_VEHICLE_METHODS and _is_empty_vehicle_slot(args[-1]):
+        return (*args[:-1], dv)
+    # enableApiControl / armDisarm: some callers pass only the bool; ensure two args.
+    if method == "enableApiControl" and len(args) == 1 and isinstance(args[0], bool):
+        return (args[0], dv)
+    if method == "armDisarm" and len(args) == 1 and isinstance(args[0], bool):
+        return (args[0], dv)
+    return args
+
+
+class _LegacyVehicleRpcShim:
+    __slots__ = ("_inner",)
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def call(self, method, *args):
+        args = _maybe_coerce_legacy_vehicle_rpc_args(method, args)
+        return self._inner.call(method, *args)
+
+    def call_async(self, method, *args):
+        args = _maybe_coerce_legacy_vehicle_rpc_args(method, args)
+        return self._inner.call_async(method, *args)
+
+    def close(self):
+        return self._inner.close()
+
 
 class VehicleClient:
     def __init__(self, ip="", port=41451, timeout_value=3600):
         if ip == "":
             ip = "127.0.0.1"
-        self.client = msgpackrpc.Client(
+        rpc = msgpackrpc.Client(
             msgpackrpc.Address(ip, port),
             timeout=timeout_value,
             pack_encoding="utf-8",
             unpack_encoding="utf-8",
         )
+        if _airsim_legacy_coerce_vehicle_rpc_args():
+            rpc = _LegacyVehicleRpcShim(rpc)
+        self.client = rpc
 
     # ----------------------------------- Common vehicle APIs -----------------------------------
     def reset(self):
@@ -172,10 +321,24 @@ class VehicleClient:
             print("Connected!")
         else:
             print("Ping returned false!")
-        server_ver = self.getServerVersion()
+        try:
+            server_ver = self.getServerVersion()
+        except Exception as exc:
+            print(
+                "AirSim: getServerVersion is unavailable on this simulator "
+                f"({type(exc).__name__}: {exc}); assuming a legacy (pre-1.2) RPC server."
+            )
+            server_ver = 1
         client_ver = self.getClientVersion()
         server_min_ver = self.getMinRequiredServerVersion()
-        client_min_ver = self.getMinRequiredClientVersion()
+        try:
+            client_min_ver = self.getMinRequiredClientVersion()
+        except Exception as exc:
+            print(
+                "AirSim: getMinRequiredClientVersion is unavailable "
+                f"({type(exc).__name__}: {exc}); assuming a legacy RPC server."
+            )
+            client_min_ver = 1
 
         ver_info = (
             "Client Ver:"
@@ -982,7 +1145,7 @@ class VehicleClient:
         kinematics_state = self.client.call("simGetGroundTruthKinematics", vehicle_name)
         return KinematicsState.from_msgpack(kinematics_state)
 
-    simGetGroundTruthKinematics.__annotations__ = {"return": KinematicsState}
+    simGetGroundTruthKinematics.__annotations__ = {"return": KinematicsState}  # noqa: RUF012
 
     def simSetKinematics(self, state, ignore_collision, vehicle_name=""):
         """
@@ -1014,7 +1177,7 @@ class VehicleClient:
         env_state = self.client.call("simGetGroundTruthEnvironment", vehicle_name)
         return EnvironmentState.from_msgpack(env_state)
 
-    simGetGroundTruthEnvironment.__annotations__ = {"return": EnvironmentState}
+    simGetGroundTruthEnvironment.__annotations__ = {"return": EnvironmentState}  # noqa: RUF012
 
     # sensor APIs
     def getImuData(self, imu_name="", vehicle_name=""):
@@ -2085,7 +2248,7 @@ class MultirotorClient(VehicleClient):
             vehicle_name (str, optional): Name of the multirotor to send this command to
         """
         self.client.call(
-            "setAngleRateControllerGains", *(angle_rate_gains.to_lists() + (vehicle_name,))
+            "setAngleRateControllerGains", *(*angle_rate_gains.to_lists(), vehicle_name)
         )
 
     def setAngleLevelControllerGains(
@@ -2111,7 +2274,7 @@ class MultirotorClient(VehicleClient):
             vehicle_name (str, optional): Name of the multirotor to send this command to
         """
         self.client.call(
-            "setAngleLevelControllerGains", *(angle_level_gains.to_lists() + (vehicle_name,))
+            "setAngleLevelControllerGains", *(*angle_level_gains.to_lists(), vehicle_name)
         )
 
     def setVelocityControllerGains(self, velocity_gains=VelocityControllerGains(), vehicle_name=""):
@@ -2134,7 +2297,7 @@ class MultirotorClient(VehicleClient):
             vehicle_name (str, optional): Name of the multirotor to send this command to
         """
         self.client.call(
-            "setVelocityControllerGains", *(velocity_gains.to_lists() + (vehicle_name,))
+            "setVelocityControllerGains", *(*velocity_gains.to_lists(), vehicle_name)
         )
 
     def setPositionControllerGains(self, position_gains=PositionControllerGains(), vehicle_name=""):
@@ -2150,7 +2313,7 @@ class MultirotorClient(VehicleClient):
             vehicle_name (str, optional): Name of the multirotor to send this command to
         """
         self.client.call(
-            "setPositionControllerGains", *(position_gains.to_lists() + (vehicle_name,))
+            "setPositionControllerGains", *(*position_gains.to_lists(), vehicle_name)
         )
 
     # query vehicle state
@@ -2167,7 +2330,7 @@ class MultirotorClient(VehicleClient):
         """
         return MultirotorState.from_msgpack(self.client.call("getMultirotorState", vehicle_name))
 
-    getMultirotorState.__annotations__ = {"return": MultirotorState}
+    getMultirotorState.__annotations__ = {"return": MultirotorState}  # noqa: RUF012
 
     # query rotor states
     def getRotorStates(self, vehicle_name=""):
@@ -2183,4 +2346,4 @@ class MultirotorClient(VehicleClient):
         """
         return RotorStates.from_msgpack(self.client.call("getRotorStates", vehicle_name))
 
-    getRotorStates.__annotations__ = {"return": RotorStates}
+    getRotorStates.__annotations__ = {"return": RotorStates}  # noqa: RUF012

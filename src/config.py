@@ -48,10 +48,13 @@ def _normalize_test_profile_overlay(tp: dict[str, Any]) -> dict[str, Any]:
         "host",
         "project_path",
         "colosseum_path",
+        "maze_colosseum_path",
+        "maze_project_path",
         "windowed",
         "res_x",
         "res_y",
         "rpc_ready_timeout_seconds",
+        "maze_rpc_ready_timeout_seconds",
     }
     sim_patch: dict[str, Any] = {}
     for key in list(patch.keys()):
