@@ -39,6 +39,14 @@ To launch the **AirsimSimulation** maze (UE 4.16 project with `MapMaze`) while k
 uv run sim maze
 ```
 
+To quickly test different algorithms in maze mode without editing `sim.config.json`, set:
+
+```bash
+$env:AIGP_MAZE_ALGORITHM="maze_straight_collision"  # maze-specific override
+# or
+$env:AIGP_ALGORITHM="attitude_four_motion"          # global override (wins in all modes)
+```
+
 Equivalent dedicated entrypoint:
 
 ```bash

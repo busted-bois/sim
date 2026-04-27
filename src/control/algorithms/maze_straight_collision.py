@@ -4,6 +4,7 @@ import sys
 import time
 
 from src.control.algorithms import Algorithm, register
+from src.control.maze_runtime import move_planar, takeoff_with_retries
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -41,20 +42,13 @@ class MazeStraightCollision(Algorithm):
             backend = client.movement_backend()
             print(f"[maze_straight_collision] movement_backend={backend}")
 
-        takeoff_attempts = 4
-        for attempt in range(1, takeoff_attempts + 1):
-            try:
-                client.takeoffAsync(timeout_sec=takeoff_timeout_sec).join()
-                break
-            except Exception as exc:
-                if attempt == takeoff_attempts:
-                    raise
-                print(
-                    f"[maze_straight_collision] takeoff attempt {attempt}/{takeoff_attempts} "
-                    f"failed ({type(exc).__name__}: {exc}); retrying...",
-                    file=sys.stderr,
-                )
-                time.sleep(1.5 * attempt)
+        takeoff_with_retries(
+            client,
+            timeout_sec=takeoff_timeout_sec,
+            attempts=4,
+            retry_backoff_s=1.5,
+            log_prefix="maze_straight_collision",
+        )
 
         fwd_vx, fwd_vy, direction_label = self._probe_forward_direction(
             client=client, speed_ms=speed_ms, probe_duration_s=probe_duration_s
@@ -73,9 +67,7 @@ class MazeStraightCollision(Algorithm):
         prev_y = float(prev_state.position.y_val)
         while time.perf_counter() - started_s < max_flight_s:
             steps += 1
-            self._move_planar(
-                client, vx=fwd_vx, vy=fwd_vy, duration=command_chunk_s, z_ref=target_z
-            )
+            move_planar(client, vx=fwd_vx, vy=fwd_vy, duration=command_chunk_s, z_ref=target_z)
 
             collision = None
             if collision_rpc_available:
@@ -152,7 +144,7 @@ class MazeStraightCollision(Algorithm):
 
         for label, vx, vy in probes:
             try:
-                self._move_planar(client, vx=vx, vy=vy, duration=probe_duration_s, z_ref=None)
+                move_planar(client, vx=vx, vy=vy, duration=probe_duration_s, z_ref=None)
                 state = client.getMultirotorState().kinematics_estimated
                 dx = float(state.position.x_val) - x0
                 dy = float(state.position.y_val) - y0
@@ -181,10 +173,3 @@ class MazeStraightCollision(Algorithm):
             return speed_ms, 0.0, "+X(default)"
         return best[1], best[2], best[0]
 
-    @staticmethod
-    def _move_planar(client, *, vx: float, vy: float, duration: float, z_ref: float | None) -> None:
-        move_planar = getattr(client, "movePlanarAsync", None)
-        if callable(move_planar):
-            move_planar(vx, vy, duration, z_ref).join()
-            return
-        client.moveByVelocityAsync(vx, vy, 0.0, duration).join()
