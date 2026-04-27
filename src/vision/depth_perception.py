@@ -39,10 +39,16 @@ class DepthEstimator:
             return False
             
         try:
+            print(f"[depth] Loading ONNX model from {self.model_path}...")
+            # Use a slightly different approach for loading if possible, 
+            # or just add prints around the potentially blocking call.
             self.net = cv2.dnn.readNetFromONNX(str(self.model_path))
+            print("[depth] ONNX model loaded into memory.")
+            
             # Set preferable backend and target to CPU (default)
             self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
             self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+            print("[depth] DNN backend/target set to CPU.")
             return True
         except Exception as e:
             print(f"[depth] Failed to load model: {e}")
