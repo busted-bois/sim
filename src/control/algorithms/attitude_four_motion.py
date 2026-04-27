@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import sys
 import time
 from pathlib import Path
 
 from src.control.algorithms import Algorithm, register
+from src.control.maze_runtime import is_maze_mode, takeoff_with_retries
 from src.vision.frame_metrics import mean_rgb_summary
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -60,7 +60,7 @@ class AttitudeFourMotion(Algorithm):
         yaw_deg = 0.0
         roll_sign = 1.0
         pitch_sign = 1.0
-        maze_velocity_control = os.environ.get("AIGP_MAZE", "").strip() == "1"
+        maze_velocity_control = is_maze_mode()
 
         state = client.getMultirotorState().kinematics_estimated
         current_z = float(state.position.z_val)
@@ -227,21 +227,14 @@ class AttitudeFourMotion(Algorithm):
         # AirSim's RPC port opens before SimpleFlight's vehicle physics finishes
         # warming up; an early takeoff can come back with a server-side error on
         # the first try. Retry a few times with backoff before giving up.
-        takeoff_attempts = 4
-        takeoff_timeout_sec = 60.0 if os.environ.get("AIGP_MAZE", "").strip() == "1" else 20.0
-        for attempt in range(1, takeoff_attempts + 1):
-            try:
-                client.takeoffAsync(timeout_sec=takeoff_timeout_sec).join()
-                break
-            except Exception as exc:
-                if attempt == takeoff_attempts:
-                    raise
-                print(
-                    f"[attitude_four_motion] takeoff attempt {attempt}/{takeoff_attempts} "
-                    f"failed ({type(exc).__name__}: {exc}); retrying...",
-                    file=sys.stderr,
-                )
-                time.sleep(1.5 * attempt)
+        takeoff_timeout_sec = 60.0 if is_maze_mode() else 20.0
+        takeoff_with_retries(
+            client,
+            timeout_sec=takeoff_timeout_sec,
+            attempts=4,
+            retry_backoff_s=1.5,
+            log_prefix="attitude_four_motion",
+        )
         takeoff_wall_s = time.perf_counter() - takeoff_t0
         takeoff_min_wall_s = 2.0
         takeoff_short = takeoff_min_wall_s - takeoff_wall_s

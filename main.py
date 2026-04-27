@@ -16,6 +16,7 @@ from src.airsim_maze_flight import (
 )
 from src.config import load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm
+from src.control.maze_runtime import choose_algorithm_name, is_maze_mode
 from src.landing_telemetry import LandingTelemetrySampler
 from src.vision import VisionFeed
 
@@ -58,7 +59,7 @@ def _set_front_camera_pose(client: airsim.MultirotorClient, config: dict) -> Non
         airsim.Quaternionr(0.0, 0.0, 0.0, 1.0),
     )
     vehicle_name = ""
-    if os.environ.get("AIGP_MAZE", "").strip() == "1":
+    if is_maze_mode():
         vehicle_name = (
             os.environ.get("AIGP_AIRSIM_VEHICLE_NAME", "SimpleFlight").strip() or "SimpleFlight"
         )
@@ -83,7 +84,7 @@ def _apply_trace_style(client: airsim.MultirotorClient, config: dict) -> None:
     thickness = max(1.0, float(trace_cfg.get("thickness", 4.0)))
 
     vehicle_name = str(trace_cfg.get("vehicle_name", "")).strip()
-    if os.environ.get("AIGP_MAZE", "").strip() == "1" and not vehicle_name:
+    if is_maze_mode() and not vehicle_name:
         vehicle_name = (
             os.environ.get("AIGP_AIRSIM_VEHICLE_NAME", "SimpleFlight").strip() or "SimpleFlight"
         )
@@ -134,7 +135,7 @@ def _apply_low_end_overrides(config: dict) -> None:
 def _resolve_landing_cfg(config: dict) -> dict:
     """Base landing config, with optional maze-specific overrides when AIGP_MAZE=1."""
     base = dict(config.get("landing", {}))
-    if os.environ.get("AIGP_MAZE", "").strip() != "1":
+    if not is_maze_mode():
         return base
     maze = base.get("maze")
     if not isinstance(maze, dict):
@@ -274,9 +275,7 @@ def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
             )
             if sampler:
                 sampler.set_command(f"move_by_velocity vz_ms={descent_speed_ms:.3f}")
-            if os.environ.get("AIGP_MAZE", "").strip() == "1" and hasattr(
-                client, "moveByVelocityZAsync"
-            ):
+            if is_maze_mode() and hasattr(client, "moveByVelocityZAsync"):
                 target_z = -final_land_altitude_m
                 client.moveByVelocityZAsync(0.0, 0.0, target_z, descent_duration_s).join()
             else:
@@ -333,13 +332,11 @@ def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
 def main() -> None:
     config = load_config()
     _apply_low_end_overrides(config)
-    maze_mode = os.environ.get("AIGP_MAZE", "").strip() == "1"
+    maze_mode = is_maze_mode()
     if maze_mode:
         config.setdefault("vision", {})["enabled"] = False
-        maze_algo = str(config.get("maze_algorithm", "maze_straight_collision")).strip()
-        if maze_algo:
-            config["algorithm"] = maze_algo
         print("Maze mode (AIGP_MAZE=1): vision disabled for AirSim 1.x / UE 4.16 compatibility.")
+    config["algorithm"] = choose_algorithm_name(config)
     sim_cfg = config["simulator"]
     host, port = simulator_endpoint(config)
     profile = os.environ.get("AIGP_PROFILE", "").strip()
@@ -373,7 +370,7 @@ def main() -> None:
 
         try:
             vision_feed.start()
-            algo_name = config.get("algorithm", "six_directions")
+            algo_name = choose_algorithm_name(config)
             algo = get_algorithm(algo_name, config)
             algo.set_vision_feed(vision_feed if vision_feed.enabled else None)
             safety_cfg = config.get("safety", {})
