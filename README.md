@@ -7,6 +7,15 @@ Autonomous drone navigating the Colosseum (UE5/AirSim) simulator for the [AI Gra
 **Prerequisites:** Python 3.10+, [uv](https://docs.astral.sh/uv/)
 
 See `How to Launch Drone on Unreal Engine 5.4` for the full step-by-step startup flow.
+For migrating the maze maps from AirsimSimulation, see `docs/AIRSIM_MAP_MIGRATION.md`.
+
+**One-shot maze deploy (clone repo + patch `sim.config.json`):**
+
+```bash
+powershell -ExecutionPolicy Bypass -File ".\scripts\deploy_maze_sim.ps1"
+```
+
+If UE 4.16 is under a non-default folder, set `EPIC_GAMES_PATH` and re-run the script, or edit `simulator.maze_colosseum_path` in `sim.config.json`. UE 4.x may use **`UE4Editor.exe`** instead of `UnrealEditor.exe`; the launcher accepts either under `Engine\\Binaries\\Win64\\`.
 
 For a quick return run after setup:
 
@@ -19,6 +28,26 @@ For smoother flight on lower-end laptops (reduced telemetry/logging):
 ```bash
 uv run sim low-end
 ```
+
+To launch the **AirsimSimulation** maze (UE 4.16 project with `MapMaze`) while keeping the same flight algorithm, set paths then run:
+
+1. Clone the maze repo (if needed): `powershell -ExecutionPolicy Bypass -File ".\scripts\extract_airsim_maps.ps1"`
+2. In `sim.config.json`, optionally set `simulator.maze_colosseum_path` to your **UE 4.16** `UnrealEditor.exe`. If unset, `uv run sim maze` tries Epic’s default folders (`UE_4.16`, or any engine folder whose name contains `4.16`). Optionally set `simulator.maze_project_path` to `VehilceAdvanced.uproject`; if empty, the launcher uses `opensrc/AirsimSimulation/VehilceAdvanced.uproject` when that file exists.
+3. Or use env vars (override config): `MAZE_COLLOSSEUM_PATH`, `MAZE_PROJECT_PATH`. You can also set `EPIC_GAMES_PATH` if games are installed outside `C:\\Program Files\\Epic Games`.
+
+```bash
+uv run sim maze
+```
+
+Equivalent dedicated entrypoint:
+
+```bash
+uv run sim-maze
+```
+
+`uv run sim` (without `maze`) still uses `simulator.colosseum_path` and `PROJECT_PATH` for Colosseum / BlocksV2.
+
+`uv run sim maze` **only** starts UE **4.16** + `VehilceAdvanced.uproject` (repo path in `simulator.maze_project_path` by default). It does **not** use `PROJECT_PATH` or `simulator.colosseum_path` for the simulator process.
 
 To run with the old third-person chase camera:
 
@@ -71,6 +100,10 @@ From a fresh Cursor session, use this exact sequence.
      ```bash
      uv run preflight
      ```
+   - For maze mode readiness checks (UE 4.16 editor + maze `.uproject`):
+     ```bash
+     uv run preflight maze
+     ```
 
 8. **Optional gentler landing profile (new)**
    - Run:
@@ -92,14 +125,22 @@ From a fresh Cursor session, use this exact sequence.
      ```
    - This keeps the old third-person (`FlyWithMe`) viewport mode while still running the same drone stack.
 
-11. **Manual mode (if you start simulator yourself)**
+11. **Optional maze launch mode (new)**
+   - Configure `simulator.maze_colosseum_path` (UE 4.16 editor) and optionally `simulator.maze_project_path` (see Quick Start above).
+   - Run:
+     ```bash
+     uv run sim maze
+     ```
+   - Launches the maze `.uproject` with `-map=/Game/MazeCreator/Maps/MapMaze` when the map files exist on disk. AirSim in that repo is older than the Colosseum stack; if RPC or `takeoff` errors appear, treat that as an AirSim version mismatch, not a launcher bug.
+
+12. **Manual mode (if you start simulator yourself)**
    - Start your AirSim/Unreal environment first and wait until loaded.
    - Then run only the drone controller:
      ```bash
      uv run main.py
      ```
 
-12. **Confirm successful start in terminal output**
+13. **Confirm successful start in terminal output**
     - Look for:
       - `Connected!`
       - `Algorithm: attitude_four_motion`
@@ -175,6 +216,8 @@ class MyAlgo(Algorithm):
 | `safety`    | Algorithm timeout / failsafe                                       |
 
 **`.env.local`** — `PROJECT_PATH` pointing to your UE5 Colosseum project.
+
+Within `simulator`, normal launch uses `colosseum_path` and optional `project_path`. For `uv run sim maze`, set `maze_colosseum_path` (UE 4.16 `UnrealEditor.exe`) and optionally `maze_project_path`; overrides: `MAZE_COLLOSSEUM_PATH`, `MAZE_PROJECT_PATH`.
 
 **Coordinate frame:** NED (North-East-Down). Negative z = above ground. Drone at 5m altitude → `z = -5.0`.
 
