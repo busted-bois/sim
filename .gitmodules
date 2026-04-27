@@ -1,0 +1,3 @@
+[submodule "simple_airsim"]
+	path = simple_airsim
+	url = https://github.com/AI-Grand-Prix/simple_airsim.git
