@@ -47,7 +47,7 @@ uv run sim-maze
 
 `uv run sim` (without `maze`) still uses `simulator.colosseum_path` and `PROJECT_PATH` for Colosseum / BlocksV2.
 
-`uv run sim maze` **only** starts UE **4.16** + `VehilceAdvanced.uproject` (repo path in `simulator.maze_project_path` by default). It does **not** use `PROJECT_PATH` or `simulator.colosseum_path` for the simulator process.
+`uv run sim maze` **only** starts UE **4.16** + the maze `.uproject` (default `opensrc/AirsimSimulation/VehilceAdvanced.uproject`). Project path resolution order is: `MAZE_PROJECT_PATH` -> `simulator.maze_project_path` -> `PROJECT_PATH` -> default under `opensrc/`. It still does **not** use `simulator.colosseum_path` for the simulator process.
 
 To run with the old third-person chase camera:
 
