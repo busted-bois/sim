@@ -27,6 +27,7 @@ manual = [
 sim = "src.sim_launch:main"
 sim-very-soft = "src.sim_launch:main_very_soft"
 sim-low-end = "src.sim_launch:main_low_end"
+calibrate = "src.sim_launch:main_calibrate"
 preflight = "src.preflight:main"
 
 [dependency-groups]
