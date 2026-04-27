@@ -89,7 +89,12 @@ def _normalize_view_mode(view_mode: str) -> str:
 
 
 def _ensure_camera_settings(
-    airsim_port: int, view_mode: str, *, corner_chase_pip: bool, enable_trace: bool
+    airsim_port: int,
+    view_mode: str,
+    *,
+    corner_chase_pip: bool,
+    enable_trace: bool,
+    use_vjoy: bool = False,
 ) -> None:
     settings_path = _airsim_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +135,10 @@ def _ensure_camera_settings(
             ]
         },
     }
+    if use_vjoy:
+        required_settings["Usage"] = "vJoy"
+        print("[launcher] AirSim configured for vJoy manual control.")
+
     if corner_chase_pip:
         # Use forward camera for PiP; "Chase" crashes on some builds.
         required_settings["SubWindows"] = [
@@ -273,6 +282,8 @@ def launch(
     enable_trace: bool = False,
     manual_gui: bool = False,
     manual_debug: bool = False,
+    use_vjoy: bool = False,
+    script_path: str = "main.py",
 ) -> None:
     _register_signal_handlers_once()
     _handles.ue = None
@@ -305,6 +316,7 @@ def launch(
         view_mode,
         corner_chase_pip=corner_chase_pip,
         enable_trace=enable_trace,
+        use_vjoy=use_vjoy,
     )
 
     if colosseum and Path(colosseum).exists():
@@ -392,12 +404,9 @@ def launch(
         print(f"Starting manual_flight_gui.py ({' '.join(gui_cmd[2:])})...")
         _handles.main = subprocess.Popen(gui_cmd, env=env)
     else:
-        print("Starting main.py...")
-        # Do not use CREATE_NEW_PROCESS_GROUP for main.py on Windows: it correlated with the
-        # child exiting almost immediately while the launcher kept running; Ctrl+C still goes
-        # to the launcher first in typical Cursor/terminal setups.
+        print(f"Starting {script_path}...")
         _handles.main = subprocess.Popen(
-            [sys.executable, str(ROOT / "main.py")],
+            [sys.executable, str(ROOT / script_path)],
             env=env,
         )
     try:
@@ -409,13 +418,13 @@ def launch(
         _handles.main = None
     if rc == 0:
         print(
-            "main.py exited successfully. If this launcher started Unreal/Colosseum, "
+            f"{script_path} exited successfully. If this launcher started Unreal/Colosseum, "
             "that process may still be running — close it from the editor or Task Manager "
             "if needed.",
             file=sys.stderr,
         )
     else:
-        print(f"main.py exited with code {rc}. See logs above.", file=sys.stderr)
+        print(f"{script_path} exited with code {rc}. See logs above.", file=sys.stderr)
     raise SystemExit(rc)
 
 
@@ -439,6 +448,10 @@ def main() -> None:
         manual_gui=manual_gui,
         manual_debug=manual_debug,
     )
+
+
+def main_calibrate() -> None:
+    launch(view_mode="FlyWithMe", use_vjoy=True, script_path="scripts/calibrate_depth.py")
 
 
 def main_very_soft() -> None:
