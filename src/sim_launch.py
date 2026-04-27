@@ -388,10 +388,18 @@ def _try_maze_uproject(raw: str) -> Path | None:
 
 
 def _resolve_maze_uproject_path(sim_cfg: dict) -> str:
-    """Maze-only .uproject: env > config (abs or repo-relative) > default under opensrc/."""
+    """Resolve maze .uproject with env/config/default fallbacks.
+
+    Priority:
+    1) MAZE_PROJECT_PATH
+    2) simulator.maze_project_path
+    3) PROJECT_PATH (for teams reusing .env.local across modes)
+    4) opensrc/AirsimSimulation/VehilceAdvanced.uproject
+    """
     for raw in (
         os.environ.get("MAZE_PROJECT_PATH", "").strip(),
         str(sim_cfg.get("maze_project_path", "")).strip(),
+        os.environ.get("PROJECT_PATH", "").strip(),
     ):
         got = _try_maze_uproject(raw) if raw else None
         if got is not None:
@@ -519,8 +527,9 @@ def _resolve_ue_and_project(sim_cfg: dict, *, maze_mode: bool) -> tuple[str, str
             "uv run sim maze could not find VehilceAdvanced.uproject.\n"
             "Run:\n"
             '  powershell -ExecutionPolicy Bypass -File ".\\scripts\\extract_airsim_maps.ps1"\n'
-            "Or set MAZE_PROJECT_PATH / simulator.maze_project_path (absolute path, or path "
-            "relative to this repo, e.g. opensrc/AirsimSimulation/VehilceAdvanced.uproject).\n"
+            "Or set MAZE_PROJECT_PATH / simulator.maze_project_path / PROJECT_PATH "
+            "(e.g. in .env.local), as an absolute path or a path relative to this repo, "
+            "such as opensrc/AirsimSimulation/VehilceAdvanced.uproject.\n"
             f"Default location checked: {_default_maze_uproject()}"
         )
 
