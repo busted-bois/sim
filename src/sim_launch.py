@@ -391,31 +391,36 @@ def launch(
     if enable_trace:
         env["AIGP_ENABLE_TRACE"] = "1"
 
+    # Start the secondary process (GUI) if requested
+    gui_proc = None
     if manual_gui:
         gui_path = ROOT / "manual_flight_gui.py"
         if not gui_path.is_file():
-            raise SystemExit(
-                f"Manual flight GUI not found at {gui_path}. "
-                "Run: git submodule update --init simple_airsim"
-            )
-        gui_cmd = [sys.executable, str(gui_path), "--vjoy"]
-        if manual_debug:
-            gui_cmd.append("--debug")
-        print(f"Starting manual_flight_gui.py ({' '.join(gui_cmd[2:])})...")
-        _handles.main = subprocess.Popen(gui_cmd, env=env)
-    else:
-        print(f"Starting {script_path}...")
-        _handles.main = subprocess.Popen(
-            [sys.executable, str(ROOT / script_path)],
-            env=env,
-        )
+            print(f"Warning: Manual flight GUI not found at {gui_path}. Skipping.")
+        else:
+            gui_cmd = [sys.executable, str(gui_path), "--vjoy"]
+            if manual_debug:
+                gui_cmd.append("--debug")
+            print(f"Starting manual_flight_gui.py ({' '.join(gui_cmd[2:])})...")
+            gui_proc = subprocess.Popen(gui_cmd, env=env)
+
+    # Start the primary script
+    print(f"Starting {script_path}...")
+    _handles.main = subprocess.Popen(
+        [sys.executable, str(ROOT / script_path)],
+        env=env,
+    )
+    
     try:
         rc = _handles.main.wait()
     except KeyboardInterrupt:
         _cleanup_on_interrupt()
         raise SystemExit(130) from None
     finally:
+        if gui_proc and gui_proc.poll() is None:
+            gui_proc.terminate()
         _handles.main = None
+
     if rc == 0:
         print(
             f"{script_path} exited successfully. If this launcher started Unreal/Colosseum, "
@@ -451,7 +456,13 @@ def main() -> None:
 
 
 def main_calibrate() -> None:
-    launch(view_mode="FlyWithMe", use_vjoy=True, script_path="scripts/calibrate_depth.py")
+    # Calibration command always includes manual control GUI for ease of use
+    launch(
+        view_mode="FlyWithMe", 
+        use_vjoy=True, 
+        manual_gui=True, 
+        script_path="scripts/calibrate_depth.py"
+    )
 
 
 def main_very_soft() -> None:
