@@ -33,7 +33,7 @@ class SixDirections(Algorithm):
             try:
                 client.takeoffAsync().join()
                 break
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 if attempt == takeoff_attempts:
                     raise
                 print(
