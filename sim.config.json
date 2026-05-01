@@ -95,7 +95,14 @@
     "brake_norm_thresh": 0.70,
     "creep_norm_thresh": 0.30,
     "hold_altitude_m": 5.0,
-    "face_forward_on_start": true
+    "face_forward_on_start": true,
+    "pursue_targets": true,
+    "pursue_blue_rings": true,
+    "pursue_red_targets": true,
+    "target_yaw_gain_deg_s": 50.0,
+    "target_approach_speed_ms": 2.0,
+    "target_arrival_r_frac": 0.20,
+    "target_min_r_frac": 0.02
   },
   "vision_guided_control": {
     "detector": "red_circle",

@@ -108,6 +108,17 @@ def _ensure_camera_settings(
 
     vehicles = settings.get("Vehicles")
     if isinstance(vehicles, dict):
+        # Drop any vehicle that isn't "Drone1" — AirSim spawns one drone per
+        # entry, so a stray "SimpleFlight" / "Drone2" / etc. causes duplicate
+        # drones to appear stacked at spawn. Drone1 is the only name the rest
+        # of this codebase uses.
+        for stray in [name for name in vehicles.keys() if name != "Drone1"]:
+            vehicles.pop(stray, None)
+            print(
+                f"[launcher] Removed stray vehicle '{stray}' from settings "
+                "to prevent duplicate spawn."
+            )
+
         drone1 = vehicles.get("Drone1")
         if isinstance(drone1, dict):
             keys = set(drone1.keys())

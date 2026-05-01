@@ -32,8 +32,13 @@ import time
 import numpy as np
 
 import airsim
+from msgpackrpc.error import RPCError
 from src.control.algorithms import Algorithm, register
-from src.vision.processing import get_depth_info
+from src.vision.processing import (
+    blue_ring_info_normalized,
+    get_depth_info,
+    red_target_info_normalized,
+)
 
 
 def _yaw_from_orientation(orientation) -> float:
@@ -80,6 +85,16 @@ class AutonomousExplore(Algorithm):
         z_hold = -hold_altitude_m  # NED: above ground = negative z
         face_forward_on_start = bool(cfg.get("face_forward_on_start", True))
 
+        pursue_targets = bool(cfg.get("pursue_targets", True))
+        pursue_blue_rings = bool(cfg.get("pursue_blue_rings", True))
+        pursue_red_targets = bool(cfg.get("pursue_red_targets", True))
+        target_yaw_gain_deg_s = _clamp(float(cfg.get("target_yaw_gain_deg_s", 50.0)), 5.0, 120.0)
+        target_approach_speed_ms = _clamp(
+            float(cfg.get("target_approach_speed_ms", 2.0)), 0.0, max_v
+        )
+        target_arrival_r_frac = _clamp(float(cfg.get("target_arrival_r_frac", 0.20)), 0.05, 0.95)
+        target_min_r_frac = _clamp(float(cfg.get("target_min_r_frac", 0.02)), 0.005, 0.5)
+
         dt = 1.0 / rate_hz
         center_idx = (n_cols - 1) / 2.0
 
@@ -90,7 +105,41 @@ class AutonomousExplore(Algorithm):
             f"inverse_depth={inverse_depth}"
         )
 
-        client.takeoffAsync().join()
+        # Retry takeoff if AirSim rejects with "already moving" — residual
+        # velocity from a prior session can bleed into the first attempt even
+        # after main.py's reset+settle.
+        for attempt in range(1, 5):
+            try:
+                client.takeoffAsync().join()
+                break
+            except RPCError as exc:
+                if "already moving" not in str(exc).lower() or attempt == 4:
+                    raise
+                print(
+                    f"[autonomous_explore] takeoff rejected ({exc}); "
+                    f"settling and retrying ({attempt}/4)..."
+                )
+                try:
+                    client.cancelLastTask()
+                    client.moveByVelocityAsync(0.0, 0.0, 0.0, 0.4).join()
+                    client.armDisarm(False)
+                    time.sleep(0.3)
+                    client.armDisarm(True)
+                except Exception:
+                    pass
+                # Wait for velocity to drop below the AirSim threshold.
+                t_settle = time.monotonic()
+                while time.monotonic() - t_settle < 6.0:
+                    try:
+                        v = client.getMultirotorState().kinematics_estimated.linear_velocity
+                        speed = (
+                            float(v.x_val) ** 2 + float(v.y_val) ** 2 + float(v.z_val) ** 2
+                        ) ** 0.5
+                    except Exception:
+                        speed = float("inf")
+                    if speed < 0.03:
+                        break
+                    time.sleep(0.1)
         print("[autonomous_explore] takeoff complete")
         if face_forward_on_start:
             print("[autonomous_explore] rotating 180 degrees to face forward...")
@@ -127,6 +176,50 @@ class AutonomousExplore(Algorithm):
             )
             cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
             vz = vz_trim()
+
+            # Target pursuit overrides depth-based wander whenever a blue ring
+            # or red circle is in view. Blue takes priority — rings are gates
+            # to fly through, red is a static target.
+            target_info: tuple[str, float, float, float] | None = None
+            if pursue_targets and frame is not None:
+                blue = blue_ring_info_normalized(frame) if pursue_blue_rings else None
+                red = red_target_info_normalized(frame) if pursue_red_targets else None
+                if blue is not None and blue[2] >= target_min_r_frac:
+                    target_info = ("blue_ring", *blue)
+                elif red is not None and red[2] >= target_min_r_frac:
+                    target_info = ("red_target", *red)
+
+            if target_info is not None:
+                kind, nx, ny, r_frac = target_info
+                if r_frac >= target_arrival_r_frac:
+                    print(
+                        f"[autonomous_explore] {kind} arrived "
+                        f"r_frac={r_frac:.2f} >= {target_arrival_r_frac:.2f}; hover"
+                    )
+                    client.hoverAsync().join()
+                    break
+                alignment = max(0.0, 1.0 - abs(nx))
+                fwd_speed = _clamp(
+                    target_approach_speed_ms * (0.35 + 0.65 * alignment), 0.0, max_v
+                )
+                yaw_rate = _clamp(target_yaw_gain_deg_s * nx, -120.0, 120.0)
+                vx_world = fwd_speed * cos_y
+                vy_world = fwd_speed * sin_y
+                client.moveByVelocityAsync(
+                    vx_world,
+                    vy_world,
+                    vz,
+                    dt,
+                    yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
+                ).join()
+                if steps % max(1, int(rate_hz)) == 0:
+                    print(
+                        f"[autonomous_explore] pursue {kind} nx={nx:+.2f} ny={ny:+.2f} "
+                        f"r_frac={r_frac:.2f} fwd={fwd_speed:.2f} yaw_rate={yaw_rate:+.1f}"
+                    )
+                steps += 1
+                self._sleep_remaining(tick_start, dt)
+                continue
 
             if depth_map is None:
                 no_frame_streak += 1
