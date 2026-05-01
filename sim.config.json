@@ -1,5 +1,5 @@
 {
-  "algorithm": "vision_guided_control",
+  "algorithm": "autonomous_explore",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -79,6 +79,23 @@
     "segment_duration_s": 3.0,
     "calibration_move_s": 0.8,
     "stabilize_s": 2.5
+  },
+  "autonomous_explore": {
+    "max_speed_ms": 2.5,
+    "cruise_speed_ms": 1.5,
+    "rate_hz": 6.0,
+    "duration_s": 60.0,
+    "num_columns": 5,
+    "eye_band_top_frac": 0.30,
+    "eye_band_bottom_frac": 0.75,
+    "clearance_percentile": 70.0,
+    "inverse_depth": true,
+    "uniform_range_thresh": 5.0,
+    "yaw_gain_deg_s": 35.0,
+    "brake_norm_thresh": 0.70,
+    "creep_norm_thresh": 0.30,
+    "hold_altitude_m": 5.0,
+    "face_forward_on_start": true
   },
   "vision_guided_control": {
     "detector": "red_circle",
