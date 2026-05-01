@@ -1,21 +1,21 @@
 import cv2
 import numpy as np
 
-from src.vision.feed import VisionFrame
 from src.vision.depth_perception import DepthEstimator
+from src.vision.feed import VisionFrame
 
-# Global or instance-based estimator could be used. 
+# Global or instance-based estimator could be used.
 # For simplicity in this module, we provide a helper.
 _depth_estimator = None
 
-def get_depth_info(frame: VisionFrame, model_path: str = None) -> np.ndarray | None:
+def get_depth_info(frame: VisionFrame, model_path: str | None = None) -> np.ndarray | None:
     """
     Computes depth map for the given frame.
     """
     global _depth_estimator
     if _depth_estimator is None:
         _depth_estimator = DepthEstimator(model_path)
-    
+
     return _depth_estimator.get_metric_depth(frame)
 
 
@@ -65,6 +65,53 @@ def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:
         circles = np.round(circles[0, :]).astype("int")
         return [(x, y, r) for x, y, r in circles]
     return []
+
+
+def find_blue_rings(frame: VisionFrame) -> list[tuple[int, int, int]]:
+    """Find blue circular shapes (rings or disks) in the frame.
+
+    HSV blue is one contiguous hue range (unlike red which wraps), so a single
+    inRange covers it. HoughCircles fires on the circular edge, which works
+    for both hollow rings and solid blue disks.
+    """
+    hsv = cv2.cvtColor(frame.image_rgb, cv2.COLOR_RGB2HSV)
+    lower_blue = np.array([95, 110, 60])
+    upper_blue = np.array([130, 255, 255])
+    mask = cv2.inRange(hsv, lower_blue, upper_blue)
+
+    mask = cv2.erode(mask, None, iterations=1)
+    mask = cv2.dilate(mask, None, iterations=2)
+
+    circles = cv2.HoughCircles(
+        mask,
+        cv2.HOUGH_GRADIENT,
+        dp=1,
+        minDist=15,
+        param1=50,
+        param2=18,
+        minRadius=4,
+        maxRadius=180,
+    )
+
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        return [(x, y, r) for x, y, r in circles]
+    return []
+
+
+def blue_ring_info_normalized(frame: VisionFrame) -> tuple[float, float, float] | None:
+    """Largest blue ring as (nx, ny, r_frac). Same convention as red_target_info_normalized."""
+    circles = find_blue_rings(frame)
+    if not circles:
+        return None
+    x, y, r = max(circles, key=lambda c: c[2])
+    w, h = float(frame.width), float(frame.height)
+    if w <= 0 or h <= 0:
+        return None
+    nx = (x - 0.5 * w) / (0.5 * w)
+    ny = (y - 0.5 * h) / (0.5 * h)
+    r_frac = float(r) / max(1.0, min(w, h))
+    return (float(nx), float(ny), r_frac)
 
 
 def find_large_grey_wall(frame: VisionFrame, threshold: float = 0.95) -> bool:

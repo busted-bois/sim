@@ -194,6 +194,83 @@ def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
             print(f"Landing telemetry saved: {sampler.out_path}")
 
 
+def _wait_until_stationary(
+    client: airsim.MultirotorClient,
+    timeout_s: float = 8.0,
+    velocity_eps_ms: float = 0.05,
+) -> None:
+    """Block until the drone is stationary, so takeoff doesn't get rejected.
+
+    AirSim's takeoff RPC refuses if |velocity| is non-trivial — observed
+    rejection at 0.19 m/s, so the epsilon must be well below that. After
+    client.reset() the drone usually settles within ~0.5s, but a previous run
+    that left residual motion can take several physics steps to bleed off.
+    """
+    deadline = time.monotonic() + timeout_s
+    last_speed = float("inf")
+    consecutive_quiet = 0
+    while time.monotonic() < deadline:
+        try:
+            v = client.getMultirotorState().kinematics_estimated.linear_velocity
+            speed = (float(v.x_val) ** 2 + float(v.y_val) ** 2 + float(v.z_val) ** 2) ** 0.5
+        except Exception:
+            speed = float("inf")
+        last_speed = speed
+        if speed < velocity_eps_ms:
+            consecutive_quiet += 1
+            # Two consecutive quiet samples — guards against catching the
+            # vehicle mid-zero-crossing while it's actually still oscillating.
+            if consecutive_quiet >= 2:
+                return
+        else:
+            consecutive_quiet = 0
+            try:
+                client.cancelLastTask()
+                # Pin to spawn z so residual vertical motion damps fast.
+                client.moveByVelocityAsync(0.0, 0.0, 0.0, 0.2).join()
+            except Exception:
+                pass
+        time.sleep(0.1)
+    print(
+        f"Warning: drone still moving ({last_speed:.2f} m/s) after {timeout_s:.1f}s settle; "
+        "proceeding anyway",
+        file=sys.stderr,
+    )
+
+
+def _takeoff_with_settle(client: airsim.MultirotorClient, max_attempts: int = 4) -> None:
+    """Call takeoffAsync, retrying after a re-settle if AirSim complains about velocity.
+
+    Some maps / physics ticks leave the vehicle just barely moving even after
+    reset() + a stationary wait. AirSim then throws "vehicle is already moving
+    with velocity X m/s" — re-settling and retrying clears this reliably.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            client.takeoffAsync().join()
+            return
+        except RPCError as exc:
+            msg = str(exc).lower()
+            if "already moving" not in msg:
+                raise
+            last_exc = exc
+            print(
+                f"Takeoff attempt {attempt}/{max_attempts} rejected ({exc}); re-settling...",
+                file=sys.stderr,
+            )
+            try:
+                client.cancelLastTask()
+                client.armDisarm(False)
+                time.sleep(0.3)
+                client.armDisarm(True)
+            except Exception:
+                pass
+            _wait_until_stationary(client, timeout_s=6.0, velocity_eps_ms=0.03)
+    if last_exc is not None:
+        raise last_exc
+
+
 def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
     error_holder: dict[str, BaseException] = {}
 
@@ -261,8 +338,17 @@ def main() -> None:
 
     try:
         client.confirmConnection()
+        # Reset first: a previous run that died mid-flight (KeyboardInterrupt,
+        # crash, etc.) leaves the vehicle airborne with residual velocity, and
+        # AirSim will then reject takeoff with "vehicle is already moving".
+        # reset() puts the drone back at spawn, stationary, every time.
+        try:
+            client.reset()
+        except Exception as reset_exc:
+            print(f"Warning: client.reset() failed (continuing): {reset_exc}", file=sys.stderr)
         client.enableApiControl(True)
         client.armDisarm(True)
+        _wait_until_stationary(client)
         _set_front_camera_pose(client, config)
         _apply_trace_style(client, config)
 
