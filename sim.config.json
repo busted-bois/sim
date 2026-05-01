@@ -108,8 +108,13 @@
     "flythrough_duration_s": 2.0,
     "flythrough_speed_ms": 2.5,
     "post_flythrough_blue_cooldown_s": 5.0,
+    "post_flythrough_scan_s": 4.0,
+    "post_flythrough_scan_speed_ms": 1.5,
     "blue_lock_r_frac": 0.08,
-    "blue_lock_timeout_s": 1.5
+    "blue_lock_timeout_s": 1.5,
+    "flythrough_align_max_nx": 0.18,
+    "lineup_yaw_gain_mult": 1.6,
+    "red_only_after_gate": true
   },
   "vision_guided_control": {
     "detector": "red_circle",
