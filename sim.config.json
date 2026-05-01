@@ -1,5 +1,5 @@
 {
-  "algorithm": "vision_guided_control",
+  "algorithm": "scan_and_lock",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -71,6 +71,16 @@
     "segment_duration_s": 3.0,
     "calibration_move_s": 0.8,
     "stabilize_s": 2.5
+  },
+  "scan_and_lock": {
+    "altitude_m": 3.0,
+    "scan_yaw_rate_deg_s": 25.0,
+    "scan_timeout_s": 20.0,
+    "approach_speed_ms": 2.0,
+    "yaw_gain_deg_s": 50.0,
+    "arrival_r_frac": 0.18,
+    "max_approach_s": 10.0,
+    "rate_hz": 12.0
   },
   "vision_guided_control": {
     "detector": "red_circle",
