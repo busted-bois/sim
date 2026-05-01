@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from src.control.algorithms import Algorithm, register
+from src.control.maze_runtime import is_maze_mode, takeoff_with_retries
 from src.vision.frame_metrics import mean_rgb_summary
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -59,6 +60,7 @@ class AttitudeFourMotion(Algorithm):
         yaw_deg = 0.0
         roll_sign = 1.0
         pitch_sign = 1.0
+        maze_velocity_control = is_maze_mode()
 
         state = client.getMultirotorState().kinematics_estimated
         current_z = float(state.position.z_val)
@@ -86,7 +88,17 @@ class AttitudeFourMotion(Algorithm):
             pitch_deg: float,
             yaw_cmd_deg: float,
             throttle: float,
+            *,
+            vx_target: float,
+            vy_target: float,
+            z_ref: float,
+            z_now: float,
         ) -> None:
+            if maze_velocity_control:
+                # UE 4.16 maze forks often don't expose moveByRollPitchYawThrottle; approximate
+                # the same behavior with velocity control in world NED.
+                client.moveByVelocityZAsync(vx_target, vy_target, z_ref, dt).join()
+                return
             client.moveByRollPitchYawThrottleAsync(
                 math.radians(roll_deg),
                 math.radians(pitch_deg),
@@ -132,7 +144,16 @@ class AttitudeFourMotion(Algorithm):
                 roll_cmd = kv_xy * (vy_target - vy)
                 pitch_deg = _clamp(pitch_sign * pitch_cmd, -pitch_max_deg, pitch_max_deg)
                 roll_deg = _clamp(roll_sign * roll_cmd, -roll_max_deg, roll_max_deg)
-                apply_control(roll_deg, pitch_deg, yaw_deg, throttle)
+                apply_control(
+                    roll_deg,
+                    pitch_deg,
+                    yaw_deg,
+                    throttle,
+                    vx_target=vx_target,
+                    vy_target=vy_target,
+                    z_ref=z_ref,
+                    z_now=z,
+                )
 
                 should_log_step = step == 0 or step == steps - 1 or step % log_every_steps == 0
                 if should_log_step and not basic_flight_logs:
@@ -206,20 +227,14 @@ class AttitudeFourMotion(Algorithm):
         # AirSim's RPC port opens before SimpleFlight's vehicle physics finishes
         # warming up; an early takeoff can come back with a server-side error on
         # the first try. Retry a few times with backoff before giving up.
-        takeoff_attempts = 4
-        for attempt in range(1, takeoff_attempts + 1):
-            try:
-                client.takeoffAsync().join()
-                break
-            except Exception as exc:
-                if attempt == takeoff_attempts:
-                    raise
-                print(
-                    f"[attitude_four_motion] takeoff attempt {attempt}/{takeoff_attempts} "
-                    f"failed ({type(exc).__name__}: {exc}); retrying...",
-                    file=sys.stderr,
-                )
-                time.sleep(1.5 * attempt)
+        takeoff_timeout_sec = 60.0 if is_maze_mode() else 20.0
+        takeoff_with_retries(
+            client,
+            timeout_sec=takeoff_timeout_sec,
+            attempts=4,
+            retry_backoff_s=1.5,
+            log_prefix="attitude_four_motion",
+        )
         takeoff_wall_s = time.perf_counter() - takeoff_t0
         takeoff_min_wall_s = 2.0
         takeoff_short = takeoff_min_wall_s - takeoff_wall_s

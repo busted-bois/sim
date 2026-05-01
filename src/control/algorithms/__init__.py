@@ -6,7 +6,7 @@ import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import airsim
+    from src.control.flight_client import FlightClient
     from src.vision import VisionFeed, VisionFrame, VisionStats
 
 _registry: dict[str, type[Algorithm]] = {}
@@ -21,8 +21,8 @@ class Algorithm:
         self._config = config
         self._vision_feed: VisionFeed | None = None
 
-    def run(self, client: airsim.MultirotorClient) -> None:
-        """Execute the algorithm with full control over the AirSim client."""
+    def run(self, client: FlightClient) -> None:
+        """Execute the algorithm with full control over the selected flight client."""
         raise NotImplementedError
 
     def set_vision_feed(self, vision_feed: VisionFeed | None) -> None:
@@ -68,3 +68,14 @@ importlib.import_module("src.control.algorithms.six_directions")
 importlib.import_module("src.control.algorithms.attitude_four_motion")
 importlib.import_module("src.control.algorithms.opencv_landing")
 importlib.import_module("src.control.algorithms.vision_guided_control")
+importlib.import_module("src.control.algorithms.maze_straight_collision")
+
+# Optional algorithms may exist only on branches rebased onto newer main.
+for _optional_module in (
+    "src.control.algorithms.opencv_landing",
+    "src.control.algorithms.vision_guided_control",
+):
+    try:
+        importlib.import_module(_optional_module)
+    except ModuleNotFoundError:
+        continue

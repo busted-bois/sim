@@ -3,13 +3,20 @@ import os
 import sys
 import threading
 import time
-import traceback
 from pathlib import Path
 
 import airsim
 from msgpackrpc.error import RPCError, TransportError
+from src.airsim_maze_flight import (
+    MazeFlightClient,
+    maze_arm_disarm,
+    maze_enable_api_control,
+    resolve_maze_vehicle_name,
+    try_maze_unpause_and_clock,
+)
 from src.config import load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm
+from src.control.maze_runtime import choose_algorithm_name, is_maze_mode
 from src.landing_telemetry import LandingTelemetrySampler
 from src.vision import VisionFeed
 
@@ -51,8 +58,13 @@ def _set_front_camera_pose(client: airsim.MultirotorClient, config: dict) -> Non
         airsim.Vector3r(0.35, 0.0, -0.05),
         airsim.Quaternionr(0.0, 0.0, 0.0, 1.0),
     )
+    vehicle_name = ""
+    if is_maze_mode():
+        vehicle_name = (
+            os.environ.get("AIGP_AIRSIM_VEHICLE_NAME", "SimpleFlight").strip() or "SimpleFlight"
+        )
     try:
-        client.simSetCameraPose(camera_name, front_pose)
+        client.simSetCameraPose(camera_name, front_pose, vehicle_name=vehicle_name)
     except Exception as exc:
         print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
 
@@ -72,6 +84,10 @@ def _apply_trace_style(client: airsim.MultirotorClient, config: dict) -> None:
     thickness = max(1.0, float(trace_cfg.get("thickness", 4.0)))
 
     vehicle_name = str(trace_cfg.get("vehicle_name", "")).strip()
+    if is_maze_mode() and not vehicle_name:
+        vehicle_name = (
+            os.environ.get("AIGP_AIRSIM_VEHICLE_NAME", "SimpleFlight").strip() or "SimpleFlight"
+        )
     try:
         client.simSetTraceLine(color, thickness, vehicle_name)
         print(f"Trace style applied: color={color}, thickness={thickness:.1f}")
@@ -116,6 +132,22 @@ def _apply_low_end_overrides(config: dict) -> None:
     )
 
 
+def _resolve_landing_cfg(config: dict) -> dict:
+    """Base landing config, with optional maze-specific overrides when AIGP_MAZE=1."""
+    base = dict(config.get("landing", {}))
+    if not is_maze_mode():
+        return base
+    maze = base.get("maze")
+    if not isinstance(maze, dict):
+        return base
+    merged = {**base}
+    for key, value in maze.items():
+        if key == "maze":
+            continue
+        merged[key] = value
+    return merged
+
+
 def _landing_telemetry_if_enabled(
     client: airsim.MultirotorClient, landing_cfg: dict
 ) -> LandingTelemetrySampler | None:
@@ -134,7 +166,7 @@ def _landing_telemetry_if_enabled(
 
 
 def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
-    landing_cfg = config.get("landing", {})
+    landing_cfg = _resolve_landing_cfg(config)
     profile = os.environ.get("AIGP_LANDING_PROFILE", "").strip() or landing_cfg.get(
         "profile", "faster_soft"
     )
@@ -161,6 +193,69 @@ def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
             client.landAsync().join()
             return
 
+        if profile == "maze_soft":
+            print(
+                "Maze soft landing: stepped slow descent with settle between chunks, "
+                "then final land."
+            )
+            descent_speed_ms = max(
+                0.25,
+                min(
+                    float(landing_cfg.get("maze_descent_speed_ms", 0.55)),
+                    max_descent_speed_ms,
+                ),
+            )
+            chunk_m = max(0.15, float(landing_cfg.get("maze_descent_chunk_m", 0.35)))
+            settle_s = max(0.0, float(landing_cfg.get("maze_settle_between_chunks_s", 0.35)))
+            final_land_altitude_m = max(0.3, float(landing_cfg.get("final_land_altitude_m", 0.8)))
+            pre_land_hover_s = max(0.0, float(landing_cfg.get("maze_pre_land_hover_s", 1.0)))
+            max_steps = max(1, int(landing_cfg.get("maze_soft_max_steps", 40)))
+
+            for step in range(max_steps):
+                state = client.getMultirotorState().kinematics_estimated
+                altitude_m = max(0.0, -float(state.position.z_val))
+                if altitude_m <= final_land_altitude_m + 0.05:
+                    print(
+                        f"Maze soft landing: altitude {altitude_m:.2f}m ≤ "
+                        f"{final_land_altitude_m:.2f}m — final approach."
+                    )
+                    break
+                step_down = min(chunk_m, altitude_m - final_land_altitude_m)
+                duration_s = max(0.2, min(4.0, step_down / descent_speed_ms))
+                print(
+                    f"Maze soft landing: chunk step={step + 1} "
+                    f"alt={altitude_m:.2f}m descend ~{step_down:.2f}m "
+                    f"at {descent_speed_ms:.2f} m/s for {duration_s:.2f}s"
+                )
+                if sampler:
+                    sampler.set_command(
+                        f"maze_soft_descent step={step + 1} vz={descent_speed_ms:.3f}"
+                    )
+                try:
+                    client.moveByVelocityAsync(
+                        0.0, 0.0, descent_speed_ms, duration_s
+                    ).join()
+                except Exception as exc:
+                    print(
+                        f"Maze soft landing: descent chunk failed ({type(exc).__name__}: {exc}); "
+                        "hovering then final land.",
+                        file=sys.stderr,
+                    )
+                    break
+                if sampler:
+                    sampler.set_command("hover_async")
+                client.hoverAsync().join()
+                if settle_s > 0:
+                    time.sleep(settle_s)
+
+            if pre_land_hover_s > 0:
+                print(f"Maze soft landing: pre-land hover {pre_land_hover_s:.2f}s")
+                time.sleep(pre_land_hover_s)
+            if sampler:
+                sampler.set_command("land_async")
+            client.landAsync().join()
+            return
+
         print(
             "Hover settle complete — next: controlled descent if above final altitude, "
             "then final land."
@@ -180,7 +275,11 @@ def _run_landing(client: airsim.MultirotorClient, config: dict) -> None:
             )
             if sampler:
                 sampler.set_command(f"move_by_velocity vz_ms={descent_speed_ms:.3f}")
-            client.moveByVelocityAsync(0.0, 0.0, descent_speed_ms, descent_duration_s).join()
+            if is_maze_mode() and hasattr(client, "moveByVelocityZAsync"):
+                target_z = -final_land_altitude_m
+                client.moveByVelocityZAsync(0.0, 0.0, target_z, descent_duration_s).join()
+            else:
+                client.moveByVelocityAsync(0.0, 0.0, descent_speed_ms, descent_duration_s).join()
             if sampler:
                 sampler.set_command("hover_async")
             client.hoverAsync().join()
@@ -203,9 +302,6 @@ def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
         except BaseException as exc:
             error_holder["error"] = exc
 
-    # Daemon: if the main thread exits (e.g. Ctrl+C), CPython must not hang waiting on this
-    # thread at interpreter shutdown. Main still blocks on join until the algorithm completes
-    # or times out.
     worker = threading.Thread(target=_target, name="algorithm_runner", daemon=True)
     worker.start()
     started = time.perf_counter()
@@ -228,23 +324,19 @@ def _run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
             f"{type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-        traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
         raise RuntimeError(
             f"Algorithm raised an exception after {elapsed_s:.1f}s"
         ) from exc
-
-    if elapsed_s < 8.0:
-        print(
-            f"Warning: algorithm reported completion in {elapsed_s:.1f}s — much shorter than "
-            "a full attitude routine. If the drone barely moved, check Unreal is unpaused, "
-            "simulation is real-time, and watch for errors above.",
-            file=sys.stderr,
-        )
 
 
 def main() -> None:
     config = load_config()
     _apply_low_end_overrides(config)
+    maze_mode = is_maze_mode()
+    if maze_mode:
+        config.setdefault("vision", {})["enabled"] = False
+        print("Maze mode (AIGP_MAZE=1): vision disabled for AirSim 1.x / UE 4.16 compatibility.")
+    config["algorithm"] = choose_algorithm_name(config)
     sim_cfg = config["simulator"]
     host, port = simulator_endpoint(config)
     profile = os.environ.get("AIGP_PROFILE", "").strip()
@@ -258,17 +350,27 @@ def main() -> None:
     )
     client = airsim.MultirotorClient(ip=host, port=port)
     vision_feed = VisionFeed(client, config.get("vision", {}))
+    maze_flight = maze_mode
+    maze_vn = "SimpleFlight"
+    flight_client = client
 
     try:
         client.confirmConnection()
-        client.enableApiControl(True)
-        client.armDisarm(True)
+        if maze_flight:
+            try_maze_unpause_and_clock(client)
+            maze_vn = resolve_maze_vehicle_name(client)
+            maze_enable_api_control(client, True, maze_vn)
+            maze_arm_disarm(client, True, maze_vn)
+            flight_client = MazeFlightClient(client, maze_vn)
+        else:
+            client.enableApiControl(True)
+            client.armDisarm(True)
         _set_front_camera_pose(client, config)
         _apply_trace_style(client, config)
 
         try:
             vision_feed.start()
-            algo_name = config.get("algorithm", "six_directions")
+            algo_name = choose_algorithm_name(config)
             algo = get_algorithm(algo_name, config)
             algo.set_vision_feed(vision_feed if vision_feed.enabled else None)
             safety_cfg = config.get("safety", {})
@@ -277,20 +379,24 @@ def main() -> None:
             )
 
             print(f"Algorithm: {algo_name}")
-            _run_algorithm_with_timeout(algo, client, algo_timeout_seconds)
+            _run_algorithm_with_timeout(algo, flight_client, algo_timeout_seconds)
 
             print("Algorithm complete. Starting landing sequence...")
-            _run_landing(client, config)
+            _run_landing(flight_client, config)
             print("Flight client finished normally (landing complete).", file=sys.stderr)
         except Exception as exc:
             print(f"Failsafe triggered: {exc}")
             print("Attempting hover and landing for safe recovery...")
-            _run_landing(client, config)
+            _run_landing(flight_client, config)
     finally:
         vision_feed.stop()
         try:
-            client.armDisarm(False)
-            client.enableApiControl(False)
+            if maze_flight:
+                maze_arm_disarm(client, False, maze_vn)
+                maze_enable_api_control(client, False, maze_vn)
+            else:
+                client.armDisarm(False)
+                client.enableApiControl(False)
         except Exception as cleanup_exc:
             if not _suppress_api_cleanup_warning(cleanup_exc):
                 print(
