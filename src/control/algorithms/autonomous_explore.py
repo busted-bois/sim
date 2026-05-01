@@ -110,6 +110,19 @@ class AutonomousExplore(Algorithm):
         flythrough_speed_ms = _clamp(
             float(cfg.get("flythrough_speed_ms", target_approach_speed_ms)), 0.2, max_v
         )
+        # After punching through a ring, suppress blue-ring pursuit briefly so
+        # the drone can scan for the next objective (typically a red target)
+        # instead of immediately re-locking on whatever ring is still in view.
+        post_flythrough_blue_cooldown_s = _clamp(
+            float(cfg.get("post_flythrough_blue_cooldown_s", 5.0)), 0.0, 30.0
+        )
+        # Once a blue ring has been seen at this size or larger, lock onto it
+        # and ignore red targets until either fly-through fires or the ring is
+        # not seen for blue_lock_timeout_s. Without this, a red target visible
+        # in the periphery yanks the drone sideways during approach and it
+        # ends up jamming against the lower rim instead of going through.
+        blue_lock_r_frac = _clamp(float(cfg.get("blue_lock_r_frac", 0.08)), 0.01, 0.5)
+        blue_lock_timeout_s = _clamp(float(cfg.get("blue_lock_timeout_s", 1.5)), 0.2, 5.0)
 
         dt = 1.0 / rate_hz
         center_idx = (n_cols - 1) / 2.0
@@ -160,6 +173,15 @@ class AutonomousExplore(Algorithm):
         if face_forward_on_start:
             print("[autonomous_explore] rotating 180 degrees to face forward...")
             client.rotateByYawRateAsync(60, 3).join()
+        # Diagnostic: log the heading the explore loop is about to start with
+        # so you can tell at a glance whether face_forward_on_start has the
+        # drone pointed the way you expect.
+        spawn_yaw_deg = math.degrees(
+            _yaw_from_orientation(
+                client.getMultirotorState().kinematics_estimated.orientation
+            )
+        )
+        print(f"[autonomous_explore] start heading yaw={spawn_yaw_deg:+.1f}°")
 
         def vz_trim() -> float:
             z = float(client.getMultirotorState().kinematics_estimated.position.z_val)
@@ -178,6 +200,22 @@ class AutonomousExplore(Algorithm):
         # deadline. Cleared back to None once we exit the gate.
         flythrough_until_s: float | None = None
         flythrough_yaw_rad: float = 0.0
+        blue_suppressed_until_s: float = 0.0
+        blue_lock_until_s: float = 0.0
+        # Last successful blue-ring detection (nx, ny, r_frac, timestamp, yaw_rad).
+        # Used to keep pursuing the ring through brief detector dropouts —
+        # HoughCircles regularly misses one or two consecutive frames at
+        # close range or at frame edges, and without this memory the drone
+        # falls back to depth-wander on the first miss and forgets the ring.
+        # The stored yaw is used to compensate the cached nx as the drone
+        # rotates, so the stale value doesn't keep pinning the target at
+        # the frame edge after we've already yawed toward it.
+        last_blue: tuple[float, float, float, float, float] | None = None
+        # Half of the configured camera FOV in degrees, used to map yaw delta
+        # back into image-normalized horizontal offset (nx).
+        cam_half_fov_deg = max(
+            10.0, float(self._config.get("vision", {}).get("fov_degrees", 100.0)) / 2.0
+        )
 
         while time.monotonic() - t0 < duration_s:
             tick_start = time.monotonic()
@@ -211,7 +249,14 @@ class AutonomousExplore(Algorithm):
                     self._sleep_remaining(tick_start, dt)
                     continue
                 flythrough_until_s = None
-                print("[autonomous_explore] flythrough complete; resuming explore")
+                blue_suppressed_until_s = (
+                    time.monotonic() + post_flythrough_blue_cooldown_s
+                )
+                print(
+                    "[autonomous_explore] flythrough complete; resuming explore "
+                    f"(blue-ring suppressed for {post_flythrough_blue_cooldown_s:.1f}s "
+                    "to let red target take priority)"
+                )
 
             frame = self.latest_frame()
             depth_map: np.ndarray | None = None
@@ -234,9 +279,55 @@ class AutonomousExplore(Algorithm):
             # to fly through, red is a static target.
             target_info: tuple[str, float, float, float] | None = None
             if pursue_targets and frame is not None:
-                blue = blue_ring_info_normalized(frame) if pursue_blue_rings else None
+                now_s = time.monotonic()
+                blue_active = pursue_blue_rings and now_s >= blue_suppressed_until_s
+                blue = blue_ring_info_normalized(frame) if blue_active else None
                 red = red_target_info_normalized(frame) if pursue_red_targets else None
-                if blue is not None and blue[2] >= target_min_r_frac:
+
+                # Engage blue lock once we see a ring close enough to commit to,
+                # and refresh the lock every frame the ring stays in view.
+                if blue is not None:
+                    last_blue = (blue[0], blue[1], blue[2], now_s, yaw_rad)
+                    if blue[2] >= blue_lock_r_frac:
+                        blue_lock_until_s = now_s + blue_lock_timeout_s
+                blue_lock_engaged = now_s < blue_lock_until_s
+
+                # Detector dropout recovery: if locked but this frame missed,
+                # reuse the most recent detection — but compensate nx by the
+                # yaw rotation we've performed since then. Without this the
+                # cached nx=+0.99 keeps commanding a hard-right yaw forever.
+                if blue is None and blue_lock_engaged and last_blue is not None:
+                    age_s = now_s - last_blue[3]
+                    if age_s <= blue_lock_timeout_s:
+                        delta_yaw_deg = math.degrees(yaw_rad - last_blue[4])
+                        # Wrap to (-180, 180] so wraparound doesn't blow up nx.
+                        delta_yaw_deg = (delta_yaw_deg + 180.0) % 360.0 - 180.0
+                        nx_compensated = last_blue[0] - delta_yaw_deg / cam_half_fov_deg
+                        # If we've yawed past the target (|nx_compensated| > 1.2)
+                        # we'd be commanding the drone back toward where the ring
+                        # was; clamp so it gently re-centers instead of overshooting.
+                        nx_compensated = _clamp(nx_compensated, -1.0, 1.0)
+                        blue = (nx_compensated, last_blue[1], last_blue[2])
+                        if steps % max(1, int(rate_hz)) == 0:
+                            print(
+                                f"[autonomous_explore] blue dropout — last seen "
+                                f"{age_s:.2f}s ago, raw_nx={last_blue[0]:+.2f} "
+                                f"compensated_nx={blue[0]:+.2f} "
+                                f"(yawed {delta_yaw_deg:+.1f}°)"
+                            )
+
+                # While locked onto an approaching ring, fully ignore red so a
+                # peripheral red target can't tug the drone sideways into the
+                # ring's rim.
+                if blue_lock_engaged:
+                    red = None
+
+                # Red beats blue while blue is suppressed; otherwise blue wins
+                # (rings are gates and need to be cleared before approaching
+                # any further-away red target).
+                if red is not None and red[2] >= target_min_r_frac and not blue_active:
+                    target_info = ("red_target", *red)
+                elif blue is not None and blue[2] >= target_min_r_frac:
                     target_info = ("blue_ring", *blue)
                 elif red is not None and red[2] >= target_min_r_frac:
                     target_info = ("red_target", *red)

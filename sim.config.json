@@ -106,7 +106,10 @@
     "flythrough_blue_rings": true,
     "flythrough_trigger_r_frac": 0.18,
     "flythrough_duration_s": 2.0,
-    "flythrough_speed_ms": 2.5
+    "flythrough_speed_ms": 2.5,
+    "post_flythrough_blue_cooldown_s": 5.0,
+    "blue_lock_r_frac": 0.08,
+    "blue_lock_timeout_s": 1.5
   },
   "vision_guided_control": {
     "detector": "red_circle",
