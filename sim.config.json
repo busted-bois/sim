@@ -102,7 +102,11 @@
     "target_yaw_gain_deg_s": 50.0,
     "target_approach_speed_ms": 2.0,
     "target_arrival_r_frac": 0.20,
-    "target_min_r_frac": 0.02
+    "target_min_r_frac": 0.02,
+    "flythrough_blue_rings": true,
+    "flythrough_trigger_r_frac": 0.18,
+    "flythrough_duration_s": 2.0,
+    "flythrough_speed_ms": 2.5
   },
   "vision_guided_control": {
     "detector": "red_circle",

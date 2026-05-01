@@ -95,6 +95,22 @@ class AutonomousExplore(Algorithm):
         target_arrival_r_frac = _clamp(float(cfg.get("target_arrival_r_frac", 0.20)), 0.05, 0.95)
         target_min_r_frac = _clamp(float(cfg.get("target_min_r_frac", 0.02)), 0.005, 0.5)
 
+        # When a blue ring fills the frame we want to fly *through* it (it's a
+        # gate), not stop at it. The drone locks its current heading and commits
+        # forward at flythrough_speed for flythrough_duration_s — long enough
+        # to clear the depth of the ring and exit the other side. Pursuit and
+        # depth-wander are suppressed during the commit so the detector losing
+        # the ring (because it fills/leaves the frame as we punch through)
+        # doesn't cause veering.
+        flythrough_blue_rings = bool(cfg.get("flythrough_blue_rings", True))
+        flythrough_trigger_r_frac = _clamp(
+            float(cfg.get("flythrough_trigger_r_frac", 0.18)), 0.05, 0.6
+        )
+        flythrough_duration_s = _clamp(float(cfg.get("flythrough_duration_s", 2.0)), 0.3, 8.0)
+        flythrough_speed_ms = _clamp(
+            float(cfg.get("flythrough_speed_ms", target_approach_speed_ms)), 0.2, max_v
+        )
+
         dt = 1.0 / rate_hz
         center_idx = (n_cols - 1) / 2.0
 
@@ -157,9 +173,45 @@ class AutonomousExplore(Algorithm):
         t0 = time.monotonic()
         steps = 0
         no_frame_streak = 0
+        # Fly-through state: when a blue ring is close enough, set these so
+        # subsequent ticks blindly punch forward on a locked heading until the
+        # deadline. Cleared back to None once we exit the gate.
+        flythrough_until_s: float | None = None
+        flythrough_yaw_rad: float = 0.0
 
         while time.monotonic() - t0 < duration_s:
             tick_start = time.monotonic()
+
+            # If we're committed to flying through a ring, ignore the camera
+            # entirely and drive forward on the locked heading. The ring will
+            # leave the frame as we punch through it, so any detector signal
+            # during this window is noise.
+            if flythrough_until_s is not None:
+                if time.monotonic() < flythrough_until_s:
+                    cos_y = math.cos(flythrough_yaw_rad)
+                    sin_y = math.sin(flythrough_yaw_rad)
+                    z = float(
+                        client.getMultirotorState().kinematics_estimated.position.z_val
+                    )
+                    err = z - z_hold
+                    vz_ft = 0.35 if err < -0.3 else (-0.35 if err > 0.3 else 0.0)
+                    client.moveByVelocityAsync(
+                        flythrough_speed_ms * cos_y,
+                        flythrough_speed_ms * sin_y,
+                        vz_ft,
+                        dt,
+                    ).join()
+                    if steps % max(1, int(rate_hz)) == 0:
+                        remaining = flythrough_until_s - time.monotonic()
+                        print(
+                            f"[autonomous_explore] flythrough committed "
+                            f"({remaining:.1f}s left, fwd={flythrough_speed_ms:.2f})"
+                        )
+                    steps += 1
+                    self._sleep_remaining(tick_start, dt)
+                    continue
+                flythrough_until_s = None
+                print("[autonomous_explore] flythrough complete; resuming explore")
 
             frame = self.latest_frame()
             depth_map: np.ndarray | None = None
@@ -191,6 +243,23 @@ class AutonomousExplore(Algorithm):
 
             if target_info is not None:
                 kind, nx, ny, r_frac = target_info
+                # Blue ring close enough → commit to fly-through.
+                if (
+                    kind == "blue_ring"
+                    and flythrough_blue_rings
+                    and r_frac >= flythrough_trigger_r_frac
+                ):
+                    flythrough_until_s = time.monotonic() + flythrough_duration_s
+                    flythrough_yaw_rad = yaw_rad
+                    print(
+                        f"[autonomous_explore] blue_ring close "
+                        f"(r_frac={r_frac:.2f} >= {flythrough_trigger_r_frac:.2f}); "
+                        f"committing to fly-through for {flythrough_duration_s:.1f}s"
+                    )
+                    steps += 1
+                    self._sleep_remaining(tick_start, dt)
+                    continue
+                # Red target arrival (or blue with flythrough disabled) → stop.
                 if r_frac >= target_arrival_r_frac:
                     print(
                         f"[autonomous_explore] {kind} arrived "
