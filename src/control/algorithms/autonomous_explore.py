@@ -110,11 +110,35 @@ class AutonomousExplore(Algorithm):
         flythrough_speed_ms = _clamp(
             float(cfg.get("flythrough_speed_ms", target_approach_speed_ms)), 0.2, max_v
         )
+        # Alignment gate: even at close range, refuse to commit to fly-through
+        # unless the ring center is within this normalized horizontal offset.
+        # If close + off-center, drone enters a lineup phase (forward = 0, yaw
+        # only) until centered, then commits. Without this the drone clips the
+        # rim when the trigger fires while still partway off to one side.
+        flythrough_align_max_nx = _clamp(
+            float(cfg.get("flythrough_align_max_nx", 0.18)), 0.05, 0.5
+        )
+        # Boost yaw authority during the close-range lineup phase so the
+        # drone can swing onto axis quickly without the ring drifting out of
+        # frame. Multiplier on target_yaw_gain_deg_s.
+        lineup_yaw_gain_mult = _clamp(float(cfg.get("lineup_yaw_gain_mult", 1.6)), 0.5, 4.0)
+        # Red target should only matter once a gate has been cleared. Before
+        # that, the only objective is finding and flying through the ring —
+        # red detected on the side must not pull the drone off course.
+        red_only_after_gate = bool(cfg.get("red_only_after_gate", True))
         # After punching through a ring, suppress blue-ring pursuit briefly so
         # the drone can scan for the next objective (typically a red target)
         # instead of immediately re-locking on whatever ring is still in view.
         post_flythrough_blue_cooldown_s = _clamp(
             float(cfg.get("post_flythrough_blue_cooldown_s", 5.0)), 0.0, 30.0
+        )
+        # Hold the post-flythrough heading at cruise for this long while
+        # scanning for red. Without it, depth-wander picks the freest column
+        # (often well off-axis) and yaws the drone away from where the red
+        # target actually is. Red pursuit still preempts immediately if found.
+        post_flythrough_scan_s = _clamp(float(cfg.get("post_flythrough_scan_s", 4.0)), 0.0, 20.0)
+        post_flythrough_scan_speed_ms = _clamp(
+            float(cfg.get("post_flythrough_scan_speed_ms", cruise_v)), 0.0, max_v
         )
         # Once a blue ring has been seen at this size or larger, lock onto it
         # and ignore red targets until either fly-through fires or the ring is
@@ -202,6 +226,13 @@ class AutonomousExplore(Algorithm):
         flythrough_yaw_rad: float = 0.0
         blue_suppressed_until_s: float = 0.0
         blue_lock_until_s: float = 0.0
+        # Becomes True after the first fly-through completes. Until then,
+        # red-target pursuit is suppressed (when red_only_after_gate=true)
+        # so a red target visible to the side can't divert the drone before
+        # it has cleared the gate.
+        gate_cleared: bool = False
+        scan_until_s: float = 0.0
+        scan_yaw_rad: float = 0.0
         # Last successful blue-ring detection (nx, ny, r_frac, timestamp, yaw_rad).
         # Used to keep pursuing the ring through brief detector dropouts —
         # HoughCircles regularly misses one or two consecutive frames at
@@ -252,10 +283,14 @@ class AutonomousExplore(Algorithm):
                 blue_suppressed_until_s = (
                     time.monotonic() + post_flythrough_blue_cooldown_s
                 )
+                scan_until_s = time.monotonic() + post_flythrough_scan_s
+                scan_yaw_rad = flythrough_yaw_rad
+                gate_cleared = True
                 print(
                     "[autonomous_explore] flythrough complete; resuming explore "
-                    f"(blue-ring suppressed for {post_flythrough_blue_cooldown_s:.1f}s "
-                    "to let red target take priority)"
+                    f"(blue-ring suppressed for {post_flythrough_blue_cooldown_s:.1f}s, "
+                    f"scanning straight for {post_flythrough_scan_s:.1f}s, "
+                    "red target now active)"
                 )
 
             frame = self.latest_frame()
@@ -282,7 +317,11 @@ class AutonomousExplore(Algorithm):
                 now_s = time.monotonic()
                 blue_active = pursue_blue_rings and now_s >= blue_suppressed_until_s
                 blue = blue_ring_info_normalized(frame) if blue_active else None
-                red = red_target_info_normalized(frame) if pursue_red_targets else None
+                # Red is gated on `gate_cleared`: don't even look until at
+                # least one ring has been flown through, so a red target
+                # visible to the side can't divert the drone pre-gate.
+                red_allowed = pursue_red_targets and (gate_cleared or not red_only_after_gate)
+                red = red_target_info_normalized(frame) if red_allowed else None
 
                 # Engage blue lock once we see a ring close enough to commit to,
                 # and refresh the lock every frame the ring stays in view.
@@ -334,19 +373,43 @@ class AutonomousExplore(Algorithm):
 
             if target_info is not None:
                 kind, nx, ny, r_frac = target_info
-                # Blue ring close enough → commit to fly-through.
+                # Blue ring close enough to consider committing.
                 if (
                     kind == "blue_ring"
                     and flythrough_blue_rings
                     and r_frac >= flythrough_trigger_r_frac
                 ):
-                    flythrough_until_s = time.monotonic() + flythrough_duration_s
-                    flythrough_yaw_rad = yaw_rad
-                    print(
-                        f"[autonomous_explore] blue_ring close "
-                        f"(r_frac={r_frac:.2f} >= {flythrough_trigger_r_frac:.2f}); "
-                        f"committing to fly-through for {flythrough_duration_s:.1f}s"
+                    if abs(nx) <= flythrough_align_max_nx:
+                        # Aligned + close → commit to fly-through.
+                        flythrough_until_s = time.monotonic() + flythrough_duration_s
+                        flythrough_yaw_rad = yaw_rad
+                        print(
+                            f"[autonomous_explore] blue_ring aligned + close "
+                            f"(r_frac={r_frac:.2f} nx={nx:+.2f}); "
+                            f"committing to fly-through for {flythrough_duration_s:.1f}s"
+                        )
+                        steps += 1
+                        self._sleep_remaining(tick_start, dt)
+                        continue
+                    # Close but off-center → lineup phase: kill forward speed,
+                    # yaw aggressively until centered. The drone hovers in
+                    # place (altitude trim only) and rotates onto axis.
+                    yaw_rate = _clamp(
+                        target_yaw_gain_deg_s * lineup_yaw_gain_mult * nx, -120.0, 120.0
                     )
+                    client.moveByVelocityAsync(
+                        0.0,
+                        0.0,
+                        vz,
+                        dt,
+                        yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
+                    ).join()
+                    if steps % max(1, int(rate_hz // 2)) == 0:
+                        print(
+                            f"[autonomous_explore] lineup nx={nx:+.2f} (need |nx|<="
+                            f"{flythrough_align_max_nx:.2f}) r_frac={r_frac:.2f} "
+                            f"yaw_rate={yaw_rate:+.1f}"
+                        )
                     steps += 1
                     self._sleep_remaining(tick_start, dt)
                     continue
@@ -376,6 +439,37 @@ class AutonomousExplore(Algorithm):
                     print(
                         f"[autonomous_explore] pursue {kind} nx={nx:+.2f} ny={ny:+.2f} "
                         f"r_frac={r_frac:.2f} fwd={fwd_speed:.2f} yaw_rate={yaw_rate:+.1f}"
+                    )
+                steps += 1
+                self._sleep_remaining(tick_start, dt)
+                continue
+
+            # Post-flythrough scan window: no target this tick, but we're
+            # within the post-gate window where red ought to be ahead. Hold
+            # the locked heading at cruise speed instead of letting depth-
+            # wander pick the freest column off-axis. Red pursuit branch
+            # above runs first, so as soon as red is detected this loop
+            # naturally exits scan mode and pursues.
+            if time.monotonic() < scan_until_s:
+                cos_s = math.cos(scan_yaw_rad)
+                sin_s = math.sin(scan_yaw_rad)
+                yaw_err_deg = math.degrees(
+                    (scan_yaw_rad - yaw_rad + math.pi) % (2 * math.pi) - math.pi
+                )
+                # Gentle drift correction back to locked heading.
+                yaw_rate_scan = _clamp(2.0 * yaw_err_deg, -25.0, 25.0)
+                client.moveByVelocityAsync(
+                    post_flythrough_scan_speed_ms * cos_s,
+                    post_flythrough_scan_speed_ms * sin_s,
+                    vz,
+                    dt,
+                    yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate_scan)),
+                ).join()
+                if steps % max(1, int(rate_hz)) == 0:
+                    remaining = scan_until_s - time.monotonic()
+                    print(
+                        f"[autonomous_explore] scan-straight no_red_yet "
+                        f"({remaining:.1f}s left, fwd={post_flythrough_scan_speed_ms:.2f})"
                     )
                 steps += 1
                 self._sleep_remaining(tick_start, dt)

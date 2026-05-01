@@ -31,12 +31,14 @@ def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:
     """
     hsv = cv2.cvtColor(frame.image_rgb, cv2.COLOR_RGB2HSV)
 
-    # Define range for red color and create a mask
-    lower_red = np.array([0, 120, 70])
-    upper_red = np.array([10, 255, 255])
+    # Looser HSV thresholds so washed-out / distant reds survive the mask;
+    # the post-gate red target tends to be small and dimly lit when first
+    # acquired, and the strict S>=120 / V>=70 cutoffs were dropping it.
+    lower_red = np.array([0, 80, 50])
+    upper_red = np.array([12, 255, 255])
     mask1 = cv2.inRange(hsv, lower_red, upper_red)
 
-    lower_red = np.array([170, 120, 70])
+    lower_red = np.array([165, 80, 50])
     upper_red = np.array([180, 255, 255])
     mask2 = cv2.inRange(hsv, lower_red, upper_red)
 
@@ -50,13 +52,15 @@ def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:
     # makes the detector pick up small/faint circles at distance, which is
     # what we want for finding a far-away red target before it's already
     # under the drone.
+    # param2 lowered (18 → 14) so faint / partial red circles register —
+    # critical for catching the post-gate target before the drone overshoots.
     circles = cv2.HoughCircles(
         mask,
         cv2.HOUGH_GRADIENT,
         dp=1,
         minDist=15,
         param1=50,
-        param2=18,
+        param2=14,
         minRadius=2,
         maxRadius=120,
     )
