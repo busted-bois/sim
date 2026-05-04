@@ -219,6 +219,10 @@ class AutonomousExplore(Algorithm):
         t0 = time.monotonic()
         steps = 0
         no_frame_streak = 0
+        # Timers for metrics
+        blue_gate_time: float | None = None
+        red_target_time: float | None = None
+
         # Fly-through state: when a blue ring is close enough, set these so
         # subsequent ticks blindly punch forward on a locked heading until the
         # deadline. Cleared back to None once we exit the gate.
@@ -286,6 +290,8 @@ class AutonomousExplore(Algorithm):
                 scan_until_s = time.monotonic() + post_flythrough_scan_s
                 scan_yaw_rad = flythrough_yaw_rad
                 gate_cleared = True
+                if blue_gate_time is None:
+                    blue_gate_time = time.monotonic() - t0
                 print(
                     "[autonomous_explore] flythrough complete; resuming explore "
                     f"(blue-ring suppressed for {post_flythrough_blue_cooldown_s:.1f}s, "
@@ -415,8 +421,14 @@ class AutonomousExplore(Algorithm):
                     continue
                 # Red target arrival (or blue with flythrough disabled) → stop.
                 if r_frac >= target_arrival_r_frac:
+                    arrival_time = time.monotonic() - t0
+                    if kind == "red_target" and red_target_time is None:
+                        red_target_time = arrival_time
+                    elif kind == "blue_ring" and blue_gate_time is None:
+                        blue_gate_time = arrival_time
+
                     print(
-                        f"[autonomous_explore] {kind} arrived "
+                        f"[autonomous_explore] {kind} arrived at {arrival_time:.2f}s "
                         f"r_frac={r_frac:.2f} >= {target_arrival_r_frac:.2f}; hover"
                     )
                     client.hoverAsync().join()
@@ -553,6 +565,20 @@ class AutonomousExplore(Algorithm):
         client.hoverAsync().join()
         time.sleep(1.0)
         client.landAsync().join()
+
+        # Print metrics
+        print("\n--- Performance Metrics ---")
+        if blue_gate_time is not None:
+            print(f"Time to blue gate: {blue_gate_time:.2f}s")
+        else:
+            print("Time to blue gate: DNF")
+
+        if red_target_time is not None:
+            print(f"Time to red target: {red_target_time:.2f}s")
+        else:
+            print("Time to red target: DNF")
+        print("---------------------------\n")
+
         print("[autonomous_explore] done")
 
     @staticmethod
