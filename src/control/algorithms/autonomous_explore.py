@@ -246,6 +246,12 @@ class AutonomousExplore(Algorithm):
         # rotates, so the stale value doesn't keep pinning the target at
         # the frame edge after we've already yawed toward it.
         last_blue: tuple[float, float, float, float, float] | None = None
+
+        # --- IMPROVED PURSUIT & SEARCH LOGIC ---
+        last_target_seen_s = time.monotonic()
+        search_scan_offset = 0.0
+        search_direction = 1.0
+
         # Half of the configured camera FOV in degrees, used to map yaw delta
         # back into image-normalized horizontal offset (nx).
         cam_half_fov_deg = max(
@@ -332,9 +338,10 @@ class AutonomousExplore(Algorithm):
                 # Engage blue lock once we see a ring close enough to commit to,
                 # and refresh the lock every frame the ring stays in view.
                 if blue is not None:
+                    last_target_seen_s = now_s
                     last_blue = (blue[0], blue[1], blue[2], now_s, yaw_rad)
-                    if blue[2] >= blue_lock_r_frac:
-                        blue_lock_until_s = now_s + blue_lock_timeout_s
+                    # CRITICAL: If we see a gate, we LOCK ON and ignore everything else
+                    blue_lock_until_s = now_s + 2.5
                 blue_lock_engaged = now_s < blue_lock_until_s
 
                 # Detector dropout recovery: if locked but this frame missed,
@@ -538,6 +545,38 @@ class AutonomousExplore(Algorithm):
                 else:
                     fwd_speed = cruise_v
                     state_label = "cruise"
+
+            # --- ACTIVE SCANNING LOGIC ---
+            if target_info is None:
+                time_since_target = time.monotonic() - last_target_seen_s
+                if time_since_target > 3.0:  # If no gate seen for 3 seconds
+                    # Perform a slow scan ±25 degrees to "find" the next gate
+                    search_scan_offset += search_direction * (30.0 * dt)  # 30 deg/s
+                    if abs(search_scan_offset) > 25.0:
+                        search_direction *= -1.0
+
+                    # Apply the scan offset to the depth-wander yaw
+                    yaw_rate += search_scan_offset
+                    state_label = "SCANNING"
+            else:
+                # Reset scan offset if we have a target
+                search_scan_offset = 0.0
+
+            # --- ACTIVE SCANNING LOGIC ---
+            if target_info is None:
+                time_since_target = time.monotonic() - last_target_seen_s
+                if time_since_target > 3.0:  # If no gate seen for 3 seconds
+                    # Perform a slow scan ±25 degrees to "find" the next gate
+                    search_scan_offset += search_direction * (30.0 * dt)  # 30 deg/s
+                    if abs(search_scan_offset) > 25.0:
+                        search_direction *= -1.0
+
+                    # Apply the scan offset to the depth-wander yaw
+                    yaw_rate += search_scan_offset
+                    state_label = "SCANNING"
+            else:
+                # Reset scan offset if we have a target
+                search_scan_offset = 0.0
 
             vx_world = fwd_speed * cos_y
             vy_world = fwd_speed * sin_y
