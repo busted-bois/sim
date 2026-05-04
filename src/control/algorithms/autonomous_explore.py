@@ -230,6 +230,7 @@ class AutonomousExplore(Algorithm):
         flythrough_yaw_rad: float = 0.0
         blue_suppressed_until_s: float = 0.0
         blue_lock_until_s: float = 0.0
+        red_lock_until_s: float = 0.0
         # Becomes True after the first fly-through completes. Until then,
         # red-target pursuit is suppressed (when red_only_after_gate=true)
         # so a red target visible to the side can't divert the drone before
@@ -246,11 +247,16 @@ class AutonomousExplore(Algorithm):
         # rotates, so the stale value doesn't keep pinning the target at
         # the frame edge after we've already yawed toward it.
         last_blue: tuple[float, float, float, float, float] | None = None
+        # Same as last_blue, but for red targets.
+        last_red: tuple[float, float, float, float, float] | None = None
 
         # --- IMPROVED PURSUIT & SEARCH LOGIC ---
         last_target_seen_s = time.monotonic()
         search_scan_offset = 0.0
         search_direction = 1.0
+        # Remembers which side the last target was on so we search in that
+        # direction first if it's lost.
+        last_target_nx = 0.0
 
         # Half of the configured camera FOV in degrees, used to map yaw delta
         # back into image-normalized horizontal offset (nx).
@@ -339,10 +345,18 @@ class AutonomousExplore(Algorithm):
                 # and refresh the lock every frame the ring stays in view.
                 if blue is not None:
                     last_target_seen_s = now_s
+                    last_target_nx = blue[0]
                     last_blue = (blue[0], blue[1], blue[2], now_s, yaw_rad)
                     # CRITICAL: If we see a gate, we LOCK ON and ignore everything else
                     blue_lock_until_s = now_s + 2.5
                 blue_lock_engaged = now_s < blue_lock_until_s
+
+                if red is not None:
+                    last_target_seen_s = now_s
+                    last_target_nx = red[0]
+                    last_red = (red[0], red[1], red[2], now_s, yaw_rad)
+                    red_lock_until_s = now_s + 2.0
+                red_lock_engaged = now_s < red_lock_until_s
 
                 # Detector dropout recovery: if locked but this frame missed,
                 # reuse the most recent detection — but compensate nx by the
@@ -365,6 +379,22 @@ class AutonomousExplore(Algorithm):
                                 f"[autonomous_explore] blue dropout — last seen "
                                 f"{age_s:.2f}s ago, raw_nx={last_blue[0]:+.2f} "
                                 f"compensated_nx={blue[0]:+.2f} "
+                                f"(yawed {delta_yaw_deg:+.1f}°)"
+                            )
+
+                if red is None and red_lock_engaged and last_red is not None:
+                    age_s = now_s - last_red[3]
+                    if age_s <= 1.5:  # Consistent timeout for red recovery
+                        delta_yaw_deg = math.degrees(yaw_rad - last_red[4])
+                        delta_yaw_deg = (delta_yaw_deg + 180.0) % 360.0 - 180.0
+                        nx_compensated = last_red[0] - delta_yaw_deg / cam_half_fov_deg
+                        nx_compensated = _clamp(nx_compensated, -1.0, 1.0)
+                        red = (nx_compensated, last_red[1], last_red[2])
+                        if steps % max(1, int(rate_hz)) == 0:
+                            print(
+                                f"[autonomous_explore] red dropout — last seen "
+                                f"{age_s:.2f}s ago, raw_nx={last_red[0]:+.2f} "
+                                f"compensated_nx={red[0]:+.2f} "
                                 f"(yawed {delta_yaw_deg:+.1f}°)"
                             )
 
@@ -404,15 +434,16 @@ class AutonomousExplore(Algorithm):
                         steps += 1
                         self._sleep_remaining(tick_start, dt)
                         continue
-                    # Close but off-center → lineup phase: kill forward speed,
-                    # yaw aggressively until centered. The drone hovers in
-                    # place (altitude trim only) and rotates onto axis.
+                    # Close but off-center → lineup phase: slow down and
+                    # yaw aggressively until centered. The drone maintains a
+                    # small "creep" speed so it doesn't stall out.
+                    lineup_v = _clamp(0.4 * cruise_v, 0.2, 1.0)
                     yaw_rate = _clamp(
                         target_yaw_gain_deg_s * lineup_yaw_gain_mult * nx, -120.0, 120.0
                     )
                     client.moveByVelocityAsync(
-                        0.0,
-                        0.0,
+                        lineup_v * cos_y,
+                        lineup_v * sin_y,
                         vz,
                         dt,
                         yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
@@ -421,7 +452,7 @@ class AutonomousExplore(Algorithm):
                         print(
                             f"[autonomous_explore] lineup nx={nx:+.2f} (need |nx|<="
                             f"{flythrough_align_max_nx:.2f}) r_frac={r_frac:.2f} "
-                            f"yaw_rate={yaw_rate:+.1f}"
+                            f"v={lineup_v:.2f} yaw_rate={yaw_rate:+.1f}"
                         )
                     steps += 1
                     self._sleep_remaining(tick_start, dt)
@@ -547,31 +578,22 @@ class AutonomousExplore(Algorithm):
                     state_label = "cruise"
 
             # --- ACTIVE SCANNING LOGIC ---
+            # If we've been blind for a while, start an active search pattern.
             if target_info is None:
                 time_since_target = time.monotonic() - last_target_seen_s
-                if time_since_target > 3.0:  # If no gate seen for 3 seconds
-                    # Perform a slow scan ±25 degrees to "find" the next gate
-                    search_scan_offset += search_direction * (30.0 * dt)  # 30 deg/s
-                    if abs(search_scan_offset) > 25.0:
+                if time_since_target > 1.5:  # Trigger search faster
+                    # If this is the start of a search, pick direction based on
+                    # where we last saw a target.
+                    if search_scan_offset == 0.0 and last_target_nx != 0.0:
+                        search_direction = 1.0 if last_target_nx > 0 else -1.0
+
+                    # Perform a scan ±35 degrees to "find" the next gate.
+                    # Increase scan speed slightly (40 deg/s).
+                    search_scan_offset += search_direction * (40.0 * dt)
+                    if abs(search_scan_offset) > 35.0:
                         search_direction *= -1.0
 
-                    # Apply the scan offset to the depth-wander yaw
-                    yaw_rate += search_scan_offset
-                    state_label = "SCANNING"
-            else:
-                # Reset scan offset if we have a target
-                search_scan_offset = 0.0
-
-            # --- ACTIVE SCANNING LOGIC ---
-            if target_info is None:
-                time_since_target = time.monotonic() - last_target_seen_s
-                if time_since_target > 3.0:  # If no gate seen for 3 seconds
-                    # Perform a slow scan ±25 degrees to "find" the next gate
-                    search_scan_offset += search_direction * (30.0 * dt)  # 30 deg/s
-                    if abs(search_scan_offset) > 25.0:
-                        search_direction *= -1.0
-
-                    # Apply the scan offset to the depth-wander yaw
+                    # Apply the scan offset to the depth-wander yaw.
                     yaw_rate += search_scan_offset
                     state_label = "SCANNING"
             else:
