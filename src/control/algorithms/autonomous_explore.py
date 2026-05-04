@@ -365,7 +365,8 @@ class AutonomousExplore(Algorithm):
                 # cached nx=+0.99 keeps commanding a hard-right yaw forever.
                 if blue is None and blue_lock_engaged and last_blue is not None:
                     age_s = now_s - last_blue[3]
-                    if age_s <= blue_lock_timeout_s:
+                    # Extend timeout to 2.0s for better distant locking.
+                    if age_s <= max(2.0, blue_lock_timeout_s):
                         delta_yaw_deg = math.degrees(yaw_rad - last_blue[4])
                         # Wrap to (-180, 180] so wraparound doesn't blow up nx.
                         delta_yaw_deg = (delta_yaw_deg + 180.0) % 360.0 - 180.0
@@ -375,6 +376,8 @@ class AutonomousExplore(Algorithm):
                         # was; clamp so it gently re-centers instead of overshooting.
                         nx_compensated = _clamp(nx_compensated, -1.0, 1.0)
                         blue = (nx_compensated, last_blue[1], last_blue[2])
+                        # Update coasting direction for scan initialization
+                        last_target_nx = nx_compensated
                         if steps % max(1, int(rate_hz)) == 0:
                             print(
                                 f"[autonomous_explore] blue dropout — last seen "
@@ -385,12 +388,14 @@ class AutonomousExplore(Algorithm):
 
                 if red is None and red_lock_engaged and last_red is not None:
                     age_s = now_s - last_red[3]
-                    if age_s <= 1.5:  # Consistent timeout for red recovery
+                    if age_s <= 2.0:  # Consistent timeout for red recovery
                         delta_yaw_deg = math.degrees(yaw_rad - last_red[4])
                         delta_yaw_deg = (delta_yaw_deg + 180.0) % 360.0 - 180.0
                         nx_compensated = last_red[0] - delta_yaw_deg / cam_half_fov_deg
                         nx_compensated = _clamp(nx_compensated, -1.0, 1.0)
                         red = (nx_compensated, last_red[1], last_red[2])
+                        # Update coasting direction for scan initialization
+                        last_target_nx = nx_compensated
                         if steps % max(1, int(rate_hz)) == 0:
                             print(
                                 f"[autonomous_explore] red dropout — last seen "
@@ -401,14 +406,21 @@ class AutonomousExplore(Algorithm):
 
                 # --- PROXIMITY-BASED TARGET ARBITRATION ---
                 # Evaluate all allowed targets and pick the closest (largest r_frac).
-                # Applies a 20% "stickiness" hysteresis to current_target_kind.
+                # Applies a 50% "stickiness" hysteresis to current_target_kind.
                 candidates: list[tuple[str, float, float, float]] = []
                 if blue is not None and blue[2] >= target_min_r_frac:
                     candidates.append(("blue_ring", *blue))
 
-                red_allowed = pursue_red_targets and (
-                    gate_cleared or not red_only_after_gate or not blue_active
-                )
+                # Commitment: if locked onto a blue ring and we still have a
+                # blue candidate (seen or recovered), ignore red entirely to
+                # avoid distraction during the approach.
+                if blue_lock_engaged and blue is not None:
+                    red_allowed = False
+                else:
+                    red_allowed = pursue_red_targets and (
+                        gate_cleared or not red_only_after_gate or not blue_active
+                    )
+
                 if red is not None and red[2] >= target_min_r_frac and red_allowed:
                     candidates.append(("red_target", *red))
 
@@ -421,13 +433,13 @@ class AutonomousExplore(Algorithm):
                     best_candidate = candidates[0]
 
                     # Stickiness: keep the current target kind unless another
-                    # is significantly (20%) closer.
+                    # is significantly (50%) closer.
                     current_cand = next(
                         (c for c in candidates if c[0] == current_target_kind), None
                     )
 
                     if current_cand is not None:
-                        if best_candidate[3] > current_cand[3] * 1.2:
+                        if best_candidate[3] > current_cand[3] * 1.5:
                             target_info = best_candidate
                             current_target_kind = best_candidate[0]
                         else:
@@ -603,16 +615,15 @@ class AutonomousExplore(Algorithm):
             # If we've been blind for a while, start an active search pattern.
             if target_info is None:
                 time_since_target = time.monotonic() - last_target_seen_s
-                if time_since_target > 1.5:  # Trigger search faster
+                if time_since_target > 2.5:  # Trigger search after 2.5s of blindness
                     # If this is the start of a search, pick direction based on
                     # where we last saw a target.
                     if search_scan_offset == 0.0 and last_target_nx != 0.0:
                         search_direction = 1.0 if last_target_nx > 0 else -1.0
 
-                    # Perform a scan ±35 degrees to "find" the next gate.
-                    # Increase scan speed slightly (40 deg/s).
-                    search_scan_offset += search_direction * (40.0 * dt)
-                    if abs(search_scan_offset) > 35.0:
+                    # Perform a scan ±25 degrees to "find" the next gate.
+                    search_scan_offset += search_direction * (30.0 * dt)
+                    if abs(search_scan_offset) > 25.0:
                         search_direction *= -1.0
 
                     # Apply the scan offset to the depth-wander yaw.
