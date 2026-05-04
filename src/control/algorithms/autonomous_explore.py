@@ -238,6 +238,7 @@ class AutonomousExplore(Algorithm):
         gate_cleared: bool = False
         scan_until_s: float = 0.0
         scan_yaw_rad: float = 0.0
+        current_target_kind: str | None = None
         # Last successful blue-ring detection (nx, ny, r_frac, timestamp, yaw_rad).
         # Used to keep pursuing the ring through brief detector dropouts —
         # HoughCircles regularly misses one or two consecutive frames at
@@ -398,21 +399,42 @@ class AutonomousExplore(Algorithm):
                                 f"(yawed {delta_yaw_deg:+.1f}°)"
                             )
 
-                # While locked onto an approaching ring, fully ignore red so a
-                # peripheral red target can't tug the drone sideways into the
-                # ring's rim.
-                if blue_lock_engaged:
-                    red = None
+                # --- PROXIMITY-BASED TARGET ARBITRATION ---
+                # Evaluate all allowed targets and pick the closest (largest r_frac).
+                # Applies a 20% "stickiness" hysteresis to current_target_kind.
+                candidates: list[tuple[str, float, float, float]] = []
+                if blue is not None and blue[2] >= target_min_r_frac:
+                    candidates.append(("blue_ring", *blue))
 
-                # Red beats blue while blue is suppressed; otherwise blue wins
-                # (rings are gates and need to be cleared before approaching
-                # any further-away red target).
-                if red is not None and red[2] >= target_min_r_frac and not blue_active:
-                    target_info = ("red_target", *red)
-                elif blue is not None and blue[2] >= target_min_r_frac:
-                    target_info = ("blue_ring", *blue)
-                elif red is not None and red[2] >= target_min_r_frac:
-                    target_info = ("red_target", *red)
+                red_allowed = pursue_red_targets and (
+                    gate_cleared or not red_only_after_gate or not blue_active
+                )
+                if red is not None and red[2] >= target_min_r_frac and red_allowed:
+                    candidates.append(("red_target", *red))
+
+                if not candidates:
+                    target_info = None
+                    current_target_kind = None
+                else:
+                    # Sort candidates by size (closest first)
+                    candidates.sort(key=lambda c: c[3], reverse=True)
+                    best_candidate = candidates[0]
+
+                    # Stickiness: keep the current target kind unless another
+                    # is significantly (20%) closer.
+                    current_cand = next(
+                        (c for c in candidates if c[0] == current_target_kind), None
+                    )
+
+                    if current_cand is not None:
+                        if best_candidate[3] > current_cand[3] * 1.2:
+                            target_info = best_candidate
+                            current_target_kind = best_candidate[0]
+                        else:
+                            target_info = current_cand
+                    else:
+                        target_info = best_candidate
+                        current_target_kind = best_candidate[0]
 
             if target_info is not None:
                 kind, nx, ny, r_frac = target_info
