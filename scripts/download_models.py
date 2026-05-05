@@ -1,13 +1,14 @@
 import urllib.request
 from pathlib import Path
 
+
 def download_midas():
     model_url = "https://github.com/intel-isl/MiDaS/releases/download/v2_1/model-small.onnx"
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
-    
+
     target_path = models_dir / "midas_v21_small.onnx"
-    
+
     if target_path.exists():
         print(f"Model already exists at {target_path}")
         return

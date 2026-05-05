@@ -145,7 +145,7 @@ class AutonomousExplore(Algorithm):
         # not seen for blue_lock_timeout_s. Without this, a red target visible
         # in the periphery yanks the drone sideways during approach and it
         # ends up jamming against the lower rim instead of going through.
-        blue_lock_r_frac = _clamp(float(cfg.get("blue_lock_r_frac", 0.08)), 0.01, 0.5)
+        _clamp(float(cfg.get("blue_lock_r_frac", 0.08)), 0.01, 0.5)
         blue_lock_timeout_s = _clamp(float(cfg.get("blue_lock_timeout_s", 1.5)), 0.2, 5.0)
 
         dt = 1.0 / rate_hz
