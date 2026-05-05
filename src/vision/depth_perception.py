@@ -1,31 +1,35 @@
+from pathlib import Path
+
 import cv2
 import numpy as np
-from pathlib import Path
+
 from src.vision.feed import VisionFrame
+
 
 class DepthEstimator:
     """
     Handles depth estimation from RGB frames using a pre-trained MiDaS model.
     """
-    
+
     # MiDaS v2.1 Small (ONNX) typical input size
     INPUT_SIZE = (256, 256)
-    
+
     def __init__(self, model_path: str | Path | None = None):
         """
         Initializes the depth estimator with a MiDaS model.
-        
+
         Args:
-            model_path: Path to the .onnx model file. If None, it will look for 'models/midas_v21_small.onnx'.
+            model_path: Path to the .onnx model file. If None, uses
+                ``models/midas_v21_small.onnx``.
         """
         if model_path is None:
             model_path = Path("models/midas_v21_small.onnx")
         else:
             model_path = Path(model_path)
-            
+
         self.model_path = model_path
         self.net = None
-        
+
         # Calibration parameters (placeholders, should be tuned for AirSim)
         # Formula: metric_depth = scale * relative_depth + offset
         # Note: MiDaS outputs inverse depth (disparity-like), so logic might vary.
@@ -37,14 +41,14 @@ class DepthEstimator:
         if not self.model_path.exists():
             print(f"[depth] Model not found at {self.model_path}")
             return False
-            
+
         try:
             print(f"[depth] Loading ONNX model from {self.model_path}...")
-            # Use a slightly different approach for loading if possible, 
+            # Use a slightly different approach for loading if possible,
             # or just add prints around the potentially blocking call.
             self.net = cv2.dnn.readNetFromONNX(str(self.model_path))
             print("[depth] ONNX model loaded into memory.")
-            
+
             # Set preferable backend and target to CPU (default)
             self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
             self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
@@ -57,7 +61,7 @@ class DepthEstimator:
     def estimate(self, frame: VisionFrame) -> np.ndarray | None:
         """
         Estimates relative depth from a VisionFrame.
-        
+
         Returns:
             A 2D numpy array of relative depth values, or None if estimation fails.
         """
@@ -66,30 +70,30 @@ class DepthEstimator:
             if not self.load_model():
                 print("[depth] Failed to load model in estimate()")
                 return None
-                
+
         img = frame.image_rgb
         h, w = img.shape[:2]
         # print(f"[depth] Processing frame {frame.seq} ({w}x{h})") # High volume
-        
+
         try:
             # MiDaS v2.1 Small preprocessing
             blob = cv2.dnn.blobFromImage(
-                img, 
-                1.0 / 255.0, 
-                self.INPUT_SIZE, 
-                (123.675, 116.28, 103.53), 
-                True, 
+                img,
+                1.0 / 255.0,
+                self.INPUT_SIZE,
+                (123.675, 116.28, 103.53),
+                True,
                 False
             )
-            
+
             self.net.setInput(blob)
             output = self.net.forward()
-            
+
             depth_map = output[0]
-            
+
             # Resize back to original frame size
             depth_map = cv2.resize(depth_map, (w, h), interpolation=cv2.INTER_CUBIC)
-            
+
             return depth_map
         except Exception as e:
             print(f"[depth] Inference error: {e}")
@@ -103,13 +107,16 @@ class DepthEstimator:
         if relative_depth is None:
             # print("[depth] get_metric_depth: relative_depth is None") # High volume
             return None
-            
+
         # MiDaS outputs are often inverse depth.
         # Simple linear calibration for now:
         metric_depth = (self.scale * relative_depth) + self.offset
-        
-        # print(f"[depth] frame {frame.seq} metric stats: min={np.min(metric_depth):.2f}, max={np.max(metric_depth):.2f}")
-        
+
+        # print(
+        #     f"[depth] frame {frame.seq} metric stats: "
+        #     f"min={np.min(metric_depth):.2f}, max={np.max(metric_depth):.2f}"
+        # )
+
         # Ensure no negative depths
         return np.maximum(metric_depth, 0.1)
 
@@ -121,7 +128,7 @@ class DepthEstimator:
         # Flatten and remove invalid/infinity values if any
         rel = relative_map.flatten()
         gt = ground_truth_map.flatten()
-        
+
         # Basic linear fit: GT = scale * REL + offset
         A = np.vstack([rel, np.ones(len(rel))]).T
         self.scale, self.offset = np.linalg.lstsq(A, gt, rcond=None)[0]

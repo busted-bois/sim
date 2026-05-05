@@ -12,8 +12,9 @@ from __future__ import annotations
 import math
 import time
 
-import airsim
 import numpy as np
+
+import airsim
 from src.control.algorithms import Algorithm, register
 from src.vision.processing import (
     get_depth_info,
