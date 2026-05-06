@@ -4,19 +4,15 @@ import numpy as np
 from src.vision.depth_perception import DepthEstimator
 from src.vision.feed import VisionFrame
 
+_depth_estimator: DepthEstimator | None = None
 
-def get_depth_info(frame: VisionFrame, depth_estimator: DepthEstimator) -> np.ndarray | None:
-    """
-    Computes depth map for the given frame.
 
-    Args:
-        frame: The vision frame to process.
-        depth_estimator: A configured DepthEstimator instance.
-
-    Returns:
-        A 2D numpy array of metric depth values in meters, or None if estimation fails.
-    """
-    return depth_estimator.get_metric_depth(frame)
+def get_depth_info(frame: VisionFrame, model_path: str | None = None) -> np.ndarray | None:
+    """Computes depth map for the given frame using a lazy singleton DepthEstimator."""
+    global _depth_estimator
+    if _depth_estimator is None:
+        _depth_estimator = DepthEstimator(model_path)
+    return _depth_estimator.get_metric_depth(frame)
 
 
 def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:

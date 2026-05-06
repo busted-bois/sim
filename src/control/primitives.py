@@ -139,17 +139,6 @@ def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
 def takeoff_with_settle(
     client: FlightClient, max_attempts: int = 4, label: str = "primitives"
 ) -> None:
-    """Call takeoffAsync, retrying after a re-settle if AirSim complains about velocity.
-
-    Some maps / physics ticks leave the vehicle just barely moving even after
-    reset() + a stationary wait. AirSim then throws "vehicle is already moving
-    with velocity X m/s" — re-settling and retrying clears this reliably.
-
-    Args:
-        client: Flight client instance.
-        max_attempts: Maximum number of takeoff attempts.
-        label: Prefix for log messages (e.g., algorithm name).
-    """
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
@@ -157,22 +146,41 @@ def takeoff_with_settle(
             return
         except RPCError as exc:
             msg = str(exc).lower()
-            if "already moving" not in msg:
-                raise
+            if "already moving" in msg:
+                last_exc = exc
+                print(
+                    f"[{label}] Takeoff attempt {attempt}/{max_attempts} rejected: {exc}; "
+                    "re-settling...",
+                    file=__import__("sys").stderr,
+                )
+                try:
+                    client.cancelLastTask()
+                    client.armDisarm(False)
+                    time.sleep(0.3)
+                    client.armDisarm(True)
+                except Exception:
+                    pass
+                wait_until_stationary(client, timeout_s=6.0, velocity_eps_ms=0.03, label=label)
+                continue
             last_exc = exc
+            if attempt == max_attempts:
+                raise
             print(
-                f"[{label}] Takeoff attempt {attempt}/{max_attempts} rejected: {exc}; "
-                "re-settling...",
+                f"[{label}] takeoff attempt {attempt}/{max_attempts} "
+                f"failed ({type(exc).__name__}: {exc}); retrying...",
                 file=__import__("sys").stderr,
             )
-            try:
-                client.cancelLastTask()
-                client.armDisarm(False)
-                time.sleep(0.3)
-                client.armDisarm(True)
-            except Exception:
-                pass
-            wait_until_stationary(client, timeout_s=6.0, velocity_eps_ms=0.03, label=label)
+            time.sleep(1.5 * attempt)
+        except Exception as exc:
+            last_exc = exc
+            if attempt == max_attempts:
+                raise
+            print(
+                f"[{label}] takeoff attempt {attempt}/{max_attempts} "
+                f"failed ({type(exc).__name__}: {exc}); retrying...",
+                file=__import__("sys").stderr,
+            )
+            time.sleep(1.5 * attempt)
     if last_exc is not None:
         raise last_exc
 
