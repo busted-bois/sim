@@ -3,6 +3,8 @@
 Plain functions for common flight sequences used across algorithms.
 """
 
+from __future__ import annotations
+
 import time
 from typing import TYPE_CHECKING
 
@@ -15,7 +17,7 @@ if TYPE_CHECKING:
     from src.landing_telemetry import LandingTelemetrySampler
 
 
-def set_front_camera_pose(client: airsim.MultirotorClient, config: Config | dict) -> None:
+def set_front_camera_pose(client: FlightClient, config: Config | dict) -> None:
     vision_cfg = config.get("vision", {})
     camera_name = str(vision_cfg.get("camera_name", "0"))
     cam_cfg = config.get("camera", {})
@@ -30,7 +32,7 @@ def set_front_camera_pose(client: airsim.MultirotorClient, config: Config | dict
         print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
 
 
-def apply_trace_style(client: airsim.MultirotorClient, config: Config | dict) -> None:
+def apply_trace_style(client: FlightClient, config: Config | dict) -> None:
     sim_cfg = config.get("simulator", {})
     trace_cfg = sim_cfg.get("trace", {})
     trace_enabled = bool(trace_cfg.get(
@@ -134,7 +136,7 @@ def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
 
 
 def takeoff_with_settle(
-    client: "FlightClient", max_attempts: int = 4, label: str = "primitives"
+    client: FlightClient, max_attempts: int = 4, label: str = "primitives"
 ) -> None:
     """Call takeoffAsync, retrying after a re-settle if AirSim complains about velocity.
 
@@ -175,7 +177,7 @@ def takeoff_with_settle(
 
 
 def rotate_yaw(
-    client: "FlightClient",
+    client: FlightClient,
     rate_dps: float,
     duration_s: float,
     label: str = "primitives",
@@ -191,7 +193,7 @@ def rotate_yaw(
     client.rotateByYawRateAsync(rate_dps, duration_s).join()
 
 
-def hold_position(client: "FlightClient", duration_s: float) -> None:
+def hold_position(client: FlightClient, duration_s: float) -> None:
     """Hold current position for duration.
 
     Args:
@@ -202,7 +204,7 @@ def hold_position(client: "FlightClient", duration_s: float) -> None:
 
 
 def land_with_telemetry(
-    client: "FlightClient",
+    client: FlightClient,
     config: Config | dict,
     label: str = "primitives",
 ) -> None:
@@ -275,7 +277,7 @@ def land_with_telemetry(
 
 
 def _wait_until_stationary(
-    client: "FlightClient",
+    client: FlightClient,
     timeout_s: float = 8.0,
     velocity_eps_ms: float = 0.05,
     label: str = "primitives",
@@ -326,8 +328,8 @@ def _wait_until_stationary(
 
 
 def _landing_telemetry_if_enabled(
-    client: "FlightClient", landing_cfg: dict, label: str = "primitives"
-) -> "LandingTelemetrySampler | None":
+    client: FlightClient, landing_cfg: dict, label: str = "primitives"
+) -> LandingTelemetrySampler | None:
     """Create landing telemetry sampler if enabled in config.
 
     Args:
