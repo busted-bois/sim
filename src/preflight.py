@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -37,10 +38,10 @@ def _has_nested_key(data: Any, key_path: str) -> bool:
     current = data
     parts = key_path.split(".")
     for part in parts[:-1]:
-        if not isinstance(current, dict) or part not in current:
+        if not isinstance(current, Mapping) or part not in current:
             return False
         current = current[part]
-    return isinstance(current, dict) and parts[-1] in current
+    return isinstance(current, Mapping) and parts[-1] in current
 
 
 def run_preflight() -> int:
