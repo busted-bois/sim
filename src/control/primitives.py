@@ -5,6 +5,7 @@ Plain functions for common flight sequences used across algorithms.
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -37,7 +38,7 @@ def apply_trace_style(client: FlightClient, config: Config | dict) -> None:
     trace_cfg = sim_cfg.get("trace", {})
     trace_enabled = bool(trace_cfg.get(
         "enabled",
-        __import__("os").environ.get("AIGP_ENABLE_TRACE", "").strip() == "1",
+        os.environ.get("AIGP_ENABLE_TRACE", "").strip() == "1",
     ))
     if not trace_enabled:
         return

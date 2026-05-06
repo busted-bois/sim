@@ -172,8 +172,8 @@ class AutonomousExplore(Algorithm):
         vz_trim = make_vz_trim(client, z_hold)
 
         depth_cfg = self._config.get("vision", {}).get("depth", {})
-        model_path = depth_cfg.get("model_path", None) if depth_cfg.get("enabled", False) else None
-        depth_estimator = DepthEstimator(model_path) if model_path else None
+        depth_enabled = depth_cfg.get("enabled", False)
+        depth_estimator = DepthEstimator(depth_cfg.get("model_path")) if depth_enabled else None
 
         t0 = time.monotonic()
         steps = 0

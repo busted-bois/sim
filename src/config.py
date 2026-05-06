@@ -139,11 +139,6 @@ class Config:
         return self._raw.get("vision", {})
 
     @property
-    def algorithm(self) -> dict[str, Any]:
-        """Typed access to algorithm section (returns dict for Algorithm)."""
-        return self._raw.get("algorithm", {})
-
-    @property
     def control(self) -> dict[str, Any]:
         """Typed access to control section."""
         return self._raw.get("control", {})
