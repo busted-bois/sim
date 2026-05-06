@@ -1,0 +1,5 @@
+  drone/trung                 [m bc7348b [[34morigin/drone/trung[m] Resolve merge conflicts with main for config and algorithm registry.
+  main                        [m ee2bbd5 [[34morigin/main[m: ahead 52, behind 106] style: remove verbose comments and defensive config parsing
+  rynwall                     [m 363f6cc [[34morigin/rynwall[m: behind 13] fix cleanup warning filtering and six_directions takeoff reliability
+  trung/drone                 [m f9c8cb0 [[34morigin/trung/drone[m: gone] style: remove verbose comments and defensive config parsing
+* [32mtrung/mavlink-implementation[m 4a03e63 [[34morigin/trung/mavlink-implementation[m] Resolve merge conflicts with main for config and algorithm registry.
