@@ -22,9 +22,9 @@ class OpenCvLanding(Algorithm):
         # Rotate 180 degrees
         print("[opencv_landing] Rotating 180 degrees...")
         rot_cfg = self._config.get("startup_rotation", {})
-        rate_dps = float(rot_cfg.get("rate_dps", 60))
-        duration_s = float(rot_cfg.get("duration_s", 3.0))
-        rotate_yaw(client, rate_dps, duration_s, label="opencv_landing")
+        rot_rate_dps = float(rot_cfg.get("rate_dps", 60))
+        rot_duration_s = float(rot_cfg.get("duration_s", 3.0))
+        rotate_yaw(client, rot_rate_dps, rot_duration_s, label="opencv_landing")
         print("[opencv_landing] Rotation complete.")
 
         # 1. Search for the wall
