@@ -168,7 +168,7 @@ class Config:
     @property
     def algorithm_name(self) -> str:
         """Convenient access to algorithm name."""
-        return str(self._raw.get("algorithm", "six_directions"))
+        return str(self._raw.get("algorithm", "autonomous_explore"))
 
 
 def load_config(path: str | Path | None = None) -> Config:
