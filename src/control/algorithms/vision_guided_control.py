@@ -19,7 +19,6 @@ from src.control.algorithms import Algorithm, register
 from src.control.flight_client import FlightClient
 from src.control.primitives import rotate_yaw, takeoff_with_settle
 from src.control.utils import _clamp, _yaw_from_orientation, make_vz_trim
-from src.vision.depth_perception import DepthEstimator
 from src.vision.processing import (
     get_depth_info,
     grey_wall_info_normalized,
@@ -108,10 +107,6 @@ class VisionGuidedControl(Algorithm):
 
         vz_trim = make_vz_trim(client, z_hold)
 
-        depth_cfg = self._config.get("vision", {}).get("depth", {})
-        depth_enabled = depth_cfg.get("enabled", False)
-        depth_estimator = DepthEstimator(depth_cfg.get("model_path")) if depth_enabled else None
-
         t0 = time.monotonic()
         steps = 0
         last_close_seen_s: float | None = None  # last time we saw target with r_frac >= proximity
@@ -128,7 +123,7 @@ class VisionGuidedControl(Algorithm):
                 info = detect_fn(frame)
                 # DEBUG: Attempt to get depth info
                 try:
-                    depth_map = get_depth_info(frame, depth_estimator) if depth_estimator else None
+                    depth_map = get_depth_info(frame)
                     if depth_map is not None:
                         # DEBUG: Print center depth stats every ~1s
                         if steps % max(1, int(rate_hz)) == 0:
