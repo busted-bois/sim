@@ -4,7 +4,7 @@ from pathlib import Path
 
 import airsim
 from src.config import apply_low_end_overrides, load_config, simulator_endpoint
-from src.control.algorithms import get_algorithm
+from src.control.algorithms import get_algorithm, list_algorithms
 from src.control.flight_client import AirSimAdapter
 from src.control.primitives import (
     _wait_until_stationary,
@@ -59,7 +59,7 @@ def main() -> None:
                 5.0, float(safety_cfg.get("algorithm_timeout_seconds", 180.0))
             )
 
-            print(f"Algorithm: {algo_name}")
+            print(f"Algorithm: {algo_name} (available: {', '.join(list_algorithms())})")
             run_algorithm_with_timeout(algo, client, algo_timeout_seconds)
 
             print("Algorithm complete. Starting landing sequence...")
