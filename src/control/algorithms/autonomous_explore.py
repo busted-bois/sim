@@ -156,9 +156,9 @@ class AutonomousExplore(Algorithm):
         if face_forward_on_start:
             print("[autonomous_explore] rotating 180 degrees to face forward...")
             rot_cfg = self._config.get("startup_rotation", {})
-            rate_dps = float(rot_cfg.get("rate_dps", 60))
-            duration_s = float(rot_cfg.get("duration_s", 3.0))
-            rotate_yaw(client, rate_dps, duration_s, label="autonomous_explore")
+            rot_rate_dps = float(rot_cfg.get("rate_dps", 60))
+            rot_duration_s = float(rot_cfg.get("duration_s", 3.0))
+            rotate_yaw(client, rot_rate_dps, rot_duration_s, label="autonomous_explore")
         # Diagnostic: log the heading the explore loop is about to start with
         # so you can tell at a glance whether face_forward_on_start has the
         # drone pointed the way you expect.

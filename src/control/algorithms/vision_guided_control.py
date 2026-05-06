@@ -97,13 +97,13 @@ class VisionGuidedControl(Algorithm):
         # Camera faces aft by default in AirSim; rotate so forward cruise
         # and detection share the same heading (matches opencv_landing).
         rotation = self._config.get("startup_rotation", {})
-        rate_dps = float(rotation.get("rate_dps", 60))
-        duration_s = float(rotation.get("duration_s", 3.0))
+        rot_rate_dps = float(rotation.get("rate_dps", 60))
+        rot_duration_s = float(rotation.get("duration_s", 3.0))
         print(
-            f"[vision_guided_control] rotating {rate_dps * duration_s:.0f} degrees "
-            f"({rate_dps:.0f} deg/s for {duration_s:.1f}s) to face forward..."
+            f"[vision_guided_control] rotating {rot_rate_dps * rot_duration_s:.0f} degrees "
+            f"({rot_rate_dps:.0f} deg/s for {rot_duration_s:.1f}s) to face forward..."
         )
-        rotate_yaw(client, rate_dps, duration_s, label="vision_guided_control")
+        rotate_yaw(client, rot_rate_dps, rot_duration_s, label="vision_guided_control")
         print("[vision_guided_control] rotation complete")
 
         vz_trim = make_vz_trim(client, z_hold)
