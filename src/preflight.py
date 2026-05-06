@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import socket
 from pathlib import Path
+from typing import Any
 
 from src.config import load_config, resolve_config_path, simulator_endpoint
 from src.control.algorithms import list_algorithms
@@ -32,7 +33,7 @@ def _load_env_local() -> None:
             os.environ[key] = value
 
 
-def _has_nested_key(data: dict, key_path: str) -> bool:
+def _has_nested_key(data: Any, key_path: str) -> bool:
     current = data
     parts = key_path.split(".")
     for part in parts[:-1]:

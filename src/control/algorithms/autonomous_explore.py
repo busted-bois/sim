@@ -32,8 +32,11 @@ import time
 import numpy as np
 
 import airsim
-from msgpackrpc.error import RPCError
 from src.control.algorithms import Algorithm, register
+from src.control.flight_client import FlightClient
+from src.control.primitives import rotate_yaw, takeoff_with_settle
+from src.control.utils import _clamp, _yaw_from_orientation, make_vz_trim
+from src.vision.depth_perception import DepthEstimator
 from src.vision.processing import (
     blue_ring_info_normalized,
     get_depth_info,
@@ -41,21 +44,9 @@ from src.vision.processing import (
 )
 
 
-def _yaw_from_orientation(orientation) -> float:
-    x = float(orientation.x_val)
-    y = float(orientation.y_val)
-    z = float(orientation.z_val)
-    w = float(orientation.w_val)
-    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-
-
-def _clamp(value: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, value))
-
-
 @register("autonomous_explore")
 class AutonomousExplore(Algorithm):
-    def run(self, client: airsim.MultirotorClient) -> None:
+    def run(self, client: FlightClient) -> None:
         cfg = self._config.get("autonomous_explore", {})
         control = self._config.get("control", {})
 
@@ -158,45 +149,14 @@ class AutonomousExplore(Algorithm):
             f"inverse_depth={inverse_depth}"
         )
 
-        # Retry takeoff if AirSim rejects with "already moving" — residual
-        # velocity from a prior session can bleed into the first attempt even
-        # after main.py's reset+settle.
-        for attempt in range(1, 5):
-            try:
-                client.takeoffAsync().join()
-                break
-            except RPCError as exc:
-                if "already moving" not in str(exc).lower() or attempt == 4:
-                    raise
-                print(
-                    f"[autonomous_explore] takeoff rejected ({exc}); "
-                    f"settling and retrying ({attempt}/4)..."
-                )
-                try:
-                    client.cancelLastTask()
-                    client.moveByVelocityAsync(0.0, 0.0, 0.0, 0.4).join()
-                    client.armDisarm(False)
-                    time.sleep(0.3)
-                    client.armDisarm(True)
-                except Exception:
-                    pass
-                # Wait for velocity to drop below the AirSim threshold.
-                t_settle = time.monotonic()
-                while time.monotonic() - t_settle < 6.0:
-                    try:
-                        v = client.getMultirotorState().kinematics_estimated.linear_velocity
-                        speed = (
-                            float(v.x_val) ** 2 + float(v.y_val) ** 2 + float(v.z_val) ** 2
-                        ) ** 0.5
-                    except Exception:
-                        speed = float("inf")
-                    if speed < 0.03:
-                        break
-                    time.sleep(0.1)
+        takeoff_with_settle(client, max_attempts=4, label="autonomous_explore")
         print("[autonomous_explore] takeoff complete")
         if face_forward_on_start:
             print("[autonomous_explore] rotating 180 degrees to face forward...")
-            client.rotateByYawRateAsync(60, 3).join()
+            rot_cfg = self._config.get("startup_rotation", {})
+            rate_dps = float(rot_cfg.get("rate_dps", 60))
+            duration_s = float(rot_cfg.get("duration_s", 3.0))
+            rotate_yaw(client, rate_dps, duration_s, label="autonomous_explore")
         # Diagnostic: log the heading the explore loop is about to start with
         # so you can tell at a glance whether face_forward_on_start has the
         # drone pointed the way you expect.
@@ -207,14 +167,11 @@ class AutonomousExplore(Algorithm):
         )
         print(f"[autonomous_explore] start heading yaw={spawn_yaw_deg:+.1f}°")
 
-        def vz_trim() -> float:
-            z = float(client.getMultirotorState().kinematics_estimated.position.z_val)
-            err = z - z_hold
-            if err < -0.3:
-                return 0.35
-            if err > 0.3:
-                return -0.35
-            return 0.0
+        vz_trim = make_vz_trim(client, z_hold)
+
+        depth_cfg = self._config.get("vision", {}).get("depth", {})
+        model_path = depth_cfg.get("model_path", None) if depth_cfg.get("enabled", False) else None
+        depth_estimator = DepthEstimator(model_path) if model_path else None
 
         t0 = time.monotonic()
         steps = 0
@@ -316,7 +273,7 @@ class AutonomousExplore(Algorithm):
             depth_map: np.ndarray | None = None
             if frame is not None:
                 try:
-                    depth_map = get_depth_info(frame)
+                    depth_map = get_depth_info(frame, depth_estimator) if depth_estimator else None
                 except Exception as exc:
                     if steps % max(1, int(rate_hz)) == 0:
                         print(f"[autonomous_explore] depth error: {exc}")

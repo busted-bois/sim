@@ -1,10 +1,12 @@
 from src.control.algorithms import Algorithm, register
+from src.control.flight_client import FlightClient
+from src.control.primitives import rotate_yaw, takeoff_with_settle
 from src.vision.processing import find_large_grey_wall
 
 
 @register("opencv_landing")
 class OpenCvLanding(Algorithm):
-    def run(self, client):
+    def run(self, client: FlightClient):
         """
         This algorithm flies forward until it detects a large grey wall,
         then it moves backward and lands.
@@ -12,12 +14,15 @@ class OpenCvLanding(Algorithm):
         print("[opencv_landing] Algorithm started.")
 
         # Takeoff
-        client.takeoffAsync().join()
+        takeoff_with_settle(client, max_attempts=1, label="opencv_landing")
         print("[opencv_landing] Takeoff complete.")
 
         # Rotate 180 degrees
         print("[opencv_landing] Rotating 180 degrees...")
-        client.rotateByYawRateAsync(60, 3).join()
+        rot_cfg = self._config.get("startup_rotation", {})
+        rate_dps = float(rot_cfg.get("rate_dps", 60))
+        duration_s = float(rot_cfg.get("duration_s", 3.0))
+        rotate_yaw(client, rate_dps, duration_s, label="opencv_landing")
         print("[opencv_landing] Rotation complete.")
 
         # 1. Search for the wall

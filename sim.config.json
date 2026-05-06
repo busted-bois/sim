@@ -165,5 +165,25 @@
   "logging": {
     "level": "INFO",
     "telemetry_log_enabled": false
+  },
+  "startup_rotation": {
+    "rate_dps": 60,
+    "duration_s": 3.0
+  },
+  "attitude_control": {
+    "roll_max_deg": 12,
+    "pitch_max_deg": 12,
+    "throttle_trim": 0.63,
+    "kp_z": 0.25,
+    "ki_z": 0.035,
+    "kd_z": 0.12,
+    "kv_xy": 5.0
+  },
+  "altitude": {
+    "z_floor": -1.0,
+    "z_ceiling": -0.5
+  },
+  "camera": {
+    "pose_offset": [0.35, 0.0, -0.05]
   }
 }

@@ -4,19 +4,19 @@ import numpy as np
 from src.vision.depth_perception import DepthEstimator
 from src.vision.feed import VisionFrame
 
-# Global or instance-based estimator could be used.
-# For simplicity in this module, we provide a helper.
-_depth_estimator = None
 
-def get_depth_info(frame: VisionFrame, model_path: str | None = None) -> np.ndarray | None:
+def get_depth_info(frame: VisionFrame, depth_estimator: DepthEstimator) -> np.ndarray | None:
     """
     Computes depth map for the given frame.
-    """
-    global _depth_estimator
-    if _depth_estimator is None:
-        _depth_estimator = DepthEstimator(model_path)
 
-    return _depth_estimator.get_metric_depth(frame)
+    Args:
+        frame: The vision frame to process.
+        depth_estimator: A configured DepthEstimator instance.
+
+    Returns:
+        A 2D numpy array of metric depth values in meters, or None if estimation fails.
+    """
+    return depth_estimator.get_metric_depth(frame)
 
 
 def find_red_circles(frame: VisionFrame) -> list[tuple[int, int, int]]:
@@ -243,3 +243,11 @@ def grey_wall_info_normalized(
     nx = (float(cx) - 0.5 * w) / (0.5 * w)
     ny = (float(cy) - 0.5 * h) / (0.5 * h)
     return (nx, ny, float(blob_fraction))
+
+
+def mean_rgb_summary(image_rgb: np.ndarray) -> str:
+    """Short log string with per-channel mean intensity (OpenCV `cv2.mean`)."""
+    if image_rgb.ndim != 3 or image_rgb.shape[2] != 3:
+        return ""
+    m = cv2.mean(image_rgb)
+    return f" cv_mean=({m[0]:.1f},{m[1]:.1f},{m[2]:.1f})"

@@ -16,20 +16,15 @@ import numpy as np
 
 import airsim
 from src.control.algorithms import Algorithm, register
+from src.control.flight_client import FlightClient
+from src.control.primitives import rotate_yaw, takeoff_with_settle
+from src.control.utils import _clamp, _yaw_from_orientation, make_vz_trim
+from src.vision.depth_perception import DepthEstimator
 from src.vision.processing import (
     get_depth_info,
     grey_wall_info_normalized,
     red_target_info_normalized,
 )
-
-
-def _yaw_from_orientation(orientation) -> float:
-    """Extract yaw (radians, Z-axis) from an AirSim orientation quaternion."""
-    x = float(orientation.x_val)
-    y = float(orientation.y_val)
-    z = float(orientation.z_val)
-    w = float(orientation.w_val)
-    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 _DETECTOR_DEFAULTS = {
     "red_circle": {"arrival_r_frac": 0.18, "proximity_r_frac": 0.10},
@@ -37,13 +32,9 @@ _DETECTOR_DEFAULTS = {
 }
 
 
-def _clamp(value: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, value))
-
-
 @register("vision_guided_control")
 class VisionGuidedControl(Algorithm):
-    def run(self, client: airsim.MultirotorClient) -> None:
+    def run(self, client: FlightClient) -> None:
         cfg = self._config.get("vision_guided_control", {})
         control = self._config.get("control", {})
 
@@ -98,23 +89,26 @@ class VisionGuidedControl(Algorithm):
             f"inject_fake={inject_fake}"
         )
 
-        client.takeoffAsync().join()
+        takeoff_with_settle(client, max_attempts=1, label="vision_guided_control")
         print("[vision_guided_control] takeoff complete")
 
-        # Camera faces aft by default in AirSim; rotate 180° so forward cruise
+        # Camera faces aft by default in AirSim; rotate so forward cruise
         # and detection share the same heading (matches opencv_landing).
-        print("[vision_guided_control] rotating 180 degrees to face forward...")
-        client.rotateByYawRateAsync(60, 3).join()
+        rotation = self._config.get("startup_rotation", {})
+        rate_dps = float(rotation.get("rate_dps", 60))
+        duration_s = float(rotation.get("duration_s", 3.0))
+        print(
+            f"[vision_guided_control] rotating {rate_dps * duration_s:.0f} degrees "
+            f"({rate_dps:.0f} deg/s for {duration_s:.1f}s) to face forward..."
+        )
+        rotate_yaw(client, rate_dps, duration_s, label="vision_guided_control")
         print("[vision_guided_control] rotation complete")
 
-        def vz_trim() -> float:
-            z = float(client.getMultirotorState().kinematics_estimated.position.z_val)
-            err = z - z_hold
-            if err < -0.3:
-                return 0.35
-            if err > 0.3:
-                return -0.35
-            return 0.0
+        vz_trim = make_vz_trim(client, z_hold)
+
+        depth_cfg = self._config.get("vision", {}).get("depth", {})
+        model_path = depth_cfg.get("model_path", None) if depth_cfg.get("enabled", False) else None
+        depth_estimator = DepthEstimator(model_path) if model_path else None
 
         t0 = time.monotonic()
         steps = 0
@@ -132,7 +126,7 @@ class VisionGuidedControl(Algorithm):
                 info = detect_fn(frame)
                 # DEBUG: Attempt to get depth info
                 try:
-                    depth_map = get_depth_info(frame)
+                    depth_map = get_depth_info(frame, depth_estimator) if depth_estimator else None
                     if depth_map is not None:
                         # DEBUG: Print center depth stats every ~1s
                         if steps % max(1, int(rate_hz)) == 0:

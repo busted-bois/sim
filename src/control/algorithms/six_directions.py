@@ -2,6 +2,8 @@ import sys
 import time
 
 from src.control.algorithms import Algorithm, register
+from src.control.flight_client import FlightClient
+from src.control.primitives import takeoff_with_settle
 
 DIRECTIONS = [
     ("+X", 2.0, 0.0, 0.0),
@@ -17,7 +19,7 @@ SPEED_MS = 2.0
 
 @register("six_directions")
 class SixDirections(Algorithm):
-    def run(self, client):
+    def run(self, client: FlightClient):
         cfg = self._config.get("six_directions", {})
         control_cfg = self._config.get("control", {})
         max_speed_ms = max(0.5, float(control_cfg.get("max_speed_ms", SPEED_MS)))
@@ -28,20 +30,7 @@ class SixDirections(Algorithm):
         if not selected:
             selected = DIRECTIONS
 
-        takeoff_attempts = 4
-        for attempt in range(1, takeoff_attempts + 1):
-            try:
-                client.takeoffAsync().join()
-                break
-            except Exception as exc:
-                if attempt == takeoff_attempts:
-                    raise
-                print(
-                    f"[six_directions] takeoff attempt {attempt}/{takeoff_attempts} "
-                    f"failed ({type(exc).__name__}: {exc}); retrying...",
-                    file=sys.stderr,
-                )
-                time.sleep(1.5 * attempt)
+        takeoff_with_settle(client, max_attempts=4, label="six_directions")
 
         for label, vx, vy, vz in selected:
             print(f"[six_directions] Moving {label} for {duration_s:.1f}s")

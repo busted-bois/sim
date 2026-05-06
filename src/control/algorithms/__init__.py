@@ -5,8 +5,9 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING
 
+from src.control.flight_client import FlightClient
+
 if TYPE_CHECKING:
-    import airsim
     from src.vision import VisionFeed, VisionFrame, VisionStats
 
 _registry: dict[str, type[Algorithm]] = {}
@@ -21,8 +22,8 @@ class Algorithm:
         self._config = config
         self._vision_feed: VisionFeed | None = None
 
-    def run(self, client: airsim.MultirotorClient) -> None:
-        """Execute the algorithm with full control over the AirSim client."""
+    def run(self, client: FlightClient) -> None:
+        """Execute the algorithm with full control over the flight client."""
         raise NotImplementedError
 
     def set_vision_feed(self, vision_feed: VisionFeed | None) -> None:
