@@ -6,8 +6,10 @@ import csv
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import airsim
+if TYPE_CHECKING:
+    from src.control.flight_client import FlightClient
 
 
 class LandingTelemetrySampler:
@@ -15,7 +17,7 @@ class LandingTelemetrySampler:
 
     def __init__(
         self,
-        client: airsim.MultirotorClient,
+        client: FlightClient,
         out_path: Path,
         sample_hz: float,
     ) -> None:

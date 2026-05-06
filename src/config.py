@@ -125,6 +125,9 @@ class Config:
     def setdefault(self, key: str, default: Any = None) -> Any:
         return self._raw.setdefault(key, default)
 
+    def __contains__(self, key: str) -> bool:
+        return key in self._raw
+
     @property
     def simulator(self) -> dict[str, Any]:
         """Typed access to simulator section (returns dict for compatibility)."""
