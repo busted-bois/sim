@@ -19,6 +19,8 @@ SPEED_MS = 2.0
 
 @register("six_directions")
 class SixDirections(Algorithm):
+    config_section = "six_directions"
+
     def run(self, client: FlightClient):
         cfg = self._config.get("six_directions", {})
         control_cfg = self._config.get("control", {})

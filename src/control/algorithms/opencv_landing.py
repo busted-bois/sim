@@ -6,6 +6,8 @@ from src.vision.processing import find_large_grey_wall
 
 @register("opencv_landing")
 class OpenCvLanding(Algorithm):
+    config_section = None
+
     def run(self, client: FlightClient):
         """
         This algorithm flies forward until it detects a large grey wall,

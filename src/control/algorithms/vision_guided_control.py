@@ -34,6 +34,8 @@ _DETECTOR_DEFAULTS = {
 
 @register("vision_guided_control")
 class VisionGuidedControl(Algorithm):
+    config_section = "vision_guided_control"
+
     def run(self, client: FlightClient) -> None:
         cfg = self._config.get("vision_guided_control", {})
         control = self._config.get("control", {})
