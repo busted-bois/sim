@@ -28,7 +28,7 @@ def main() -> None:
     map_name = str(sim_cfg.get("map_name", "")).strip()
     print(
         "Flight session: "
-        f"algorithm={config.get('algorithm', 'six_directions')!r} "
+        f"algorithm={config.algorithm_name!r} "
         f"rpc={host}:{port}"
         + (f" profile={profile!r}" if profile else "")
         + (f" map={map_name!r}" if map_name else "")
@@ -51,7 +51,7 @@ def main() -> None:
 
         try:
             vision_feed.start()
-            algo_name = config.get("algorithm", "six_directions")
+            algo_name = config.algorithm_name
             algo = get_algorithm(algo_name, config)
             algo.set_vision_feed(vision_feed if vision_feed.enabled else None)
             safety_cfg = config.get("safety", {})
