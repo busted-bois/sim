@@ -7,18 +7,17 @@ import time
 from pathlib import Path
 
 from src.control.algorithms import Algorithm, register
-from src.vision.frame_metrics import mean_rgb_summary
+from src.control.flight_client import FlightClient
+from src.control.primitives import takeoff_with_settle
+from src.control.utils import _clamp
+from src.vision.processing import mean_rgb_summary
 
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def _clamp(value: float, lower: float, upper: float) -> float:
-    return max(lower, min(upper, value))
-
-
 @register("attitude_four_motion")
 class AttitudeFourMotion(Algorithm):
-    def run(self, client):
+    def run(self, client: FlightClient):
         basic_flight_logs = bool(self._config.get("logging", {}).get("basic_flight_logs", False))
         control_cfg = self._config.get("control", {})
         vision_cfg = self._config.get("vision", {})
@@ -49,11 +48,14 @@ class AttitudeFourMotion(Algorithm):
         calibration_move_s = max(0.2, float(afm_cfg.get("calibration_move_s", 0.8)))
         stabilize_s = max(0.5, float(afm_cfg.get("stabilize_s", 2.5)))
 
-        roll_max_deg = 12.0
-        pitch_max_deg = 12.0
-        throttle_trim = 0.63
-        kp_z, ki_z, kd_z = 0.25, 0.035, 0.12
-        kv_xy = 5.0
+        ac_cfg = self._config.get("attitude_control", {})
+        roll_max_deg = float(ac_cfg.get("roll_max_deg", 12.0))
+        pitch_max_deg = float(ac_cfg.get("pitch_max_deg", 12.0))
+        throttle_trim = float(ac_cfg.get("throttle_trim", 0.63))
+        kp_z = float(ac_cfg.get("kp_z", 0.25))
+        ki_z = float(ac_cfg.get("ki_z", 0.035))
+        kd_z = float(ac_cfg.get("kd_z", 0.12))
+        kv_xy = float(ac_cfg.get("kv_xy", 5.0))
 
         z_integral = 0.0
         yaw_deg = 0.0
@@ -63,8 +65,9 @@ class AttitudeFourMotion(Algorithm):
         state = client.getMultirotorState().kinematics_estimated
         current_z = float(state.position.z_val)
         target_z = float(self._config.get("waypoints", [{"z": -5.0}])[0].get("z", -5.0))
+        alt_cfg = self._config.get("altitude", {})
         z_floor = -max_altitude_m
-        z_ceiling = -0.5
+        z_ceiling = float(alt_cfg.get("z_ceiling", -0.5))
         target_z = _clamp(target_z, z_floor, z_ceiling)
         if current_z > -1.0:
             target_z = min(target_z, -4.0)
@@ -204,22 +207,7 @@ class AttitudeFourMotion(Algorithm):
 
         takeoff_t0 = time.perf_counter()
         # AirSim's RPC port opens before SimpleFlight's vehicle physics finishes
-        # warming up; an early takeoff can come back with a server-side error on
-        # the first try. Retry a few times with backoff before giving up.
-        takeoff_attempts = 4
-        for attempt in range(1, takeoff_attempts + 1):
-            try:
-                client.takeoffAsync().join()
-                break
-            except Exception as exc:
-                if attempt == takeoff_attempts:
-                    raise
-                print(
-                    f"[attitude_four_motion] takeoff attempt {attempt}/{takeoff_attempts} "
-                    f"failed ({type(exc).__name__}: {exc}); retrying...",
-                    file=sys.stderr,
-                )
-                time.sleep(1.5 * attempt)
+        takeoff_with_settle(client, max_attempts=4, label="attitude_four_motion")
         takeoff_wall_s = time.perf_counter() - takeoff_t0
         takeoff_min_wall_s = 2.0
         takeoff_short = takeoff_min_wall_s - takeoff_wall_s

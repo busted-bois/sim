@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -104,7 +105,75 @@ def _apply_profile_overlay(data: dict[str, Any]) -> None:
     _deep_merge_into(data, overlay)
 
 
-def load_config(path: str | Path | None = None) -> dict:
+@dataclass(slots=True)
+class Config:
+    """Typed wrapper around config dict with dict-like access for backward compatibility."""
+
+    _raw: dict[str, Any]
+
+    def __getitem__(self, key: str) -> Any:
+        """Support config["section"] access returning raw dict section."""
+        return self._raw[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Support config.get("section", default) access."""
+        return self._raw.get(key, default)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._raw[key] = value
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        return self._raw.setdefault(key, default)
+
+    @property
+    def simulator(self) -> dict[str, Any]:
+        """Typed access to simulator section (returns dict for compatibility)."""
+        return self._raw.get("simulator", {})
+
+    @property
+    def vision(self) -> dict[str, Any]:
+        """Typed access to vision section (returns dict for VisionFeed)."""
+        return self._raw.get("vision", {})
+
+    @property
+    def algorithm(self) -> dict[str, Any]:
+        """Typed access to algorithm section (returns dict for Algorithm)."""
+        return self._raw.get("algorithm", {})
+
+    @property
+    def control(self) -> dict[str, Any]:
+        """Typed access to control section."""
+        return self._raw.get("control", {})
+
+    @property
+    def landing(self) -> dict[str, Any]:
+        """Typed access to landing section."""
+        return self._raw.get("landing", {})
+
+    @property
+    def safety(self) -> dict[str, Any]:
+        """Typed access to safety section."""
+        return self._raw.get("safety", {})
+
+    @property
+    def host(self) -> str:
+        """Convenient access to simulator host."""
+        sim = self._raw.get("simulator", {})
+        return str(sim.get("host", "127.0.0.1")).strip() or "127.0.0.1"
+
+    @property
+    def port(self) -> int:
+        """Convenient access to AirSim port."""
+        sim = self._raw.get("simulator", {})
+        return int(sim.get("airsim_port", 41451))
+
+    @property
+    def algorithm_name(self) -> str:
+        """Convenient access to algorithm name."""
+        return str(self._raw.get("algorithm", "six_directions"))
+
+
+def load_config(path: str | Path | None = None) -> Config:
     """Load config from JSON, apply optional profile overlay (AIGP_PROFILE)."""
     config_path = resolve_config_path(path)
     if not config_path.is_file():
@@ -117,12 +186,51 @@ def load_config(path: str | Path | None = None) -> dict:
         data: dict[str, Any] = json.load(f)
 
     _apply_profile_overlay(data)
-    return data
+    return Config(data)
 
 
-def simulator_endpoint(config: dict[str, Any]) -> tuple[str, int]:
+def simulator_endpoint(config: Config | dict[str, Any]) -> tuple[str, int]:
     """AirSim RPC host and port from merged config."""
     sim = config.get("simulator", {})
     host = str(sim.get("host", "127.0.0.1")).strip() or "127.0.0.1"
     port = int(sim.get("airsim_port", 41451))
     return host, port
+
+
+def apply_low_end_overrides(config: Config | dict[str, Any]) -> None:
+    """Mutate config dict in-place when AIGP_LOW_END=1."""
+    raw = config._raw if isinstance(config, Config) else config
+    if os.environ.get("AIGP_LOW_END", "").strip() != "1":
+        return
+    print("Low-end mode enabled: prioritizing smooth flight over detailed logging.")
+    low_end_cfg = raw.setdefault("low_end_profile", {})
+
+    vision_cfg = raw.setdefault("vision", {})
+    vision_cfg["enabled"] = bool(low_end_cfg.get("vision_enabled", False))
+    if vision_cfg["enabled"]:
+        vision_cfg["fps"] = float(low_end_cfg.get("vision_fps", 8.0))
+
+    control_cfg = raw.setdefault("control", {})
+    command_rate_hz = float(low_end_cfg.get("command_rate_hz", 25.0))
+    control_cfg["command_rate_hz"] = max(10.0, min(35.0, command_rate_hz))
+    latency_cfg = control_cfg.setdefault("latency_tuning", {})
+    latency_cfg["enabled"] = False
+    latency_cfg.setdefault("autotuner", {})["enabled"] = False
+
+    landing_cfg = raw.setdefault("landing", {})
+    landing_cfg.setdefault("telemetry_log", {})["enabled"] = False
+    landing_cfg["min_hover_seconds"] = min(0.6, float(landing_cfg.get("min_hover_seconds", 1.0)))
+
+    log_cfg = raw.setdefault("logging", {})
+    log_cfg["basic_flight_logs"] = True
+    raw["algorithm"] = str(low_end_cfg.get("algorithm", "attitude_four_motion"))
+    raw.setdefault("safety", {})["algorithm_timeout_seconds"] = float(
+        low_end_cfg.get("algorithm_timeout_seconds", 90.0)
+    )
+
+    six_cfg = raw.setdefault("six_directions", {})
+    six_cfg["duration_s"] = float(low_end_cfg.get("segment_duration_s", 1.2))
+    six_cfg["speed_ms"] = float(low_end_cfg.get("speed_ms", 1.6))
+    six_cfg["direction_labels"] = list(
+        low_end_cfg.get("direction_labels", ["+X", "-X", "+Y", "-Y"])
+    )
