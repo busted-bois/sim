@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 @register("attitude_four_motion")
 class AttitudeFourMotion(Algorithm):
+    config_section = "attitude_four_motion"
+
     def run(self, client: FlightClient):
         basic_flight_logs = bool(self._config.get("logging", {}).get("basic_flight_logs", False))
         control_cfg = self._config.get("control", {})

@@ -46,6 +46,8 @@ from src.vision.processing import (
 
 @register("autonomous_explore")
 class AutonomousExplore(Algorithm):
+    config_section = "autonomous_explore"
+
     def run(self, client: FlightClient) -> None:
         cfg = self._config.get("autonomous_explore", {})
         control = self._config.get("control", {})

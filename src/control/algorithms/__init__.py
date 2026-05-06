@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.control.flight_client import FlightClient
@@ -17,6 +18,7 @@ class Algorithm:
     """Base class for flight control algorithms."""
 
     name: str = "base"
+    config_section: str | None = None
 
     def __init__(self, config: dict) -> None:
         self._config = config
@@ -56,7 +58,13 @@ def get_algorithm(name: str, config: dict) -> Algorithm:
     if name not in _registry:
         available = ", ".join(_registry.keys()) or "(none)"
         raise ValueError(f"Unknown algorithm '{name}'. Available: {available}")
-    return _registry[name](config)
+    algo = _registry[name](config)
+    if algo.config_section and algo.config_section not in config:
+        raise ValueError(
+            f"Algorithm '{name}' requires config section '{algo.config_section}' "
+            f"but it was not found in the config."
+        )
+    return algo
 
 
 def list_algorithms() -> list[str]:
@@ -64,9 +72,9 @@ def list_algorithms() -> list[str]:
     return sorted(_registry.keys())
 
 
-# Import built-in algorithms to trigger registration.
-importlib.import_module("src.control.algorithms.six_directions")
-importlib.import_module("src.control.algorithms.attitude_four_motion")
-importlib.import_module("src.control.algorithms.opencv_landing")
-importlib.import_module("src.control.algorithms.vision_guided_control")
-importlib.import_module("src.control.algorithms.autonomous_explore")
+_algorithms_dir = Path(__file__).parent
+for module_path in _algorithms_dir.glob("*.py"):
+    if module_path.name.startswith("_") or module_path.name == "__init__.py":
+        continue
+    module_name = f"src.control.algorithms.{module_path.stem}"
+    importlib.import_module(module_name)
