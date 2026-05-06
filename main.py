@@ -7,12 +7,12 @@ from src.config import apply_low_end_overrides, load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm, list_algorithms
 from src.control.flight_client import AirSimAdapter
 from src.control.primitives import (
-    _wait_until_stationary,
     apply_trace_style,
     land_with_telemetry,
     run_algorithm_with_timeout,
     set_front_camera_pose,
     suppress_api_cleanup_warning,
+    wait_until_stationary,
 )
 from src.vision import VisionFeed
 
@@ -45,7 +45,7 @@ def main() -> None:
             print(f"Warning: client.reset() failed (continuing): {reset_exc}", file=sys.stderr)
         client.enableApiControl(True)
         client.armDisarm(True)
-        _wait_until_stationary(client)
+        wait_until_stationary(client)
         set_front_camera_pose(client, config)
         apply_trace_style(client, config)
 

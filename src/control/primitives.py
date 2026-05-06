@@ -172,7 +172,7 @@ def takeoff_with_settle(
                 client.armDisarm(True)
             except Exception:
                 pass
-            _wait_until_stationary(client, timeout_s=6.0, velocity_eps_ms=0.03, label=label)
+            wait_until_stationary(client, timeout_s=6.0, velocity_eps_ms=0.03, label=label)
     if last_exc is not None:
         raise last_exc
 
@@ -277,7 +277,7 @@ def land_with_telemetry(
             print(f"[{label}] Landing telemetry saved: {sampler.out_path}")
 
 
-def _wait_until_stationary(
+def wait_until_stationary(
     client: FlightClient,
     timeout_s: float = 8.0,
     velocity_eps_ms: float = 0.05,
