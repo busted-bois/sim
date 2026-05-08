@@ -1,7 +1,4 @@
-"""Shared flight primitives for drone control.
-
-Plain functions for common flight sequences used across algorithms.
-"""
+"""Shared flight primitives used across algorithms."""
 
 from __future__ import annotations
 
@@ -190,24 +187,10 @@ def rotate_yaw(
     duration_s: float,
     label: str = "primitives",
 ) -> None:
-    """Rotate by yaw rate for duration.
-
-    Args:
-        client: Flight client instance.
-        rate_dps: Yaw rate in degrees per second.
-        duration_s: Duration in seconds.
-        label: Prefix for log messages.
-    """
     client.rotateByYawRateAsync(rate_dps, duration_s).join()
 
 
 def hold_position(client: FlightClient, duration_s: float) -> None:
-    """Hold current position for duration.
-
-    Args:
-        client: Flight client instance.
-        duration_s: Duration in seconds.
-    """
     client.moveByVelocityAsync(0.0, 0.0, 0.0, duration_s).join()
 
 
@@ -216,14 +199,6 @@ def land_with_telemetry(
     config: Config | dict,
     label: str = "primitives",
 ) -> None:
-    """Execute landing sequence with optional telemetry logging.
-
-    Args:
-        client: Flight client instance.
-        config: Configuration dict containing landing settings.
-        label: Prefix for log messages.
-    """
-
     landing_cfg = config.get("landing", {})
     profile = os.environ.get("AIGP_LANDING_PROFILE", "").strip() or landing_cfg.get(
         "profile", "faster_soft"
@@ -290,18 +265,11 @@ def wait_until_stationary(
     velocity_eps_ms: float = 0.05,
     label: str = "primitives",
 ) -> None:
-    """Block until the drone is stationary, so takeoff doesn't get rejected.
+    """Block until drone velocity drops below velocity_eps_ms.
 
     AirSim's takeoff RPC refuses if |velocity| is non-trivial — observed
-    rejection at 0.19 m/s, so the epsilon must be well below that. After
-    client.reset() the drone usually settles within ~0.5s, but a previous run
-    that left residual motion can take several physics steps to bleed off.
-
-    Args:
-        client: Flight client instance.
-        timeout_s: Maximum time to wait for drone to settle.
-        velocity_eps_ms: Velocity threshold in m/s to consider stationary.
-        label: Prefix for log messages.
+    rejection at 0.19 m/s. After client.reset() the drone usually settles
+    within ~0.5s, but residual motion from a prior run can take longer.
     """
     deadline = time.monotonic() + timeout_s
     last_speed = float("inf")
@@ -315,15 +283,12 @@ def wait_until_stationary(
         last_speed = speed
         if speed < velocity_eps_ms:
             consecutive_quiet += 1
-            # Two consecutive quiet samples — guards against catching the
-            # vehicle mid-zero-crossing while it's actually still oscillating.
             if consecutive_quiet >= 2:
                 return
         else:
             consecutive_quiet = 0
             try:
                 client.cancelLastTask()
-                # Pin to spawn z so residual vertical motion damps fast.
                 client.moveByVelocityAsync(0.0, 0.0, 0.0, 0.2).join()
             except Exception:
                 pass
@@ -338,16 +303,6 @@ def wait_until_stationary(
 def _landing_telemetry_if_enabled(
     client: FlightClient, landing_cfg: dict, label: str = "primitives"
 ) -> LandingTelemetrySampler | None:
-    """Create landing telemetry sampler if enabled in config.
-
-    Args:
-        client: Flight client instance.
-        landing_cfg: Landing configuration dict.
-        label: Prefix for log messages.
-
-    Returns:
-        LandingTelemetrySampler instance if enabled, None otherwise.
-    """
     from pathlib import Path
 
     from src.landing_telemetry import LandingTelemetrySampler

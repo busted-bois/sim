@@ -135,39 +135,32 @@ class Config(MutableMapping):
 
     @property
     def vision(self) -> dict[str, Any]:
-        """Typed access to vision section (returns dict for VisionFeed)."""
         return self._raw.get("vision", {})
 
     @property
     def control(self) -> dict[str, Any]:
-        """Typed access to control section."""
         return self._raw.get("control", {})
 
     @property
     def landing(self) -> dict[str, Any]:
-        """Typed access to landing section."""
         return self._raw.get("landing", {})
 
     @property
     def safety(self) -> dict[str, Any]:
-        """Typed access to safety section."""
         return self._raw.get("safety", {})
 
     @property
     def host(self) -> str:
-        """Convenient access to simulator host."""
         sim = self._raw.get("simulator", {})
         return str(sim.get("host", "127.0.0.1")).strip() or "127.0.0.1"
 
     @property
     def port(self) -> int:
-        """Convenient access to AirSim port."""
         sim = self._raw.get("simulator", {})
         return int(sim.get("airsim_port", 41451))
 
     @property
     def algorithm_name(self) -> str:
-        """Convenient access to algorithm name."""
         return str(self._raw.get("algorithm", "autonomous_explore"))
 
 
