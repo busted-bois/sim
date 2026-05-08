@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any
 
@@ -105,32 +105,32 @@ def _apply_profile_overlay(data: dict[str, Any]) -> None:
     _deep_merge_into(data, overlay)
 
 
-@dataclass(slots=True)
-class Config:
-    """Typed wrapper around config dict with dict-like access for backward compatibility."""
+class Config(MutableMapping):
+    """Typed wrapper around config dict with full MutableMapping support."""
 
-    _raw: dict[str, Any]
+    def __init__(self, raw: dict[str, Any]) -> None:
+        self._raw = raw
 
     def __getitem__(self, key: str) -> Any:
-        """Support config["section"] access returning raw dict section."""
         return self._raw[key]
-
-    def get(self, key: str, default: Any = None) -> Any:
-        """Support config.get("section", default) access."""
-        return self._raw.get(key, default)
 
     def __setitem__(self, key: str, value: Any) -> None:
         self._raw[key] = value
 
-    def setdefault(self, key: str, default: Any = None) -> Any:
-        return self._raw.setdefault(key, default)
+    def __delitem__(self, key: str) -> None:
+        del self._raw[key]
 
-    def __contains__(self, key: str) -> bool:
+    def __iter__(self):
+        return iter(self._raw)
+
+    def __len__(self) -> int:
+        return len(self._raw)
+
+    def __contains__(self, key: object) -> bool:
         return key in self._raw
 
     @property
     def simulator(self) -> dict[str, Any]:
-        """Typed access to simulator section (returns dict for compatibility)."""
         return self._raw.get("simulator", {})
 
     @property

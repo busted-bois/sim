@@ -6,6 +6,7 @@ Plain functions for common flight sequences used across algorithms.
 from __future__ import annotations
 
 import os
+import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -87,9 +88,7 @@ def suppress_api_cleanup_warning(exc: BaseException) -> bool:
 
 
 def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
-    import sys
     import threading
-    import time
     import traceback
 
     error_holder: dict[str, BaseException] = {}
@@ -151,7 +150,7 @@ def takeoff_with_settle(
                 print(
                     f"[{label}] Takeoff attempt {attempt}/{max_attempts} rejected: {exc}; "
                     "re-settling...",
-                    file=__import__("sys").stderr,
+                    file=sys.stderr,
                 )
                 try:
                     client.cancelLastTask()
@@ -168,7 +167,7 @@ def takeoff_with_settle(
             print(
                 f"[{label}] takeoff attempt {attempt}/{max_attempts} "
                 f"failed ({type(exc).__name__}: {exc}); retrying...",
-                file=__import__("sys").stderr,
+                file=sys.stderr,
             )
             time.sleep(1.5 * attempt)
         except Exception as exc:
@@ -178,7 +177,7 @@ def takeoff_with_settle(
             print(
                 f"[{label}] takeoff attempt {attempt}/{max_attempts} "
                 f"failed ({type(exc).__name__}: {exc}); retrying...",
-                file=__import__("sys").stderr,
+                file=sys.stderr,
             )
             time.sleep(1.5 * attempt)
     if last_exc is not None:
@@ -226,7 +225,7 @@ def land_with_telemetry(
     """
 
     landing_cfg = config.get("landing", {})
-    profile = __import__("os").environ.get("AIGP_LANDING_PROFILE", "").strip() or landing_cfg.get(
+    profile = os.environ.get("AIGP_LANDING_PROFILE", "").strip() or landing_cfg.get(
         "profile", "faster_soft"
     )
 
@@ -332,7 +331,7 @@ def wait_until_stationary(
     print(
         f"[{label}] Warning: drone still moving ({last_speed:.2f} m/s) after "
         f"{timeout_s:.1f}s settle; proceeding anyway",
-        file=__import__("sys").stderr,
+        file=sys.stderr,
     )
 
 
