@@ -189,7 +189,6 @@ def simulator_endpoint(config: Config | dict[str, Any]) -> tuple[str, int]:
 
 
 def apply_low_end_overrides(config: Config | dict[str, Any]) -> None:
-    """Mutate config dict in-place when AIGP_LOW_END=1."""
     raw = config._raw if isinstance(config, Config) else config
     if os.environ.get("AIGP_LOW_END", "").strip() != "1":
         return
