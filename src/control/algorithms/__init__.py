@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.control.flight_client import FlightClient
 
 if TYPE_CHECKING:
+    from src.config import Config
     from src.vision import VisionFeed, VisionFrame, VisionStats
 
 _registry: dict[str, type[Algorithm]] = {}
@@ -20,7 +21,7 @@ class Algorithm:
     name: str = "base"
     config_section: str | None = None
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: Config | dict[str, Any]) -> None:
         self._config = config
         self._vision_feed: VisionFeed | None = None
 
@@ -53,7 +54,7 @@ def register(name: str):
     return decorator
 
 
-def get_algorithm(name: str, config: dict) -> Algorithm:
+def get_algorithm(name: str, config: Config | dict[str, Any]) -> Algorithm:
     """Instantiate an algorithm by name from the registry."""
     if name not in _registry:
         available = ", ".join(_registry.keys()) or "(none)"
