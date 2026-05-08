@@ -121,11 +121,9 @@ class VisionGuidedControl(Algorithm):
                 depth_map = None
             elif frame is not None:
                 info = detect_fn(frame)
-                # DEBUG: Attempt to get depth info
                 try:
                     depth_map = get_depth_info(frame)
                     if depth_map is not None:
-                        # DEBUG: Print center depth stats every ~1s
                         if steps % max(1, int(rate_hz)) == 0:
                             h, w = depth_map.shape
                             center_val = depth_map[h // 2, w // 2]
