@@ -294,60 +294,59 @@ class AutonomousExplore(Algorithm):
             if pursue_targets and frame is not None:
                 now_s = time.monotonic()
                 blue_active = pursue_blue_rings and now_s >= blue_suppressed_until_s
-                blue = blue_ring_info_normalized(frame) if blue_active else None
+                
+                # We track "real" detections separately from "recovered" ones.
+                # Recovered detections (dropout recovery) keep the drone on course
+                # but don't reset the timer for active scanning.
+                real_blue = blue_ring_info_normalized(frame) if blue_active else None
+                blue = real_blue
+
                 # Red is gated on `gate_cleared`: don't even look until at
                 # least one ring has been flown through, so a red target
                 # visible to the side can't divert the drone pre-gate.
                 red_allowed = pursue_red_targets and (gate_cleared or not red_only_after_gate)
-                red = red_target_info_normalized(frame) if red_allowed else None
+                real_red = red_target_info_normalized(frame) if red_allowed else None
+                red = real_red
 
                 # Engage blue lock once we see a ring close enough to commit to,
                 # and refresh the lock every frame the ring stays in view.
-                if blue is not None:
+                if real_blue is not None:
                     last_target_seen_s = now_s
-                    last_target_nx = blue[0]
-                    last_blue = (blue[0], blue[1], blue[2], now_s, yaw_rad)
+                    last_target_nx = real_blue[0]
+                    last_blue = (real_blue[0], real_blue[1], real_blue[2], now_s, yaw_rad)
                     # CRITICAL: If we see a gate, we LOCK ON and ignore everything else
                     blue_lock_until_s = now_s + 2.5
                 blue_lock_engaged = now_s < blue_lock_until_s
 
-                if red is not None:
+                if real_red is not None:
                     last_target_seen_s = now_s
-                    last_target_nx = red[0]
-                    last_red = (red[0], red[1], red[2], now_s, yaw_rad)
+                    last_target_nx = real_red[0]
+                    last_red = (real_red[0], real_red[1], real_red[2], now_s, yaw_rad)
                     red_lock_until_s = now_s + 2.0
                 red_lock_engaged = now_s < red_lock_until_s
 
                 # Detector dropout recovery: if locked but this frame missed,
                 # reuse the most recent detection — but compensate nx by the
-                # yaw rotation we've performed since then. Without this the
-                # cached nx=+0.99 keeps commanding a hard-right yaw forever.
+                # yaw rotation we've performed since then.
                 if blue is None and blue_lock_engaged and last_blue is not None:
                     age_s = now_s - last_blue[3]
-                    # Extend timeout to 2.0s for better distant locking.
                     if age_s <= max(2.0, blue_lock_timeout_s):
                         delta_yaw_deg = math.degrees(yaw_rad - last_blue[4])
-                        # Wrap to (-180, 180] so wraparound doesn't blow up nx.
                         delta_yaw_deg = (delta_yaw_deg + 180.0) % 360.0 - 180.0
                         nx_compensated = last_blue[0] - delta_yaw_deg / cam_half_fov_deg
-                        # If we've yawed past the target (|nx_compensated| > 1.2)
-                        # we'd be commanding the drone back toward where the ring
-                        # was; clamp so it gently re-centers instead of overshooting.
                         nx_compensated = _clamp(nx_compensated, -1.0, 1.0)
                         blue = (nx_compensated, last_blue[1], last_blue[2])
                         # Update coasting direction for scan initialization
                         last_target_nx = nx_compensated
                         if steps % max(1, int(rate_hz)) == 0:
                             print(
-                                f"[autonomous_explore] blue dropout — last seen "
-                                f"{age_s:.2f}s ago, raw_nx={last_blue[0]:+.2f} "
-                                f"compensated_nx={blue[0]:+.2f} "
-                                f"(yawed {delta_yaw_deg:+.1f}°)"
+                                f"[autonomous_explore] blue dropout recovery (age={age_s:.2f}s) "
+                                f"raw_nx={last_blue[0]:+.2f} comp_nx={blue[0]:+.2f}"
                             )
 
                 if red is None and red_lock_engaged and last_red is not None:
                     age_s = now_s - last_red[3]
-                    if age_s <= 2.0:  # Consistent timeout for red recovery
+                    if age_s <= 2.0:
                         delta_yaw_deg = math.degrees(yaw_rad - last_red[4])
                         delta_yaw_deg = (delta_yaw_deg + 180.0) % 360.0 - 180.0
                         nx_compensated = last_red[0] - delta_yaw_deg / cam_half_fov_deg
@@ -357,10 +356,8 @@ class AutonomousExplore(Algorithm):
                         last_target_nx = nx_compensated
                         if steps % max(1, int(rate_hz)) == 0:
                             print(
-                                f"[autonomous_explore] red dropout — last seen "
-                                f"{age_s:.2f}s ago, raw_nx={last_red[0]:+.2f} "
-                                f"compensated_nx={red[0]:+.2f} "
-                                f"(yawed {delta_yaw_deg:+.1f}°)"
+                                f"[autonomous_explore] red dropout recovery (age={age_s:.2f}s) "
+                                f"raw_nx={last_red[0]:+.2f} comp_nx={red[0]:+.2f}"
                             )
 
                 # --- PROXIMITY-BASED TARGET ARBITRATION ---
@@ -568,6 +565,21 @@ class AutonomousExplore(Algorithm):
                 state_label = "uniform"
             else:
                 norm = (obstacle_score - obstacle_score.min()) / max(1e-6, raw_range)
+                
+                # --- TARGET BIASING ---
+                # If we recently saw a target, slightly favor columns in that direction
+                # to prevent the drone from turning away from the gate area because
+                # monocular depth sees the gate rim as an "obstacle".
+                time_since_target = time.monotonic() - last_target_seen_s
+                if last_target_nx != 0.0 and time_since_target < 10.0:
+                    # Map last_target_nx [-1, 1] to column index [0, n_cols-1]
+                    bias_col = (last_target_nx * center_idx) + center_idx
+                    for i in range(n_cols):
+                        dist = abs(i - bias_col)
+                        # Penalize columns far from the target direction.
+                        # This makes depth-wander "stickier" to the search area.
+                        norm[i] *= (1.0 + 0.25 * dist)
+
                 chosen = int(np.argmin(norm))
                 center_norm = float(norm[round(center_idx)])
 
@@ -588,20 +600,28 @@ class AutonomousExplore(Algorithm):
             # If we've been blind for a while, start an active search pattern.
             if target_info is None:
                 time_since_target = time.monotonic() - last_target_seen_s
-                if time_since_target > 2.5:  # Trigger search after 2.5s of blindness
+                # Trigger search immediately when the dropout recovery/lock fails (~2.0s)
+                if time_since_target > 2.0:
                     # If this is the start of a search, pick direction based on
                     # where we last saw a target.
                     if search_scan_offset == 0.0 and last_target_nx != 0.0:
                         search_direction = 1.0 if last_target_nx > 0 else -1.0
 
-                    # Perform a scan ±25 degrees to "find" the next gate.
-                    search_scan_offset += search_direction * (30.0 * dt)
-                    if abs(search_scan_offset) > 25.0:
+                    # Perform a scan ±30 degrees to "find" the next gate.
+                    search_scan_offset += search_direction * (35.0 * dt)
+                    if abs(search_scan_offset) > 30.0:
                         search_direction *= -1.0
 
-                    # Apply the scan offset to the depth-wander yaw.
-                    yaw_rate += search_scan_offset
+                    # Override depth-wander entirely during active search so we don't
+                    # turn away from the gate area because of depth-avoidance.
+                    yaw_rate = search_scan_offset
                     state_label = "SCANNING"
+                elif time_since_target > 0.5:
+                    # Brief "coasting" period: suppress aggressive depth-wander 
+                    # immediately after losing a target to prevent the "snap-away"
+                    # behavior where it avoids the gate rim.
+                    yaw_rate *= 0.2
+                    state_label = "COASTING"
             else:
                 # Reset scan offset if we have a target
                 search_scan_offset = 0.0
