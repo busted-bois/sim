@@ -84,6 +84,7 @@ class AutonomousExplore(Algorithm):
         target_approach_speed_ms = _clamp(
             float(cfg.get("target_approach_speed_ms", 2.0)), 0.0, max_v
         )
+        target_v_gain = _clamp(float(cfg.get("target_v_gain", 2.5)), 0.5, 10.0)
         target_arrival_r_frac = _clamp(float(cfg.get("target_arrival_r_frac", 0.20)), 0.05, 0.95)
         target_min_r_frac = _clamp(float(cfg.get("target_min_r_frac", 0.02)), 0.005, 0.5)
 
@@ -109,6 +110,9 @@ class AutonomousExplore(Algorithm):
         # rim when the trigger fires while still partway off to one side.
         flythrough_align_max_nx = _clamp(
             float(cfg.get("flythrough_align_max_nx", 0.18)), 0.05, 0.5
+        )
+        flythrough_align_max_ny = _clamp(
+            float(cfg.get("flythrough_align_max_ny", 0.15)), 0.05, 0.5
         )
         # Boost yaw authority during the close-range lineup phase so the
         # drone can swing onto axis quickly without the ring drifting out of
@@ -182,6 +186,7 @@ class AutonomousExplore(Algorithm):
         # deadline. Cleared back to None once we exit the gate.
         flythrough_until_s: float | None = None
         flythrough_yaw_rad: float = 0.0
+        flythrough_z_target: float = z_hold
         blue_suppressed_until_s: float = 0.0
         blue_lock_until_s: float = 0.0
         red_lock_until_s: float = 0.0
@@ -233,7 +238,7 @@ class AutonomousExplore(Algorithm):
                     z = float(
                         client.getMultirotorState().kinematics_estimated.position.z_val
                     )
-                    err = z - z_hold
+                    err = z - flythrough_z_target
                     vz_ft = 0.35 if err < -0.3 else (-0.35 if err > 0.3 else 0.0)
                     client.moveByVelocityAsync(
                         flythrough_speed_ms * cos_y,
@@ -410,37 +415,47 @@ class AutonomousExplore(Algorithm):
                     and flythrough_blue_rings
                     and r_frac >= flythrough_trigger_r_frac
                 ):
-                    if abs(nx) <= flythrough_align_max_nx:
+                    if (
+                        abs(nx) <= flythrough_align_max_nx
+                        and abs(ny) <= flythrough_align_max_ny
+                    ):
                         # Aligned + close → commit to fly-through.
                         flythrough_until_s = time.monotonic() + flythrough_duration_s
                         flythrough_yaw_rad = yaw_rad
+                        flythrough_z_target = float(
+                            client.getMultirotorState().kinematics_estimated.position.z_val
+                        )
                         print(
                             f"[autonomous_explore] blue_ring aligned + close "
-                            f"(r_frac={r_frac:.2f} nx={nx:+.2f}); "
-                            f"committing to fly-through for {flythrough_duration_s:.1f}s"
+                            f"(r_frac={r_frac:.2f} nx={nx:+.2f} ny={ny:+.2f}); "
+                            f"locking z={flythrough_z_target:.1f} and committing "
+                            f"to fly-through for {flythrough_duration_s:.1f}s"
                         )
                         steps += 1
                         self._sleep_remaining(tick_start, dt)
                         continue
-                    # Close but off-center → lineup phase: slow down and
-                    # yaw aggressively until centered. The drone maintains a
-                    # small "creep" speed so it doesn't stall out.
+                    # Close but off-center (horizontally or vertically) → lineup phase:
+                    # slow down and center before committing.
                     lineup_v = _clamp(0.4 * cruise_v, 0.2, 1.0)
                     yaw_rate = _clamp(
                         target_yaw_gain_deg_s * lineup_yaw_gain_mult * nx, -120.0, 120.0
                     )
+                    # Vertical correction during lineup
+                    vz_lineup = _clamp(target_v_gain * ny, -1.0, 1.0)
+
                     client.moveByVelocityAsync(
                         lineup_v * cos_y,
                         lineup_v * sin_y,
-                        vz,
+                        vz_lineup,
                         dt,
                         yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
                     ).join()
                     if steps % max(1, int(rate_hz // 2)) == 0:
                         print(
-                            f"[autonomous_explore] lineup nx={nx:+.2f} (need |nx|<="
-                            f"{flythrough_align_max_nx:.2f}) r_frac={r_frac:.2f} "
-                            f"v={lineup_v:.2f} yaw_rate={yaw_rate:+.1f}"
+                            f"[autonomous_explore] lineup nx={nx:+.2f} ny={ny:+.2f} "
+                            f"(need |nx|<={flythrough_align_max_nx:.2f}, "
+                            f"|ny|<={flythrough_align_max_ny:.2f}) r_frac={r_frac:.2f} "
+                            f"v={lineup_v:.2f} yaw={yaw_rate:+.1f} vz={vz_lineup:+.1f}"
                         )
                     steps += 1
                     self._sleep_remaining(tick_start, dt)
@@ -464,19 +479,23 @@ class AutonomousExplore(Algorithm):
                     target_approach_speed_ms * (0.35 + 0.65 * alignment), 0.0, max_v
                 )
                 yaw_rate = _clamp(target_yaw_gain_deg_s * nx, -120.0, 120.0)
+                # Vertical centering during approach
+                vz_pursue = _clamp(target_v_gain * ny, -1.2, 1.2)
+
                 vx_world = fwd_speed * cos_y
                 vy_world = fwd_speed * sin_y
                 client.moveByVelocityAsync(
                     vx_world,
                     vy_world,
-                    vz,
+                    vz_pursue,
                     dt,
                     yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
                 ).join()
                 if steps % max(1, int(rate_hz)) == 0:
                     print(
                         f"[autonomous_explore] pursue {kind} nx={nx:+.2f} ny={ny:+.2f} "
-                        f"r_frac={r_frac:.2f} fwd={fwd_speed:.2f} yaw_rate={yaw_rate:+.1f}"
+                        f"r_frac={r_frac:.2f} fwd={fwd_speed:.2f} yaw_rate={yaw_rate:+.1f} "
+                        f"vz={vz_pursue:+.1f}"
                     )
                 steps += 1
                 self._sleep_remaining(tick_start, dt)
