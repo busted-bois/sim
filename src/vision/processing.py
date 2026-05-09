@@ -88,7 +88,7 @@ def find_blue_rings(frame: VisionFrame) -> list[tuple[int, int, int]]:
         dp=1,
         minDist=15,
         param1=50,
-        param2=18,
+        param2=22,
         minRadius=4,
         maxRadius=180,
     )

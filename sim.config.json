@@ -101,6 +101,7 @@
     "pursue_red_targets": true,
     "target_yaw_gain_deg_s": 50.0,
     "target_approach_speed_ms": 2.0,
+    "target_v_gain": 2.5,
     "target_arrival_r_frac": 0.20,
     "target_min_r_frac": 0.02,
     "flythrough_blue_rings": true,
@@ -113,6 +114,7 @@
     "blue_lock_r_frac": 0.08,
     "blue_lock_timeout_s": 1.5,
     "flythrough_align_max_nx": 0.18,
+    "flythrough_align_max_ny": 0.15,
     "lineup_yaw_gain_mult": 1.6,
     "red_only_after_gate": true
   },
