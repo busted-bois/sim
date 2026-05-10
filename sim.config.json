@@ -18,7 +18,12 @@
     "rpc_ready_timeout_seconds": 120,
     "trace": {
       "enabled": true,
-      "color_rgba": [1.0, 0.0, 1.0, 1.0],
+      "color_rgba": [
+        1.0,
+        0.0,
+        1.0,
+        1.0
+      ],
       "thickness": 4.0
     }
   },
@@ -129,7 +134,12 @@
     "vision_enabled": false,
     "segment_duration_s": 1.2,
     "speed_ms": 1.6,
-    "direction_labels": ["+X", "-X", "+Y", "-Y"]
+    "direction_labels": [
+      "+X",
+      "-X",
+      "+Y",
+      "-Y"
+    ]
   },
   "attitude_four_motion": {
     "segment_duration_s": 3.0,
@@ -142,14 +152,14 @@
     "rate_hz": 6.0,
     "duration_s": 60.0,
     "num_columns": 5,
-    "eye_band_top_frac": 0.30,
+    "eye_band_top_frac": 0.3,
     "eye_band_bottom_frac": 0.75,
     "clearance_percentile": 70.0,
     "inverse_depth": true,
     "uniform_range_thresh": 5.0,
     "yaw_gain_deg_s": 35.0,
-    "brake_norm_thresh": 0.70,
-    "creep_norm_thresh": 0.30,
+    "brake_norm_thresh": 0.7,
+    "creep_norm_thresh": 0.3,
     "hold_altitude_m": 5.0,
     "face_forward_on_start": true,
     "pursue_targets": true,
@@ -158,7 +168,7 @@
     "target_yaw_gain_deg_s": 50.0,
     "target_approach_speed_ms": 2.0,
     "target_v_gain": 2.5,
-    "target_arrival_r_frac": 0.20,
+    "target_arrival_r_frac": 0.2,
     "target_min_r_frac": 0.02,
     "flythrough_blue_rings": true,
     "flythrough_trigger_r_frac": 0.18,
@@ -292,10 +302,26 @@
     }
   },
   "waypoints": [
-    { "x": 10.0, "y": 0.0, "z": -8.0 },
-    { "x": 10.0, "y": 10.0, "z": -8.0 },
-    { "x": 0.0, "y": 10.0, "z": -8.0 },
-    { "x": 0.0, "y": 0.0, "z": -8.0 }
+    {
+      "x": 10.0,
+      "y": 0.0,
+      "z": -8.0
+    },
+    {
+      "x": 10.0,
+      "y": 10.0,
+      "z": -8.0
+    },
+    {
+      "x": 0.0,
+      "y": 10.0,
+      "z": -8.0
+    },
+    {
+      "x": 0.0,
+      "y": 0.0,
+      "z": -8.0
+    }
   ],
   "logging": {
     "level": "INFO",
@@ -323,5 +349,33 @@
     "pitch_up_degrees": 20.0,
     "roll_degrees": 0.0,
     "yaw_degrees": 0.0
+  },
+  "yolo_explore": {
+    "model_path": "models/yolov8n.pt",
+    "confidence": 0.5,
+    "classes": null,
+    "blue_class_names": ["blue_ring"],
+    "red_class_names": ["red_target"],
+    "max_speed_ms": 2.5,
+    "cruise_speed_ms": 1.5,
+    "rate_hz": 6.0,
+    "duration_s": 60.0,
+    "hold_altitude_m": 5.0,
+    "face_forward_on_start": true,
+    "target_yaw_gain_deg_s": 50.0,
+    "target_approach_speed_ms": 2.0,
+    "target_v_gain": 2.5,
+    "target_arrival_size_frac": 0.15,
+    "target_min_size_frac": 0.001,
+    "flythrough_trigger_size_frac": 0.1,
+    "flythrough_duration_s": 2.0,
+    "flythrough_speed_ms": 2.5,
+    "flythrough_align_max_nx": 0.18,
+    "flythrough_align_max_ny": 0.15,
+    "lineup_yaw_gain_mult": 1.6,
+    "red_only_after_gate": true,
+    "post_flythrough_blue_cooldown_s": 5.0,
+    "post_flythrough_scan_s": 4.0,
+    "post_flythrough_scan_speed_ms": 1.5
   }
 }
