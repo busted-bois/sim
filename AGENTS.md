@@ -18,6 +18,9 @@ uv run sim-very-soft                    # Gentle landing profile
 uv run sim vjoy                         # Manual vJoy control + GUI
 uv run preflight                        # Safety check before launch
 uv run calibrate                        # Depth calibration with manual GUI
+uv run check-mavlink                    # Sniff UDP 14540/14550 for MAVLink v1/v2 frames
+uv run sim-mavlink                      # Launch UE with PX4Multirotor settings (needs PX4-SITL in WSL); Ctrl+C to stop
+uv run sim-mavlink probe                # Same, but auto-run check-mavlink for 60s after launch
 uv run main.py                          # Run drone client (needs simulator running)
 ```
 
