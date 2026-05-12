@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from typing import Protocol
 
 __all__ = [
     "TimesyncEvent",
@@ -12,6 +13,13 @@ __all__ = [
 ]
 
 _TIMESYNC_MESSAGE_TYPE = "TIMESYNC"
+
+
+class _TimesyncMessageLike(Protocol):
+    tc1: object
+    ts1: object
+
+    def get_type(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,9 +49,18 @@ class TimesyncSnapshot:
     last_request: TimesyncEvent | None
     last_response: TimesyncEvent | None
 
+    @classmethod
+    def empty(cls) -> TimesyncSnapshot:
+        return cls(
+            message_count=0,
+            last_message=None,
+            last_request=None,
+            last_response=None,
+        )
+
 
 def parse_timesync_message(
-    message: object,
+    message: _TimesyncMessageLike | object,
     *,
     received_monotonic_ns: int | None = None,
     received_wall_ns: int | None = None,
@@ -58,6 +75,10 @@ def parse_timesync_message(
     target_component = int(getattr(message, "target_component", 0))
     source_system = _optional_source_id(message, "get_srcSystem")
     source_component = _optional_source_id(message, "get_srcComponent")
+    monotonic_ns, wall_ns = _receive_timestamps(
+        received_monotonic_ns=received_monotonic_ns,
+        received_wall_ns=received_wall_ns,
+    )
 
     return TimesyncEvent(
         tc1=tc1,
@@ -66,10 +87,8 @@ def parse_timesync_message(
         target_component=target_component,
         source_system=source_system,
         source_component=source_component,
-        received_monotonic_ns=(
-            time.monotonic_ns() if received_monotonic_ns is None else received_monotonic_ns
-        ),
-        received_wall_ns=(time.time_ns() if received_wall_ns is None else received_wall_ns),
+        received_monotonic_ns=monotonic_ns,
+        received_wall_ns=wall_ns,
     )
 
 
@@ -78,14 +97,11 @@ class TimesyncStore:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._message_count = 0
-        self._last_message: TimesyncEvent | None = None
-        self._last_request: TimesyncEvent | None = None
-        self._last_response: TimesyncEvent | None = None
+        self._snapshot = TimesyncSnapshot.empty()
 
     def handle_message(
         self,
-        message: object,
+        message: _TimesyncMessageLike | object,
         *,
         received_monotonic_ns: int | None = None,
         received_wall_ns: int | None = None,
@@ -100,30 +116,37 @@ class TimesyncStore:
 
     def record_event(self, event: TimesyncEvent) -> None:
         with self._lock:
-            self._record_event_locked(event)
+            self._snapshot = self._snapshot_after(event)
 
     def snapshot(self) -> TimesyncSnapshot:
         with self._lock:
-            return TimesyncSnapshot(
-                message_count=self._message_count,
-                last_message=self._last_message,
-                last_request=self._last_request,
-                last_response=self._last_response,
-            )
+            return self._snapshot
 
-    def _record_event_locked(self, event: TimesyncEvent) -> None:
-        self._message_count += 1
-        self._last_message = event
-        if event.is_request:
-            self._last_request = event
-        else:
-            self._last_response = event
+    def _snapshot_after(self, event: TimesyncEvent) -> TimesyncSnapshot:
+        snapshot = self._snapshot
+        return TimesyncSnapshot(
+            message_count=snapshot.message_count + 1,
+            last_message=event,
+            last_request=event if event.is_request else snapshot.last_request,
+            last_response=event if event.is_response else snapshot.last_response,
+        )
 
 
 def _required_attr(message: object, attr_name: str) -> object:
     if not hasattr(message, attr_name):
         raise ValueError(f"TIMESYNC message is missing required field {attr_name!r}.")
     return getattr(message, attr_name)
+
+
+def _receive_timestamps(
+    *,
+    received_monotonic_ns: int | None,
+    received_wall_ns: int | None,
+) -> tuple[int, int]:
+    return (
+        time.monotonic_ns() if received_monotonic_ns is None else received_monotonic_ns,
+        time.time_ns() if received_wall_ns is None else received_wall_ns,
+    )
 
 
 def _optional_source_id(message: object, getter_name: str) -> int | None:
