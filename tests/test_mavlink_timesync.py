@@ -61,8 +61,26 @@ class ParseTimesyncMessageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "TIMESYNC"):
             parse_timesync_message(_FakeHeartbeatMessage())
 
+    def test_rejects_missing_required_fields(self) -> None:
+        class _MissingTs1Message:
+            tc1 = 0
+
+            def get_type(self) -> str:
+                return "TIMESYNC"
+
+        with self.assertRaisesRegex(ValueError, "ts1"):
+            parse_timesync_message(_MissingTs1Message())
+
 
 class TimesyncStoreTests(unittest.TestCase):
+    def test_store_starts_empty(self) -> None:
+        snapshot = TimesyncStore().snapshot()
+
+        self.assertEqual(snapshot.message_count, 0)
+        self.assertIsNone(snapshot.last_message)
+        self.assertIsNone(snapshot.last_request)
+        self.assertIsNone(snapshot.last_response)
+
     def test_store_tracks_request_and_response_separately(self) -> None:
         store = TimesyncStore()
         request = _FakeTimesyncMessage(tc1=0, ts1=111)
