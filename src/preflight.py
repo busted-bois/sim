@@ -10,6 +10,7 @@ from typing import Any
 
 from src.config import load_config, resolve_config_path, simulator_endpoint
 from src.control.algorithms import list_algorithms
+from src.mavlink_endpoints import candidate_mavlink_endpoints, resolve_control_transport
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,9 +45,42 @@ def _has_nested_key(data: Any, key_path: str) -> bool:
     return isinstance(current, Mapping) and parts[-1] in current
 
 
+def _airsim_reachable(host: str, port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1.5)
+    try:
+        return sock.connect_ex((host, port)) == 0
+    finally:
+        sock.close()
+
+
+def _mavlink_heartbeat(config: dict) -> tuple[bool, str, list[str]]:
+    from pymavlink import mavutil as _mavutil
+
+    endpoints = candidate_mavlink_endpoints(config)
+    last_err = ""
+    for endpoint in endpoints:
+        connection = None
+        try:
+            connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
+            heartbeat = connection.wait_heartbeat(timeout=2.0)
+            if heartbeat is not None:
+                return True, endpoint, endpoints
+        except Exception as exc:
+            last_err = str(exc)
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+    return False, last_err, endpoints
+
+
 def run_preflight() -> int:
     _load_env_local()
     config = load_config()
+    transport = resolve_control_transport(config)
 
     errors: list[str] = []
     warnings: list[str] = []
@@ -95,20 +129,33 @@ def run_preflight() -> int:
     else:
         passes.append("PROJECT_PATH exists")
 
-    host, port = simulator_endpoint(config)
-    require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(1.5)
-    reachable = sock.connect_ex((host, port)) == 0
-    sock.close()
-    if reachable:
-        passes.append(f"AirSim RPC reachable at {host}:{port}")
-    else:
-        message = f"AirSim RPC not reachable at {host}:{port}"
-        if require_reachable:
-            errors.append(message)
+    if transport == "mavlink":
+        heartbeat_ok, detail, endpoints = _mavlink_heartbeat(config)
+        require_reachable = bool(
+            config.get("preflight", {}).get("require_mavlink_reachable", False)
+        )
+        if heartbeat_ok:
+            passes.append(f"MAVLink HEARTBEAT detected via {detail}")
         else:
-            warnings.append(f"{message} (warning only before simulator launch)")
+            message = (
+                "MAVLink HEARTBEAT not detected on any endpoint. "
+                f"endpoints={endpoints}. last_err={detail}"
+            )
+            if require_reachable:
+                errors.append(message)
+            else:
+                warnings.append(f"{message} (warning only before simulator launch)")
+    else:
+        host, port = simulator_endpoint(config)
+        require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))
+        if _airsim_reachable(host, port):
+            passes.append(f"AirSim RPC reachable at {host}:{port}")
+        else:
+            message = f"AirSim RPC not reachable at {host}:{port}"
+            if require_reachable:
+                errors.append(message)
+            else:
+                warnings.append(f"{message} (warning only before simulator launch)")
 
     cfg_path = resolve_config_path()
     print(f"== Preflight (config: {cfg_path}) ==")
