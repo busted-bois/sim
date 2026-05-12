@@ -14,6 +14,7 @@ dependencies = [
     "numpy",
     "opencv-python-headless>=4.8,<5",
     "pillow>=12.2.0",
+    "pymavlink>=2.4.49",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +36,8 @@ attitude-listen = "src.mavlink.attitude_listen:main"
 sim-mavlink = "src.sim_launch:main_mavlink"
 mavlink-all = "src.sim_launch:main_mavlink_all"
 sim-restore-simpleflight = "src.sim_launch:main_restore_simpleflight"
+timesync-smoke = "src.timesync_smoke:main"
+sim-timesync-smoke = "src.sim_launch:main_timesync_smoke"
 
 [dependency-groups]
 dev = [
