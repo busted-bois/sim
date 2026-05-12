@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -21,9 +22,12 @@ def set_front_camera_pose(client: FlightClient, config: Config | dict) -> None:
     camera_name = str(vision_cfg.get("camera_name", "0"))
     cam_cfg = config.get("camera", {})
     pose_offset = tuple(cam_cfg.get("pose_offset", [0.35, 0.0, -0.05]))
+    pitch_up_degrees = float(vision_cfg.get("pitch_up_degrees", 20.0))
+    # AirSim camera poses use NED-style axes, so an upward tilt is negative pitch.
+    pitch_rad = math.radians(-pitch_up_degrees)
     front_pose = airsim.Pose(
         airsim.Vector3r(pose_offset[0], pose_offset[1], pose_offset[2]),
-        airsim.Quaternionr(0.0, 0.0, 0.0, 1.0),
+        airsim.Quaternionr(0.0, math.sin(pitch_rad / 2.0), 0.0, math.cos(pitch_rad / 2.0)),
     )
     try:
         client.simSetCameraPose(camera_name, front_pose)
