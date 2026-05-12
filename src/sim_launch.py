@@ -141,40 +141,6 @@ def _ensure_camera_settings(
     normalized_view_mode = _normalize_view_mode(view_mode)
     transport_l = str(transport).strip().lower()
     vehicle_name = "Drone1"
-    vision_cfg = config.get("vision", {})
-    camera_cfg = config.get("camera", {})
-    pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
-    camera_pitch = float(camera_cfg.get("pitch_up_degrees", 20.0))
-    camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
-    camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
-    camera_name = str(vision_cfg.get("camera_name", "0"))
-    resolution = vision_cfg.get("resolution", [640, 360])
-    if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
-        capture_width = int(resolution[0])
-        capture_height = int(resolution[1])
-    else:
-        capture_width = int(vision_cfg.get("width", 640))
-        capture_height = int(vision_cfg.get("height", 360))
-    front_camera_settings = {
-        "X": float(pose_offset[0]),
-        "Y": float(pose_offset[1]),
-        "Z": float(pose_offset[2]),
-        "Pitch": camera_pitch,
-        "Roll": camera_roll,
-        "Yaw": camera_yaw,
-        "CaptureSettings": [
-            {
-                "ImageType": 0,
-                "Width": capture_width,
-                "Height": capture_height,
-                "FOV_Degrees": float(vision_cfg.get("fov_degrees", 100.0)),
-            }
-        ],
-    }
-    cameras_settings = {
-        camera_name: front_camera_settings,
-        "front_center": dict(front_camera_settings),
-    }
     if transport_l == "mavlink":
         mav_cfg = config.get("control", {}).get("mavlink", {})
         airsim_mav_cfg = mav_cfg.get("airsim_profile", {})
@@ -207,14 +173,12 @@ def _ensure_camera_settings(
             "QgcPort": qgc_port,
             "AllowAPIAlways": True,
             "EnableTrace": bool(enable_trace),
-            "Cameras": cameras_settings,
         }
     else:
         vehicle_settings = {
             "VehicleType": "SimpleFlight",
             "AllowAPIAlways": True,
             "EnableTrace": bool(enable_trace),
-            "Cameras": cameras_settings,
         }
 
     required_settings = {
@@ -334,13 +298,8 @@ def _wait_for_control_link(
     config: dict,
     wait_timeout_s: float,
     transport: str,
-    *,
-    require_requested_transport: bool = False,
 ) -> tuple[str, str | None]:
-    from src.mavlink_endpoints import (
-        describe_mavlink_heartbeat_failure,
-        probe_mavlink_heartbeat,
-    )
+    from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint
 
     requested = str(transport).strip().lower()
     timeout_s = max(15.0, float(wait_timeout_s))
@@ -352,20 +311,21 @@ def _wait_for_control_link(
             f"within {timeout_s:.0f}s. Ensure Unreal finished loading the map."
         )
 
-    strict = require_requested_transport or os.environ.get("AIGP_MAVLINK_STRICT", "").strip() == "1"
+    strict = os.environ.get("AIGP_MAVLINK_STRICT", "").strip() == "1"
     mav_phase_s = min(30.0, max(8.0, timeout_s * 0.25))
-    probe = probe_mavlink_heartbeat(config, timeout_s=mav_phase_s)
-    if probe.endpoint is not None:
-        return "mavlink", probe.endpoint
-
-    failure_detail = describe_mavlink_heartbeat_failure(config, probe)
+    resolved = first_mavlink_heartbeat_endpoint(config, timeout_s=mav_phase_s)
+    if resolved is not None:
+        return "mavlink", resolved
 
     if strict:
-        raise SystemExit(failure_detail)
+        raise SystemExit(
+            f"AIGP_MAVLINK_STRICT=1: no MAVLink HEARTBEAT within {timeout_s:.0f}s. "
+            "Check MAVLink wiring in the simulator."
+        )
 
     rest_s = max(10.0, timeout_s - mav_phase_s)
     print(
-        f"{failure_detail} "
+        "No MAVLink HEARTBEAT detected yet. "
         f"Trying AirSim RPC for up to {rest_s:.0f}s. "
         'Set AIGP_MAVLINK_STRICT=1 to require MAVLink.'
     )
@@ -374,8 +334,7 @@ def _wait_for_control_link(
         return "airsim", None
 
     raise SystemExit(
-        f"{failure_detail} AirSim RPC was also not ready on {host}:{airsim_port} "
-        f"within {timeout_s:.0f}s."
+        f"Neither MAVLink HEARTBEAT nor AirSim RPC became ready within {timeout_s:.0f}s."
     )
 
 
@@ -868,7 +827,6 @@ def launch(
                 config,
                 rpc_ready_timeout_s,
                 transport,
-                require_requested_transport=require_requested_transport,
             )
         except KeyboardInterrupt:
             _cleanup_on_interrupt()
@@ -888,7 +846,6 @@ def launch(
                 config,
                 rpc_ready_timeout_s,
                 transport,
-                require_requested_transport=require_requested_transport,
             )
         except KeyboardInterrupt:
             _cleanup_on_interrupt()
@@ -1016,15 +973,6 @@ def main_low_end() -> None:
 
 def main_timesync_smoke() -> None:
     launch(script_path="src/timesync_smoke.py")
-
-
-def main_highres_imu_smoke() -> None:
-    os.environ["AIGP_CONTROL_TRANSPORT"] = "mavlink"
-    os.environ.setdefault("AIGP_ALLOW_MAVLINK_SIMPLEFLIGHT", "1")
-    launch(
-        script_path="src/highres_imu_smoke.py",
-        require_requested_transport=True,
-    )
 
 
 if __name__ == "__main__":

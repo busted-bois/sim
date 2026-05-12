@@ -12,13 +12,7 @@ from typing import Any
 
 from src.config import load_config, resolve_config_path, simulator_endpoint
 from src.control.algorithms import list_algorithms
-from src.mavlink_endpoints import (
-    candidate_mavlink_endpoints,
-    describe_mavlink_heartbeat_failure,
-    probe_mavlink_heartbeat,
-    resolve_control_transport,
-)
-from src.simulator_specs import resolve_specification_path
+from src.mavlink_endpoints import candidate_mavlink_endpoints, resolve_control_transport
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -53,12 +47,6 @@ def _has_nested_key(data: Any, key_path: str) -> bool:
     return isinstance(current, Mapping) and parts[-1] in current
 
 
-def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
-    if isinstance(value, Mapping):
-        return value
-    return {}
-
-
 def _airsim_reachable(host: str, port: int) -> bool:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1.5)
@@ -68,64 +56,25 @@ def _airsim_reachable(host: str, port: int) -> bool:
         sock.close()
 
 
-def _mavlink_heartbeat(
-    config: dict,
-    *,
-    connection_factory=None,
-) -> tuple[bool, str, list[str]]:
-    probe = probe_mavlink_heartbeat(
-        config,
-        timeout_s=2.0,
-        connection_factory=connection_factory,
-    )
-    if probe.endpoint is not None:
-        return True, probe.endpoint, list(probe.attempted_endpoints)
-    return False, describe_mavlink_heartbeat_failure(config, probe), list(probe.attempted_endpoints)
-
-
-def _mavlink_highres_imu(
-    config: dict,
-    *,
-    connection_factory=None,
-) -> tuple[bool, str, list[str]]:
+def _mavlink_heartbeat(config: dict) -> tuple[bool, str, list[str]]:
     from pymavlink import mavutil as _mavutil
 
-    factory = connection_factory or _mavutil.mavlink_connection
     endpoints = candidate_mavlink_endpoints(config)
-    mav_cfg = config.get("control", {}).get("mavlink", {})
-    imu_cfg = mav_cfg.get("highres_imu", {})
-    interval_us = int(1e6 / max(1.0, float(imu_cfg.get("request_hz", 20.0))))
     last_err = ""
     for endpoint in endpoints:
         connection = None
         try:
-            connection = factory(endpoint, autoreconnect=False)
+            connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
             heartbeat = connection.wait_heartbeat(timeout=2.0)
-            if heartbeat is None:
-                continue
-            message_id = getattr(_mavutil.mavlink, "MAVLINK_MSG_ID_HIGHRES_IMU", None)
-            if message_id is not None:
-                connection.mav.message_interval_send(int(message_id), interval_us)
-            deadline = time.monotonic() + 2.5
-            samples = 0
-            while time.monotonic() < deadline:
-                message = connection.recv_match(
-                    type=["HIGHRES_IMU"],
-                    blocking=True,
-                    timeout=0.5,
-                )
-                if message is not None:
-                    samples += 1
-                    sensor_id = int(getattr(message, "id", 0))
-                    return True, f"{endpoint} sensor_id={sensor_id} samples={samples}", endpoints
-            last_err = "timed out waiting for HIGHRES_IMU after requesting stream"
+            if heartbeat is not None:
+                return True, endpoint, endpoints
         except Exception as exc:
             last_err = str(exc)
         finally:
             if connection is not None:
                 try:
                     connection.close()
-                except OSError:
+                except Exception:
                     pass
     return False, last_err, endpoints
 
@@ -185,77 +134,6 @@ def run_preflight() -> int:
     else:
         passes.append("PROJECT_PATH exists")
 
-    physics_update_hz = float(sim_cfg.get("physics_update_hz", 0.0))
-    if abs(physics_update_hz - 120.0) > 1e-6:
-        errors.append(
-            "simulator.physics_update_hz must be 120.0 for the official spec "
-            f"(got {physics_update_hz})"
-        )
-    else:
-        passes.append("Simulator physics update rate is 120 Hz")
-
-    vision_fps = float(vision_cfg.get("fps", 0.0))
-    if abs(vision_fps - 30.0) > 1e-6:
-        errors.append(f"vision.fps must be 30.0 for the official spec (got {vision_fps})")
-    else:
-        passes.append("Camera capture rate is 30 Hz")
-
-    if bool(vision_cfg.get("startup_autotune_enabled", False)):
-        errors.append("vision.startup_autotune_enabled must be false for fixed 30 Hz compliance")
-    else:
-        passes.append("Camera startup auto-tuning is disabled for fixed timing")
-
-    camera_pitch_up = float(camera_cfg.get("pitch_up_degrees", 0.0))
-    if abs(camera_pitch_up - 20.0) > 1e-6:
-        errors.append(
-            f"camera.pitch_up_degrees must be 20.0 for the official spec (got {camera_pitch_up})"
-        )
-    else:
-        passes.append("Front camera upward tilt is 20 degrees")
-
-    command_rate_hz = float(control_cfg.get("command_rate_hz", 0.0))
-    if not (0.0 < command_rate_hz < 100.0):
-        errors.append(
-            "control.command_rate_hz must be greater than 0 and less than 100 "
-            f"(got {command_rate_hz})"
-        )
-    else:
-        passes.append(f"Command rate limit is in spec (<100 Hz): {command_rate_hz:.1f} Hz")
-
-    latency_cfg = control_cfg.get("latency_tuning", {})
-    if bool(latency_cfg.get("enabled", False)):
-        errors.append(
-            "control.latency_tuning.enabled must be false for fixed "
-            "command-rate compliance"
-        )
-    else:
-        passes.append("Command-rate auto-tuning is disabled for fixed timing")
-
-    spec_required = bool(sim_cfg.get("specification_required", False))
-    spec_path = resolve_specification_path(config)
-    if spec_path is not None and spec_path.is_file():
-        try:
-            spec_snapshot = json.loads(spec_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            errors.append(f"Simulator specification snapshot is invalid JSON: {spec_path} ({exc})")
-        else:
-            drone_dims = _mapping_or_empty(spec_snapshot.get("drone")).get("dimensions_m")
-            gate_dims = _mapping_or_empty(spec_snapshot.get("gate_reference")).get("dimensions_m")
-            if drone_dims and gate_dims:
-                passes.append(f"Simulator specification snapshot present: {spec_path}")
-            else:
-                errors.append(
-                    "Simulator specification snapshot is missing drone/gate dimensions: "
-                    f"{spec_path}"
-                )
-    elif spec_required:
-        errors.append(
-            "Simulator specification snapshot is required but missing. "
-            "Run: uv run extract-simulator-specs"
-        )
-    else:
-        warnings.append("Simulator specification snapshot not found; dimension checks were skipped")
-
     if transport == "mavlink":
         heartbeat_ok, detail, endpoints = _mavlink_heartbeat(config)
         require_reachable = bool(
@@ -272,21 +150,6 @@ def run_preflight() -> int:
                 errors.append(message)
             else:
                 warnings.append(f"{message} (warning only before simulator launch)")
-        imu_cfg = config.get("control", {}).get("mavlink", {}).get("highres_imu", {})
-        if bool(imu_cfg.get("enabled", True)):
-            imu_ok, imu_detail, imu_endpoints = _mavlink_highres_imu(config)
-            require_imu = bool(imu_cfg.get("require_stream", False))
-            if imu_ok:
-                passes.append(f"MAVLink HIGHRES_IMU detected via {imu_detail}")
-            else:
-                message = (
-                    "MAVLink HIGHRES_IMU not detected on any endpoint after requesting the stream. "
-                    f"endpoints={imu_endpoints}. last_err={imu_detail}"
-                )
-                if require_imu:
-                    errors.append(message)
-                else:
-                    warnings.append(f"{message} (warning only before simulator launch)")
     else:
         host, port = simulator_endpoint(config)
         require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))

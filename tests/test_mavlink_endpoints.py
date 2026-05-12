@@ -2,11 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from src.mavlink_endpoints import (
-    MavlinkHeartbeatProbeResult,
-    describe_mavlink_heartbeat_failure,
-    resolve_control_transport,
-)
+from src.mavlink_endpoints import resolve_control_transport
 
 
 class ResolveControlTransportTests(unittest.TestCase):
@@ -48,35 +44,6 @@ class ResolveControlTransportTests(unittest.TestCase):
     def test_unsupported_transport_falls_back_to_airsim(self) -> None:
         config = {"control": {"transport": "weird_mode"}}
         self.assertEqual(resolve_control_transport(config), "airsim")
-
-    def test_describe_mavlink_heartbeat_failure_includes_endpoints_and_profile(self) -> None:
-        config = {
-            "control": {
-                "transport": "mavlink",
-                "mavlink": {
-                    "airsim_profile": {
-                        "vehicle_type": "PX4Multirotor",
-                        "udp_port": 14560,
-                        "control_port_local": 14540,
-                        "control_port_remote": 14580,
-                        "qgc_port": 14550,
-                    }
-                },
-            }
-        }
-        probe = MavlinkHeartbeatProbeResult(
-            endpoint=None,
-            attempted_endpoints=("udpin:0.0.0.0:14550", "udpin:0.0.0.0:5760"),
-            last_error="udpin:0.0.0.0:14550: no heartbeat within 0.8s",
-            elapsed_s=8.5,
-        )
-
-        detail = describe_mavlink_heartbeat_failure(config, probe)
-
-        self.assertIn("No MAVLink HEARTBEAT detected", detail)
-        self.assertIn("udpin:0.0.0.0:14550", detail)
-        self.assertIn("vehicle_type='PX4Multirotor'", detail)
-        self.assertIn("Likely causes:", detail)
 
 
 if __name__ == "__main__":

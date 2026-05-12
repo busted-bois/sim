@@ -96,7 +96,6 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
             send_timesync_requests=False,
             prepare_for_flight_on_connect=False,
             request_state_messages_on_connect=False,
-            highres_imu_enabled=False,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:
@@ -128,7 +127,6 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
             send_timesync_requests=False,
             timesync_min_stable_samples=1,
             timesync_max_stable_rtt_ns=10_000_000_000_000,
-            highres_imu_enabled=False,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:
@@ -175,7 +173,6 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
             timesync_log_messages=False,
             send_timesync_requests=False,
             timesync_min_stable_samples=1,
-            highres_imu_enabled=False,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:
@@ -207,7 +204,6 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
             timesync_log_messages=False,
             send_timesync_requests=True,
             timesync_request_interval_s=0.1,
-            highres_imu_enabled=False,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:
@@ -240,7 +236,6 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
             timesync_log_messages=False,
             send_timesync_requests=False,
             timesync_min_stable_samples=1,
-            highres_imu_enabled=False,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:

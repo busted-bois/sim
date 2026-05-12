@@ -207,25 +207,6 @@
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,
-      "highres_imu": {
-        "enabled": true,
-        "request_hz": 50.0,
-        "require_stream": false,
-        "log_messages": false,
-        "max_staleness_ms": 1000.0,
-        "summary_interval_seconds": 5.0,
-        "warn_on_stale": true,
-        "capture_log": {
-          "enabled": false,
-          "path": "logs/highres_imu_capture.csv"
-        },
-        "smoke_test": {
-          "duration_seconds": 8.0,
-          "poll_interval_seconds": 1.0,
-          "min_samples": 3,
-          "require_fresh": true
-        }
-      },
       "timesync": {
         "send_requests": true,
         "request_interval_seconds": 1.0,
