@@ -1,19 +1,95 @@
+import queue
 import time
 import unittest
 
 from src.control.mavlink_client import PymavlinkFlightClient
-from tests.mavlink_fakes import FakeMavConnection, FakeMessage
+
+
+class _FakeMessage:
+    def __init__(self, message_type: str, **fields) -> None:
+        self._message_type = message_type
+        self._source_system = int(fields.pop("source_system", 1))
+        self._source_component = int(fields.pop("source_component", 1))
+        for key, value in fields.items():
+            setattr(self, key, value)
+
+    def get_type(self) -> str:
+        return self._message_type
+
+    def get_srcSystem(self) -> int:
+        return self._source_system
+
+    def get_srcComponent(self) -> int:
+        return self._source_component
+
+
+class _FakeMavSender:
+    def __init__(self) -> None:
+        self.command_long_calls: list[tuple] = []
+        self.message_interval_calls: list[tuple] = []
+        self.position_target_calls: list[tuple] = []
+        self.attitude_target_calls: list[tuple] = []
+        self.timesync_calls: list[tuple[int, int]] = []
+
+    def command_long_send(self, *args) -> None:
+        self.command_long_calls.append(args)
+
+    def message_interval_send(self, *args) -> None:
+        self.message_interval_calls.append(args)
+
+    def set_position_target_local_ned_send(self, *args) -> None:
+        self.position_target_calls.append(args)
+
+    def set_attitude_target_send(self, *args) -> None:
+        self.attitude_target_calls.append(args)
+
+    def timesync_send(self, tc1: int, ts1: int) -> None:
+        self.timesync_calls.append((tc1, ts1))
+
+
+class _FakeMavConnection:
+    def __init__(self, heartbeat: _FakeMessage, queued_messages: list[_FakeMessage]) -> None:
+        self._heartbeat = heartbeat
+        self._queue: queue.Queue[_FakeMessage] = queue.Queue()
+        for message in queued_messages:
+            self.push_message(message)
+        self.target_system = heartbeat.get_srcSystem()
+        self.target_component = heartbeat.get_srcComponent()
+        self.mav = _FakeMavSender()
+        self.closed = False
+
+    def wait_heartbeat(self, timeout: float | None = None):
+        _ = timeout
+        return self._heartbeat
+
+    def recv_match(self, type=None, blocking=True, timeout=None):
+        _ = blocking
+        deadline = time.time() + (timeout or 0.0)
+        while True:
+            remaining = max(0.0, deadline - time.time()) if timeout is not None else None
+            try:
+                message = self._queue.get(timeout=remaining)
+            except queue.Empty:
+                return None
+            if type is None or message.get_type() in type:
+                return message
+
+    def close(self) -> None:
+        self.closed = True
+
+    def push_message(self, message: _FakeMessage) -> None:
+        self._queue.put(message)
 
 
 class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
     def test_sync_probe_mode_skips_flight_setup_commands(self) -> None:
-        heartbeat = FakeMessage(
+        heartbeat = _FakeMessage(
             "HEARTBEAT",
             base_mode=0,
             source_system=42,
             source_component=24,
         )
-        connection = FakeMavConnection(heartbeat, [])
+        connection = _FakeMavConnection(heartbeat, [])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             timesync_log_messages=False,
@@ -31,20 +107,20 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
         self.assertEqual(connection.mav.message_interval_calls, [])
 
     def test_confirm_connection_processes_timesync_request_and_responds(self) -> None:
-        heartbeat = FakeMessage(
+        heartbeat = _FakeMessage(
             "HEARTBEAT",
             base_mode=0,
             source_system=42,
             source_component=24,
         )
-        timesync_request = FakeMessage(
+        timesync_request = _FakeMessage(
             "TIMESYNC",
             tc1=0,
             ts1=123456789,
             source_system=42,
             source_component=24,
         )
-        connection = FakeMavConnection(heartbeat, [timesync_request])
+        connection = _FakeMavConnection(heartbeat, [timesync_request])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             timesync_log_messages=False,
@@ -78,20 +154,20 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
         self.assertTrue(connection.closed)
 
     def test_timesync_response_is_stored_without_reply(self) -> None:
-        heartbeat = FakeMessage(
+        heartbeat = _FakeMessage(
             "HEARTBEAT",
             base_mode=0,
             source_system=42,
             source_component=24,
         )
-        timesync_response = FakeMessage(
+        timesync_response = _FakeMessage(
             "TIMESYNC",
             tc1=987654321,
             ts1=222,
             source_system=42,
             source_component=24,
         )
-        connection = FakeMavConnection(heartbeat, [timesync_response])
+        connection = _FakeMavConnection(heartbeat, [timesync_response])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             timesync_log_messages=False,
@@ -116,13 +192,13 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
         self.assertEqual(connection.mav.timesync_calls, [])
 
     def test_client_sends_periodic_timesync_requests(self) -> None:
-        heartbeat = FakeMessage(
+        heartbeat = _FakeMessage(
             "HEARTBEAT",
             base_mode=0,
             source_system=42,
             source_component=24,
         )
-        connection = FakeMavConnection(heartbeat, [])
+        connection = _FakeMavConnection(heartbeat, [])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             timesync_log_messages=False,
@@ -148,13 +224,13 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
         self.assertGreaterEqual(snapshot.outbound_request_count, 1)
 
     def test_response_to_outbound_request_produces_measurement(self) -> None:
-        heartbeat = FakeMessage(
+        heartbeat = _FakeMessage(
             "HEARTBEAT",
             base_mode=0,
             source_system=42,
             source_component=24,
         )
-        connection = FakeMavConnection(heartbeat, [])
+        connection = _FakeMavConnection(heartbeat, [])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             timesync_log_messages=False,
@@ -174,7 +250,7 @@ class PymavlinkFlightClientTimesyncTests(unittest.TestCase):
             )
             client._send_timesync_request()
             connection.push_message(
-                FakeMessage(
+                _FakeMessage(
                     "TIMESYNC",
                     tc1=request_sent_wall_ns + 500_000,
                     ts1=request_sent_wall_ns,

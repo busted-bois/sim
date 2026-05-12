@@ -141,40 +141,6 @@ def _ensure_camera_settings(
     normalized_view_mode = _normalize_view_mode(view_mode)
     transport_l = str(transport).strip().lower()
     vehicle_name = "Drone1"
-    vision_cfg = config.get("vision", {})
-    camera_cfg = config.get("camera", {})
-    pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
-    camera_pitch = float(camera_cfg.get("pitch_up_degrees", 20.0))
-    camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
-    camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
-    camera_name = str(vision_cfg.get("camera_name", "0"))
-    resolution = vision_cfg.get("resolution", [640, 360])
-    if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
-        capture_width = int(resolution[0])
-        capture_height = int(resolution[1])
-    else:
-        capture_width = int(vision_cfg.get("width", 640))
-        capture_height = int(vision_cfg.get("height", 360))
-    front_camera_settings = {
-        "X": float(pose_offset[0]),
-        "Y": float(pose_offset[1]),
-        "Z": float(pose_offset[2]),
-        "Pitch": camera_pitch,
-        "Roll": camera_roll,
-        "Yaw": camera_yaw,
-        "CaptureSettings": [
-            {
-                "ImageType": 0,
-                "Width": capture_width,
-                "Height": capture_height,
-                "FOV_Degrees": float(vision_cfg.get("fov_degrees", 100.0)),
-            }
-        ],
-    }
-    cameras_settings = {
-        camera_name: front_camera_settings,
-        "front_center": dict(front_camera_settings),
-    }
     if transport_l == "mavlink":
         mav_cfg = config.get("control", {}).get("mavlink", {})
         airsim_mav_cfg = mav_cfg.get("airsim_profile", {})
@@ -207,14 +173,12 @@ def _ensure_camera_settings(
             "QgcPort": qgc_port,
             "AllowAPIAlways": True,
             "EnableTrace": bool(enable_trace),
-            "Cameras": cameras_settings,
         }
     else:
         vehicle_settings = {
             "VehicleType": "SimpleFlight",
             "AllowAPIAlways": True,
             "EnableTrace": bool(enable_trace),
-            "Cameras": cameras_settings,
         }
 
     required_settings = {
@@ -1008,10 +972,6 @@ def main_low_end() -> None:
 
 def main_timesync_smoke() -> None:
     launch(script_path="src/timesync_smoke.py")
-
-
-def main_attitude_smoke() -> None:
-    launch(script_path="src/attitude_smoke.py")
 
 
 if __name__ == "__main__":
