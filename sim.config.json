@@ -55,7 +55,8 @@
     "algorithm_timeout_seconds": 180
   },
   "preflight": {
-    "require_airsim_reachable": false
+    "require_airsim_reachable": false,
+    "require_mavlink_reachable": false
   },
   "test_profile": {
     "name": "baseline_repeatable",
@@ -140,6 +141,46 @@
     "direction_labels": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
   },
   "control": {
+    "transport": "auto",
+    "mavlink": {
+      "endpoint": "udpin:0.0.0.0:14550",
+      "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],
+      "auto_discover_endpoints": true,
+      "state_request_hz": 20,
+      "guided_custom_mode": 4,
+      "takeoff_altitude_m": 5.0,
+      "source_system": 255,
+      "source_component": 1,
+      "timesync": {
+        "send_requests": true,
+        "request_interval_seconds": 1.0,
+        "respond_to_requests": true,
+        "log_messages": true,
+        "pending_request_limit": 64,
+        "stable_window_size": 9,
+        "stable_best_subset_size": 5,
+        "min_stable_samples": 3,
+        "max_stable_rtt_ms": 250.0,
+        "max_offset_jitter_ms": 50.0,
+        "smoke_test": {
+          "duration_seconds": 12.0,
+          "poll_interval_seconds": 1.0,
+          "min_matched_responses": 3,
+          "require_stable_health": true
+        }
+      },
+      "airsim_profile": {
+        "vehicle_name": "Drone1",
+        "vehicle_type": "PX4Multirotor",
+        "udp_ip": "127.0.0.1",
+        "udp_port": 14560,
+        "control_port_local": 14540,
+        "control_port_remote": 14580,
+        "qgc_host_ip": "127.0.0.1",
+        "qgc_port": 14550,
+        "lock_step": false
+      }
+    },
     "command_rate_hz": 50,
     "latency_tuning": {
       "enabled": true,
