@@ -9,27 +9,6 @@ from typing import Any, Final
 
 from pymavlink import mavutil
 
-from src.control.command_rate import (
-    CommandRateGate,
-    CommandRateGateStats,
-    normalize_command_rate_hz,
-)
-from src.control.flight_client import (
-    SET_POSITION_FRAME_BODY_NED,
-    SET_POSITION_FRAME_LOCAL_NED,
-    SetAttitudeTargetCommand,
-    SetPositionTargetLocalNedCommand,
-    build_attitude_only_type_mask,
-    build_body_rate_type_mask,
-    build_position_type_mask,
-    build_velocity_type_mask,
-)
-from src.control.highres_imu import (
-    HighresImuHealth,
-    HighresImuSample,
-    format_highres_imu_health,
-    merge_highres_imu_sample,
-)
 from src.control.mavlink_timesync import TimesyncOutboundRequest, TimesyncSnapshot, TimesyncStore
 
 
@@ -94,18 +73,9 @@ class _Joinable:
 
 
 class PymavlinkFlightClient:
-    """AirSim-like MAVLink runtime client with TIMESYNC observability.
-
-    Motion setpoints map AirSim Euler/sign conventions before SET_POSITION /
-    SET_ATTITUDE_TARGET sends.
-    """
+    """AirSim-like MAVLink runtime client with TIMESYNC observability."""
 
     _DEFAULT_ENDPOINT: Final[str] = "udpin:0.0.0.0:14550"
-    _GUIDED_MODE_MIN_RESEND_INTERVAL_S: Final[float] = 1.0
-    _POSITION_TARGET_FRAME_MAP: Final[dict[str, int]] = {
-        "local_ned": int(mavutil.mavlink.MAV_FRAME_LOCAL_NED),
-        "body_ned": int(mavutil.mavlink.MAV_FRAME_BODY_NED),
-    }
 
     def __init__(
         self,
@@ -128,27 +98,18 @@ class PymavlinkFlightClient:
         timesync_request_interval_s: float = 1.0,
         prepare_for_flight_on_connect: bool = True,
         request_state_messages_on_connect: bool = True,
-        highres_imu_enabled: bool = True,
-        highres_imu_request_hz: float | None = None,
-        highres_imu_log_messages: bool = False,
-        highres_imu_max_staleness_ms: float = 1000.0,
         timesync_pending_request_limit: int = 64,
         timesync_stable_window_size: int = 9,
         timesync_stable_best_subset_size: int = 5,
         timesync_min_stable_samples: int = 3,
         timesync_max_stable_rtt_ns: int = 250_000_000,
         timesync_max_offset_jitter_ns: int = 50_000_000,
-        attitude_target_throttle_body_z: bool = False,
         connection_factory: Callable[..., Any] | None = None,
     ) -> None:
         self._endpoint = endpoint.strip() if endpoint else self._DEFAULT_ENDPOINT
         _parse_udp_endpoint(self._endpoint)
 
-        self._command_rate_hz = normalize_command_rate_hz(command_rate_hz)
-        self._command_rate_gate = CommandRateGate(
-            self._command_rate_hz,
-            label="MAVLink outbound motion commands",
-        )
+        self._command_rate_hz = float(command_rate_hz)
         self._state_request_hz = float(state_request_hz)
         self._guided_custom_mode = int(guided_custom_mode)
         self._takeoff_altitude_m = float(takeoff_altitude_m)
@@ -165,15 +126,6 @@ class PymavlinkFlightClient:
         self._timesync_request_interval_s = max(0.1, float(timesync_request_interval_s))
         self._prepare_for_flight_on_connect = bool(prepare_for_flight_on_connect)
         self._request_state_messages_on_connect = bool(request_state_messages_on_connect)
-        self._highres_imu_enabled = bool(highres_imu_enabled)
-        imu_request_hz = (
-            float(highres_imu_request_hz)
-            if highres_imu_request_hz is not None
-            else float(state_request_hz)
-        )
-        self._highres_imu_request_hz = max(1.0, imu_request_hz)
-        self._highres_imu_log_messages = bool(highres_imu_log_messages)
-        self._highres_imu_max_staleness_ms = max(1.0, float(highres_imu_max_staleness_ms))
         self._connection_factory = connection_factory or mavutil.mavlink_connection
 
         self._mav: Any | None = None
@@ -182,11 +134,6 @@ class PymavlinkFlightClient:
 
         self._telemetry_lock = threading.Lock()
         self._telemetry: _Telemetry | None = None
-        self._highres_imu_lock = threading.Lock()
-        self._highres_imu: HighresImuSample | None = None
-        self._highres_imu_sample_count = 0
-        self._highres_imu_first_monotonic_ns: int | None = None
-        self._highres_imu_last_monotonic_ns: int | None = None
         self._timesync_store = TimesyncStore(
             local_system=self._source_system,
             local_component=self._source_component,
@@ -201,9 +148,6 @@ class PymavlinkFlightClient:
         self._state_ready_evt = threading.Event()
         self._stop_evt = threading.Event()
         self._thread: threading.Thread | None = None
-        self._guided_mode_last_sent_monotonic_s: float | None = None
-        self._motion_epoch_monotonic: float | None = None
-        self._attitude_target_throttle_body_z = bool(attitude_target_throttle_body_z)
 
     def confirmConnection(self) -> None:
         self._mav = self._connection_factory(
@@ -242,13 +186,12 @@ class PymavlinkFlightClient:
                 armed=armed,
             )
         self._state_ready_evt.set()
-        self._motion_epoch_monotonic = time.monotonic()
 
         if self._request_state_messages_on_connect:
             self._request_message_intervals()
         self._start_telemetry_pump()
         if self._prepare_for_flight_on_connect:
-            self._set_guided_mode(force=True)
+            self._set_guided_mode()
 
     def enableApiControl(self, enable: bool) -> None:
         _ = enable
@@ -268,8 +211,8 @@ class PymavlinkFlightClient:
             0,
             0,
         )
-        deadline = time.monotonic() + 8.0
-        while time.monotonic() < deadline:
+        deadline = time.time() + 8.0
+        while time.time() < deadline:
             telemetry = self._get_latest_telemetry()
             if telemetry is not None and telemetry.armed == arm:
                 return
@@ -322,59 +265,6 @@ class PymavlinkFlightClient:
 
         return _Joinable(_run)
 
-    def submitSetPositionTargetLocalNed(self, command: SetPositionTargetLocalNedCommand) -> None:
-        assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode(force=False)
-        self._send_set_position_target_local_ned(command)
-
-    def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None:
-        self.submitSetPositionTargetLocalNed(
-            SetPositionTargetLocalNedCommand(
-                frame=SET_POSITION_FRAME_LOCAL_NED,
-                type_mask=build_velocity_type_mask(),
-                vx=vx,
-                vy=vy,
-                vz=vz,
-            )
-        )
-
-    def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
-        self.submitSetPositionTargetLocalNed(
-            SetPositionTargetLocalNedCommand(
-                frame=SET_POSITION_FRAME_BODY_NED,
-                type_mask=build_velocity_type_mask(),
-                vx=vx,
-                vy=vy,
-                vz=vz,
-            )
-        )
-
-    def submitPositionLocalNed(self, x: float, y: float, z: float) -> None:
-        self.submitSetPositionTargetLocalNed(
-            SetPositionTargetLocalNedCommand(
-                frame=SET_POSITION_FRAME_LOCAL_NED,
-                type_mask=build_position_type_mask(),
-                x=x,
-                y=y,
-                z=z,
-            )
-        )
-
-    def streamSetPositionTargetLocalNedAsync(
-        self, command: SetPositionTargetLocalNedCommand, duration: float
-    ) -> _Joinable:
-        return _Joinable(lambda: self._stream_set_position_target_local_ned(command, duration))
-
-    def submitSetAttitudeTarget(self, command: SetAttitudeTargetCommand) -> None:
-        assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode(force=False)
-        self._send_set_attitude_target(command)
-
-    def streamSetAttitudeTargetAsync(
-        self, command: SetAttitudeTargetCommand, duration: float
-    ) -> _Joinable:
-        return _Joinable(lambda: self._stream_set_attitude_target(command, duration))
-
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
     ) -> _Joinable:
@@ -391,8 +281,8 @@ class PymavlinkFlightClient:
         return _Joinable(
             lambda: self._stream_attitude_rate_target(
                 roll_rate,
-                -pitch_rate,
-                -yaw_rate,
+                pitch_rate,
+                yaw_rate,
                 throttle,
                 duration,
             )
@@ -403,7 +293,7 @@ class PymavlinkFlightClient:
     ) -> _Joinable:
         return _Joinable(
             lambda: self._stream_attitude_target(
-                self._quaternion_from_euler(roll, -pitch, -yaw),
+                self._quaternion_from_euler(roll, pitch, yaw),
                 throttle,
                 duration,
             )
@@ -442,70 +332,6 @@ class PymavlinkFlightClient:
     def getTimesyncSnapshot(self) -> TimesyncSnapshot:
         return self._timesync_store.snapshot()
 
-    def getHighresImu(self) -> HighresImuSample | None:
-        with self._highres_imu_lock:
-            return self._highres_imu
-
-    def getCommandRateStats(self) -> CommandRateGateStats:
-        return self._command_rate_gate.stats()
-
-    def getHighresImuHealth(self) -> HighresImuHealth | None:
-        with self._highres_imu_lock:
-            sample = self._highres_imu
-            sample_count = self._highres_imu_sample_count
-            first_ns = self._highres_imu_first_monotonic_ns
-            last_ns = self._highres_imu_last_monotonic_ns
-
-        if not self._highres_imu_enabled:
-            return HighresImuHealth(
-                status="disabled",
-                reason="HIGHRES_IMU stream disabled in config",
-                enabled=False,
-                sample_count=sample_count,
-                stream_rate_hz=None,
-                update_age_ms=None,
-                max_staleness_ms=self._highres_imu_max_staleness_ms,
-            )
-        if sample is None or last_ns is None:
-            return HighresImuHealth(
-                status="missing",
-                reason="no HIGHRES_IMU samples received yet",
-                enabled=True,
-                sample_count=sample_count,
-                stream_rate_hz=None,
-                update_age_ms=None,
-                max_staleness_ms=self._highres_imu_max_staleness_ms,
-            )
-
-        now_ns = time.monotonic_ns()
-        update_age_ms = (now_ns - last_ns) / 1_000_000.0
-        stream_rate_hz = None
-        if (
-            sample_count >= 2
-            and first_ns is not None
-            and last_ns > first_ns
-        ):
-            stream_rate_hz = (sample_count - 1) / ((last_ns - first_ns) / 1_000_000_000.0)
-
-        status = "ok"
-        reason = "HIGHRES_IMU samples are fresh"
-        if update_age_ms > self._highres_imu_max_staleness_ms:
-            status = "stale"
-            reason = (
-                f"latest HIGHRES_IMU sample age {update_age_ms:.1f} ms exceeds "
-                f"{self._highres_imu_max_staleness_ms:.1f} ms"
-            )
-
-        return HighresImuHealth(
-            status=status,
-            reason=reason,
-            enabled=True,
-            sample_count=sample_count,
-            stream_rate_hz=stream_rate_hz,
-            update_age_ms=update_age_ms,
-            max_staleness_ms=self._highres_imu_max_staleness_ms,
-        )
-
     def close(self) -> None:
         self._stop_evt.set()
         if self._thread is not None:
@@ -517,12 +343,10 @@ class PymavlinkFlightClient:
             except Exception:
                 pass
             self._mav = None
-            self._guided_mode_last_sent_monotonic_s = None
-            self._motion_epoch_monotonic = None
 
     def _takeoff(self) -> None:
         self._state_ready_evt.wait(timeout=self._heartbeat_timeout_s)
-        self._set_guided_mode(force=True)
+        self._set_guided_mode()
         self._send_takeoff_command()
 
         target_z = -abs(self._takeoff_altitude_m)
@@ -583,11 +407,6 @@ class PymavlinkFlightClient:
             if message_id is None:
                 continue
             self._mav.mav.message_interval_send(int(message_id), interval_us)
-        if self._highres_imu_enabled:
-            message_id = getattr(mavutil.mavlink, "MAVLINK_MSG_ID_HIGHRES_IMU", None)
-            if message_id is not None:
-                imu_interval_us = int(1e6 / max(1.0, self._highres_imu_request_hz))
-                self._mav.mav.message_interval_send(int(message_id), imu_interval_us)
 
     def _start_telemetry_pump(self) -> None:
         if self._thread is not None:
@@ -604,16 +423,13 @@ class PymavlinkFlightClient:
         assert self._mav is not None
         armed_bit = mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
         next_timesync_request_s = time.monotonic()
-        message_types = ["LOCAL_POSITION_NED", "HEARTBEAT", "TIMESYNC"]
-        if self._highres_imu_enabled:
-            message_types.append("HIGHRES_IMU")
         while not self._stop_evt.is_set():
             if self._send_timesync_requests and time.monotonic() >= next_timesync_request_s:
                 self._send_timesync_request()
                 next_timesync_request_s = time.monotonic() + self._timesync_request_interval_s
             try:
                 message = self._mav.recv_match(
-                    type=message_types,
+                    type=["LOCAL_POSITION_NED", "HEARTBEAT", "TIMESYNC"],
                     blocking=True,
                     timeout=0.2,
                 )
@@ -627,8 +443,6 @@ class PymavlinkFlightClient:
                     self._handle_heartbeat(armed)
                 elif message_type == "TIMESYNC":
                     self._handle_timesync(message)
-                elif message_type == "HIGHRES_IMU":
-                    self._handle_highres_imu(message)
             except Exception:
                 continue
 
@@ -687,43 +501,6 @@ class PymavlinkFlightClient:
                 f"{measurement_log}{stable_log}{jitter_log}"
             )
 
-    def _handle_highres_imu(self, message: Any) -> None:
-        previous = self.getHighresImu()
-        received_ns = time.monotonic_ns()
-        source_system = self._message_source_id(message, "get_srcSystem")
-        source_component = self._message_source_id(message, "get_srcComponent")
-        sample = merge_highres_imu_sample(
-            previous,
-            time_usec=int(getattr(message, "time_usec", 0)),
-            xacc=self._float_or_none(getattr(message, "xacc", None)),
-            yacc=self._float_or_none(getattr(message, "yacc", None)),
-            zacc=self._float_or_none(getattr(message, "zacc", None)),
-            xgyro=self._float_or_none(getattr(message, "xgyro", None)),
-            ygyro=self._float_or_none(getattr(message, "ygyro", None)),
-            zgyro=self._float_or_none(getattr(message, "zgyro", None)),
-            xmag=self._float_or_none(getattr(message, "xmag", None)),
-            ymag=self._float_or_none(getattr(message, "ymag", None)),
-            zmag=self._float_or_none(getattr(message, "zmag", None)),
-            abs_pressure=self._float_or_none(getattr(message, "abs_pressure", None)),
-            diff_pressure=self._float_or_none(getattr(message, "diff_pressure", None)),
-            pressure_alt=self._float_or_none(getattr(message, "pressure_alt", None)),
-            temperature=self._float_or_none(getattr(message, "temperature", None)),
-            fields_updated=int(getattr(message, "fields_updated", 0)),
-            sensor_id=int(getattr(message, "id", 0)),
-            source_system=source_system,
-            source_component=source_component,
-            local_received_monotonic_ns=received_ns,
-            transport="mavlink",
-        )
-        with self._highres_imu_lock:
-            self._highres_imu = sample
-            self._highres_imu_sample_count += 1
-            if self._highres_imu_first_monotonic_ns is None:
-                self._highres_imu_first_monotonic_ns = received_ns
-            self._highres_imu_last_monotonic_ns = received_ns
-        if self._highres_imu_log_messages:
-            print(f"[mavlink] HIGHRES_IMU {format_highres_imu_health(self.getHighresImuHealth())}")
-
     def _send_timesync_request(self) -> None:
         if self._mav is None:
             return
@@ -740,32 +517,9 @@ class PymavlinkFlightClient:
             return
         self._mav.mav.timesync_send(time.time_ns(), int(ts1))
 
-    @staticmethod
-    def _float_or_none(value: Any) -> float | None:
-        if value is None:
-            return None
-        return float(value)
-
-    @staticmethod
-    def _message_source_id(message: Any, getter_name: str) -> int | None:
-        getter = getattr(message, getter_name, None)
-        if not callable(getter):
-            return None
-        try:
-            return int(getter())
-        except Exception:
-            return None
-
-    def _set_guided_mode(self, *, force: bool = False) -> None:
+    def _set_guided_mode(self) -> None:
         if self._mav is None or self._target_system is None:
             return
-        now_s = time.monotonic()
-        if not force and self._guided_mode_last_sent_monotonic_s is not None:
-            if (
-                now_s - self._guided_mode_last_sent_monotonic_s
-                < self._GUIDED_MODE_MIN_RESEND_INTERVAL_S
-            ):
-                return
         self._mav.mav.command_long_send(
             self._target_system,
             self._target_component or 1,
@@ -779,7 +533,6 @@ class PymavlinkFlightClient:
             0,
             0,
         )
-        self._guided_mode_last_sent_monotonic_s = now_s
 
     def _send_takeoff_command(self) -> None:
         if self._mav is None or self._target_system is None:
@@ -800,110 +553,42 @@ class PymavlinkFlightClient:
 
     def _stream_velocity(self, vx: float, vy: float, vz: float, duration_s: float) -> None:
         assert self._mav is not None and self._target_system is not None
-        velocity_only_type_mask = build_velocity_type_mask()
-        self._stream_set_position_target_local_ned(
-            SetPositionTargetLocalNedCommand(
-                frame=SET_POSITION_FRAME_LOCAL_NED,
-                type_mask=velocity_only_type_mask,
-                vx=float(vx),
-                vy=float(vy),
-                vz=float(vz),
-            ),
-            duration_s,
+        self._set_guided_mode()
+        period_s = max(0.02, 1.0 / max(5.0, min(50.0, self._command_rate_hz)))
+        type_mask = (
+            int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE)
+            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE)
+            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE)
+            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE)
+            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE)
+            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE)
+            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_FORCE_SET)
+            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE)
+            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
         )
 
-    def _stream_set_position_target_local_ned(
-        self, command: SetPositionTargetLocalNedCommand, duration_s: float
-    ) -> None:
-        assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode(force=False)
-        period_s = self._command_rate_gate.period_s
-        deadline = time.monotonic() + max(0.0, float(duration_s))
-        next_tick = time.monotonic()
-        while time.monotonic() < deadline:
-            now_s = time.monotonic()
-            if self._command_rate_gate.allow(now_s):
-                self._send_set_position_target_local_ned(command)
-            next_tick += period_s
-            sleep_s = next_tick - time.monotonic()
-            if sleep_s > 0:
-                time.sleep(sleep_s)
-            else:
-                next_tick = time.monotonic()
-
-    def _mavlink_time_boot_ms(self) -> int:
-        epoch = self._motion_epoch_monotonic
-        if epoch is None:
-            return int((time.time() * 1000) % 2**32)
-        return int(((time.monotonic() - epoch) * 1000) % 2**32)
-
-    def _send_set_position_target_local_ned(
-        self,
-        command: SetPositionTargetLocalNedCommand,
-        *,
-        t_ms: int | None = None,
-    ) -> None:
-        assert self._mav is not None and self._target_system is not None
-        frame = command.frame
-        if frame not in self._POSITION_TARGET_FRAME_MAP:
-            raise ValueError(
-                f"Unsupported SET_POSITION_TARGET_LOCAL_NED frame {command.frame!r}. "
-                "Expected one of: local_ned, body_ned."
+        deadline = time.time() + max(0.0, float(duration_s))
+        while time.time() < deadline:
+            t_ms = int((time.time() * 1000) % 2**32)
+            self._mav.mav.set_position_target_local_ned_send(
+                t_ms,
+                self._target_system,
+                self._target_component or 1,
+                mavutil.mavlink.MAV_FRAME_LOCAL_NED,
+                type_mask,
+                0.0,
+                0.0,
+                0.0,
+                float(vx),
+                float(vy),
+                float(vz),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
             )
-
-        timestamp_ms = int(t_ms) if t_ms is not None else self._mavlink_time_boot_ms()
-        self._mav.mav.set_position_target_local_ned_send(
-            timestamp_ms,
-            self._target_system,
-            self._target_component or 1,
-            self._POSITION_TARGET_FRAME_MAP[frame],
-            int(command.type_mask),
-            float(command.x),
-            float(command.y),
-            float(command.z),
-            float(command.vx),
-            float(command.vy),
-            float(command.vz),
-            float(command.afx),
-            float(command.afy),
-            float(command.afz),
-            float(command.yaw),
-            float(command.yaw_rate),
-        )
-
-    def _send_set_attitude_target(self, command: SetAttitudeTargetCommand) -> None:
-        assert self._mav is not None and self._target_system is not None
-        t_ms = self._mavlink_time_boot_ms()
-        self._mav.mav.set_attitude_target_send(
-            t_ms,
-            self._target_system,
-            self._target_component or 1,
-            command.type_mask,
-            list(command.quaternion),
-            float(command.body_roll_rate),
-            float(command.body_pitch_rate),
-            float(command.body_yaw_rate),
-            float(max(0.0, min(1.0, command.thrust))),
-        )
-
-    def _stream_set_attitude_target(
-        self, command: SetAttitudeTargetCommand, duration_s: float
-    ) -> None:
-        assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode(force=False)
-        period_s = self._command_rate_gate.period_s
-        deadline = time.monotonic() + max(0.0, float(duration_s))
-        next_tick = time.monotonic()
-        while time.monotonic() < deadline:
-            now_s = time.monotonic()
-            if self._command_rate_gate.allow(now_s):
-                self._send_set_attitude_target(command)
-            next_tick += period_s
-            sleep_s = next_tick - time.monotonic()
-            if sleep_s > 0:
-                time.sleep(sleep_s)
-            else:
-                next_tick = time.monotonic()
+            time.sleep(period_s)
 
     def _stream_attitude_target(
         self,
@@ -911,17 +596,29 @@ class PymavlinkFlightClient:
         thrust: float,
         duration_s: float,
     ) -> None:
-        quat = self._normalize_quaternion(quaternion)
-        self._stream_set_attitude_target(
-            SetAttitudeTargetCommand(
-                type_mask=build_attitude_only_type_mask(
-                    throttle_body_z=self._attitude_target_throttle_body_z
-                ),
-                quaternion=quat,
-                thrust=thrust,
-            ),
-            duration_s,
+        assert self._mav is not None and self._target_system is not None
+        self._set_guided_mode()
+        period_s = max(0.02, 1.0 / max(5.0, min(50.0, self._command_rate_hz)))
+        type_mask = (
+            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE)
+            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
+            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
         )
+        deadline = time.time() + max(0.0, float(duration_s))
+        while time.time() < deadline:
+            t_ms = int((time.time() * 1000) % 2**32)
+            self._mav.mav.set_attitude_target_send(
+                t_ms,
+                self._target_system,
+                self._target_component or 1,
+                type_mask,
+                quaternion,
+                0.0,
+                0.0,
+                0.0,
+                float(max(0.0, min(1.0, thrust))),
+            )
+            time.sleep(period_s)
 
     def _stream_attitude_rate_target(
         self,
@@ -931,29 +628,25 @@ class PymavlinkFlightClient:
         thrust: float,
         duration_s: float,
     ) -> None:
-        self._stream_set_attitude_target(
-            SetAttitudeTargetCommand(
-                type_mask=build_body_rate_type_mask(
-                    throttle_body_z=self._attitude_target_throttle_body_z
-                ),
-                body_roll_rate=roll_rate,
-                body_pitch_rate=pitch_rate,
-                body_yaw_rate=yaw_rate,
-                thrust=thrust,
-            ),
-            duration_s,
-        )
-
-    @staticmethod
-    def _normalize_quaternion(
-        quat: tuple[float, float, float, float],
-    ) -> tuple[float, float, float, float]:
-        w, x, y, z = quat
-        n = math.sqrt(w * w + x * x + y * y + z * z)
-        if n < 1e-9:
-            return (1.0, 0.0, 0.0, 0.0)
-        inv = 1.0 / n
-        return (w * inv, x * inv, y * inv, z * inv)
+        assert self._mav is not None and self._target_system is not None
+        self._set_guided_mode()
+        period_s = max(0.02, 1.0 / max(5.0, min(50.0, self._command_rate_hz)))
+        type_mask = int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE)
+        deadline = time.time() + max(0.0, float(duration_s))
+        while time.time() < deadline:
+            t_ms = int((time.time() * 1000) % 2**32)
+            self._mav.mav.set_attitude_target_send(
+                t_ms,
+                self._target_system,
+                self._target_component or 1,
+                type_mask,
+                [1.0, 0.0, 0.0, 0.0],
+                float(roll_rate),
+                float(pitch_rate),
+                float(yaw_rate),
+                float(max(0.0, min(1.0, thrust))),
+            )
+            time.sleep(period_s)
 
     @staticmethod
     def _quaternion_from_euler(
