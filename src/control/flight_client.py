@@ -100,6 +100,13 @@ class FlightClient(Protocol):
         self, command: SetPositionTargetLocalNedCommand
     ) -> None: ...
 
+    def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None: ...
+    def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None: ...
+    def submitPositionLocalNed(self, x: float, y: float, z: float) -> None: ...
+    def streamSetPositionTargetLocalNedAsync(
+        self, command: SetPositionTargetLocalNedCommand, duration: float
+    ) -> Any: ...
+
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
     ) -> Any: ...
@@ -183,6 +190,34 @@ class AirSimAdapter:
         if not callable(sender):
             raise NotImplementedError("submitSetPositionTargetLocalNed is unavailable for AirSim")
         sender(command)
+
+    def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None:
+        sender = getattr(self._client, "submitVelocityLocalNed", None)
+        if not callable(sender):
+            raise NotImplementedError("submitVelocityLocalNed is unavailable for AirSim")
+        sender(vx, vy, vz)
+
+    def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
+        sender = getattr(self._client, "submitVelocityBodyNed", None)
+        if not callable(sender):
+            raise NotImplementedError("submitVelocityBodyNed is unavailable for AirSim")
+        sender(vx, vy, vz)
+
+    def submitPositionLocalNed(self, x: float, y: float, z: float) -> None:
+        sender = getattr(self._client, "submitPositionLocalNed", None)
+        if not callable(sender):
+            raise NotImplementedError("submitPositionLocalNed is unavailable for AirSim")
+        sender(x, y, z)
+
+    def streamSetPositionTargetLocalNedAsync(
+        self, command: SetPositionTargetLocalNedCommand, duration: float
+    ) -> Any:
+        sender = getattr(self._client, "streamSetPositionTargetLocalNedAsync", None)
+        if not callable(sender):
+            raise NotImplementedError(
+                "streamSetPositionTargetLocalNedAsync is unavailable for AirSim"
+            )
+        return sender(command, duration)
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
