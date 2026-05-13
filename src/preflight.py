@@ -48,6 +48,12 @@ def _has_nested_key(data: Any, key_path: str) -> bool:
     return isinstance(current, Mapping) and parts[-1] in current
 
 
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    return {}
+
+
 def _airsim_reachable(host: str, port: int) -> bool:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1.5)
@@ -57,15 +63,20 @@ def _airsim_reachable(host: str, port: int) -> bool:
         sock.close()
 
 
-def _mavlink_heartbeat(config: dict) -> tuple[bool, str, list[str]]:
+def _mavlink_heartbeat(
+    config: dict,
+    *,
+    connection_factory=None,
+) -> tuple[bool, str, list[str]]:
     from pymavlink import mavutil as _mavutil
 
+    factory = connection_factory or _mavutil.mavlink_connection
     endpoints = candidate_mavlink_endpoints(config)
     last_err = ""
     for endpoint in endpoints:
         connection = None
         try:
-            connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
+            connection = factory(endpoint, autoreconnect=False)
             heartbeat = connection.wait_heartbeat(timeout=2.0)
             if heartbeat is not None:
                 return True, endpoint, endpoints
@@ -80,9 +91,14 @@ def _mavlink_heartbeat(config: dict) -> tuple[bool, str, list[str]]:
     return False, last_err, endpoints
 
 
-def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
+def _mavlink_highres_imu(
+    config: dict,
+    *,
+    connection_factory=None,
+) -> tuple[bool, str, list[str]]:
     from pymavlink import mavutil as _mavutil
 
+    factory = connection_factory or _mavutil.mavlink_connection
     endpoints = candidate_mavlink_endpoints(config)
     mav_cfg = config.get("control", {}).get("mavlink", {})
     imu_cfg = mav_cfg.get("highres_imu", {})
@@ -91,7 +107,7 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
     for endpoint in endpoints:
         connection = None
         try:
-            connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
+            connection = factory(endpoint, autoreconnect=False)
             heartbeat = connection.wait_heartbeat(timeout=2.0)
             if heartbeat is None:
                 continue
@@ -99,6 +115,7 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
             if message_id is not None:
                 connection.mav.message_interval_send(int(message_id), interval_us)
             deadline = time.monotonic() + 2.5
+            samples = 0
             while time.monotonic() < deadline:
                 message = connection.recv_match(
                     type=["HIGHRES_IMU"],
@@ -106,7 +123,9 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
                     timeout=0.5,
                 )
                 if message is not None:
-                    return True, endpoint, endpoints
+                    samples += 1
+                    sensor_id = int(getattr(message, "id", 0))
+                    return True, f"{endpoint} sensor_id={sensor_id} samples={samples}", endpoints
             last_err = "timed out waiting for HIGHRES_IMU after requesting stream"
         except Exception as exc:
             last_err = str(exc)
@@ -228,8 +247,8 @@ def run_preflight() -> int:
         except json.JSONDecodeError as exc:
             errors.append(f"Simulator specification snapshot is invalid JSON: {spec_path} ({exc})")
         else:
-            drone_dims = spec_snapshot.get("drone", {}).get("dimensions_m")
-            gate_dims = spec_snapshot.get("gate_reference", {}).get("dimensions_m")
+            drone_dims = _mapping_or_empty(spec_snapshot.get("drone")).get("dimensions_m")
+            gate_dims = _mapping_or_empty(spec_snapshot.get("gate_reference")).get("dimensions_m")
             if drone_dims and gate_dims:
                 passes.append(f"Simulator specification snapshot present: {spec_path}")
             else:

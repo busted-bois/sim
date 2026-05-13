@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import csv
 import math
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 from pymavlink import mavutil
@@ -13,7 +15,9 @@ from src.control.command_rate import CommandRateGate, normalize_command_rate_hz
 from src.control.highres_imu import (
     HighresImuHealth,
     HighresImuSample,
+    SensorSnapshot,
     format_highres_imu_health,
+    format_highres_imu_sample,
     merge_highres_imu_sample,
 )
 from src.control.mavlink_timesync import TimesyncOutboundRequest, TimesyncSnapshot, TimesyncStore
@@ -109,6 +113,9 @@ class PymavlinkFlightClient:
         highres_imu_request_hz: float | None = None,
         highres_imu_log_messages: bool = False,
         highres_imu_max_staleness_ms: float = 1000.0,
+        highres_imu_summary_interval_s: float = 5.0,
+        highres_imu_warn_on_stale: bool = True,
+        highres_imu_capture_path: str | None = None,
         timesync_pending_request_limit: int = 64,
         timesync_stable_window_size: int = 9,
         timesync_stable_best_subset_size: int = 5,
@@ -147,6 +154,14 @@ class PymavlinkFlightClient:
         self._highres_imu_request_hz = max(1.0, imu_request_hz)
         self._highres_imu_log_messages = bool(highres_imu_log_messages)
         self._highres_imu_max_staleness_ms = max(1.0, float(highres_imu_max_staleness_ms))
+        self._highres_imu_summary_interval_s = max(0.0, float(highres_imu_summary_interval_s))
+        self._highres_imu_warn_on_stale = bool(highres_imu_warn_on_stale)
+        repo_root = Path(__file__).resolve().parents[2]
+        capture_path = str(highres_imu_capture_path or "").strip()
+        self._highres_imu_capture_path = (
+            (repo_root / capture_path) if capture_path and not Path(capture_path).is_absolute()
+            else (Path(capture_path) if capture_path else None)
+        )
         self._connection_factory = connection_factory or mavutil.mavlink_connection
 
         self._mav: Any | None = None
@@ -157,9 +172,14 @@ class PymavlinkFlightClient:
         self._telemetry: _Telemetry | None = None
         self._highres_imu_lock = threading.Lock()
         self._highres_imu: HighresImuSample | None = None
+        self._highres_imu_by_sensor_id: dict[int, HighresImuSample] = {}
         self._highres_imu_sample_count = 0
         self._highres_imu_first_monotonic_ns: int | None = None
         self._highres_imu_last_monotonic_ns: int | None = None
+        self._highres_imu_last_health_status: str | None = None
+        self._highres_imu_last_summary_monotonic_ns: int | None = None
+        self._highres_imu_capture_file: Any | None = None
+        self._highres_imu_capture_writer: csv.writer | None = None
         self._timesync_store = TimesyncStore(
             local_system=self._source_system,
             local_component=self._source_component,
@@ -362,9 +382,18 @@ class PymavlinkFlightClient:
         with self._highres_imu_lock:
             return self._highres_imu
 
+    def getHighresImuBySensorId(self, sensor_id: int) -> HighresImuSample | None:
+        with self._highres_imu_lock:
+            return self._highres_imu_by_sensor_id.get(int(sensor_id))
+
+    def getHighresImuSensors(self) -> dict[int, HighresImuSample]:
+        with self._highres_imu_lock:
+            return dict(self._highres_imu_by_sensor_id)
+
     def getHighresImuHealth(self) -> HighresImuHealth | None:
         with self._highres_imu_lock:
             sample = self._highres_imu
+            sensor_ids = tuple(sorted(self._highres_imu_by_sensor_id))
             sample_count = self._highres_imu_sample_count
             first_ns = self._highres_imu_first_monotonic_ns
             last_ns = self._highres_imu_last_monotonic_ns
@@ -378,6 +407,9 @@ class PymavlinkFlightClient:
                 stream_rate_hz=None,
                 update_age_ms=None,
                 max_staleness_ms=self._highres_imu_max_staleness_ms,
+                sensor_count=len(sensor_ids),
+                active_sensor_ids=sensor_ids,
+                expected_rate_hz=None,
             )
         if sample is None or last_ns is None:
             return HighresImuHealth(
@@ -388,6 +420,9 @@ class PymavlinkFlightClient:
                 stream_rate_hz=None,
                 update_age_ms=None,
                 max_staleness_ms=self._highres_imu_max_staleness_ms,
+                sensor_count=len(sensor_ids),
+                active_sensor_ids=sensor_ids,
+                expected_rate_hz=self._highres_imu_request_hz,
             )
 
         now_ns = time.monotonic_ns()
@@ -408,6 +443,15 @@ class PymavlinkFlightClient:
                 f"latest HIGHRES_IMU sample age {update_age_ms:.1f} ms exceeds "
                 f"{self._highres_imu_max_staleness_ms:.1f} ms"
             )
+        elif (
+            stream_rate_hz is not None
+            and stream_rate_hz < (self._highres_imu_request_hz * 0.70)
+        ):
+            status = "degraded"
+            reason = (
+                f"observed HIGHRES_IMU rate {stream_rate_hz:.2f} Hz is below "
+                f"requested {self._highres_imu_request_hz:.2f} Hz"
+            )
 
         return HighresImuHealth(
             status=status,
@@ -417,6 +461,18 @@ class PymavlinkFlightClient:
             stream_rate_hz=stream_rate_hz,
             update_age_ms=update_age_ms,
             max_staleness_ms=self._highres_imu_max_staleness_ms,
+            sensor_count=len(sensor_ids),
+            active_sensor_ids=sensor_ids,
+            expected_rate_hz=self._highres_imu_request_hz,
+        )
+
+    def getSensorSnapshot(self) -> SensorSnapshot:
+        return SensorSnapshot(
+            state=self.getMultirotorState(),
+            highres_imu=self.getHighresImu(),
+            highres_imu_health=self.getHighresImuHealth(),
+            captured_monotonic_ns=time.monotonic_ns(),
+            transport="mavlink",
         )
 
     def close(self) -> None:
@@ -424,6 +480,13 @@ class PymavlinkFlightClient:
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
+        if self._highres_imu_capture_file is not None:
+            try:
+                self._highres_imu_capture_file.close()
+            except Exception:
+                pass
+            self._highres_imu_capture_file = None
+            self._highres_imu_capture_writer = None
         if self._mav is not None:
             try:
                 self._mav.close()
@@ -529,6 +592,7 @@ class PymavlinkFlightClient:
                     timeout=0.2,
                 )
                 if message is None:
+                    self._maybe_emit_highres_imu_runtime_logs()
                     continue
                 message_type = message.get_type()
                 if message_type == "LOCAL_POSITION_NED":
@@ -540,6 +604,7 @@ class PymavlinkFlightClient:
                     self._handle_timesync(message)
                 elif message_type == "HIGHRES_IMU":
                     self._handle_highres_imu(message)
+                self._maybe_emit_highres_imu_runtime_logs()
             except Exception:
                 continue
 
@@ -599,7 +664,8 @@ class PymavlinkFlightClient:
             )
 
     def _handle_highres_imu(self, message: Any) -> None:
-        previous = self.getHighresImu()
+        sensor_id = int(getattr(message, "id", 0))
+        previous = self.getHighresImuBySensorId(sensor_id) or self.getHighresImu()
         received_ns = time.monotonic_ns()
         source_system = self._message_source_id(message, "get_srcSystem")
         source_component = self._message_source_id(message, "get_srcComponent")
@@ -620,7 +686,7 @@ class PymavlinkFlightClient:
             pressure_alt=self._float_or_none(getattr(message, "pressure_alt", None)),
             temperature=self._float_or_none(getattr(message, "temperature", None)),
             fields_updated=int(getattr(message, "fields_updated", 0)),
-            sensor_id=int(getattr(message, "id", 0)),
+            sensor_id=sensor_id,
             source_system=source_system,
             source_component=source_component,
             local_received_monotonic_ns=received_ns,
@@ -628,12 +694,18 @@ class PymavlinkFlightClient:
         )
         with self._highres_imu_lock:
             self._highres_imu = sample
+            self._highres_imu_by_sensor_id[sensor_id] = sample
             self._highres_imu_sample_count += 1
             if self._highres_imu_first_monotonic_ns is None:
                 self._highres_imu_first_monotonic_ns = received_ns
             self._highres_imu_last_monotonic_ns = received_ns
+        self._write_highres_imu_capture(sample)
         if self._highres_imu_log_messages:
-            print(f"[mavlink] HIGHRES_IMU {format_highres_imu_health(self.getHighresImuHealth())}")
+            print(
+                "[mavlink] HIGHRES_IMU "
+                f"{format_highres_imu_health(self.getHighresImuHealth())} "
+                f"{format_highres_imu_sample(sample)}"
+            )
 
     def _send_timesync_request(self) -> None:
         if self._mav is None:
@@ -666,6 +738,102 @@ class PymavlinkFlightClient:
             return int(getter())
         except Exception:
             return None
+
+    def _maybe_emit_highres_imu_runtime_logs(self, *, force: bool = False) -> None:
+        if not self._highres_imu_enabled:
+            return
+        health = self.getHighresImuHealth()
+        if health is None:
+            return
+        if self._highres_imu_warn_on_stale:
+            previous = self._highres_imu_last_health_status
+            if health.status != previous:
+                if health.status in {"stale", "degraded"}:
+                    print(f"[mavlink] HIGHRES_IMU warning {format_highres_imu_health(health)}")
+                elif previous in {"stale", "degraded"} and health.status == "ok":
+                    print(f"[mavlink] HIGHRES_IMU recovered {format_highres_imu_health(health)}")
+                self._highres_imu_last_health_status = health.status
+        if self._highres_imu_summary_interval_s <= 0.0:
+            return
+        now_ns = time.monotonic_ns()
+        if not force and self._highres_imu_last_summary_monotonic_ns is not None:
+            elapsed_s = (now_ns - self._highres_imu_last_summary_monotonic_ns) / 1_000_000_000.0
+            if elapsed_s < self._highres_imu_summary_interval_s:
+                return
+        self._highres_imu_last_summary_monotonic_ns = now_ns
+        print(
+            "[mavlink] HIGHRES_IMU summary "
+            f"{format_highres_imu_health(health)} {format_highres_imu_sample(self.getHighresImu())}"
+        )
+
+    def _write_highres_imu_capture(self, sample: HighresImuSample) -> None:
+        writer = self._ensure_highres_imu_capture_writer()
+        if writer is None:
+            return
+        writer.writerow(
+            [
+                sample.local_received_monotonic_ns,
+                sample.time_usec,
+                sample.sensor_id,
+                sample.source_system,
+                sample.source_component,
+                sample.transport,
+                sample.fields_updated,
+                sample.xacc,
+                sample.yacc,
+                sample.zacc,
+                sample.xgyro,
+                sample.ygyro,
+                sample.zgyro,
+                sample.xmag,
+                sample.ymag,
+                sample.zmag,
+                sample.abs_pressure,
+                sample.diff_pressure,
+                sample.pressure_alt,
+                sample.temperature,
+            ]
+        )
+        if self._highres_imu_capture_file is not None:
+            self._highres_imu_capture_file.flush()
+
+    def _ensure_highres_imu_capture_writer(self) -> csv.writer | None:
+        if self._highres_imu_capture_path is None:
+            return None
+        if self._highres_imu_capture_writer is not None:
+            return self._highres_imu_capture_writer
+        self._highres_imu_capture_path.parent.mkdir(parents=True, exist_ok=True)
+        self._highres_imu_capture_file = self._highres_imu_capture_path.open(
+            "w",
+            newline="",
+            encoding="utf-8",
+        )
+        self._highres_imu_capture_writer = csv.writer(self._highres_imu_capture_file)
+        self._highres_imu_capture_writer.writerow(
+            [
+                "local_received_monotonic_ns",
+                "time_usec",
+                "sensor_id",
+                "source_system",
+                "source_component",
+                "transport",
+                "fields_updated",
+                "xacc",
+                "yacc",
+                "zacc",
+                "xgyro",
+                "ygyro",
+                "zgyro",
+                "xmag",
+                "ymag",
+                "zmag",
+                "abs_pressure",
+                "diff_pressure",
+                "pressure_alt",
+                "temperature",
+            ]
+        )
+        return self._highres_imu_capture_writer
 
     def _set_guided_mode(self) -> None:
         if self._mav is None or self._target_system is None:

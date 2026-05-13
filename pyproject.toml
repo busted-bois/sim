@@ -38,6 +38,7 @@ mavlink-all = "src.sim_launch:main_mavlink_all"
 sim-restore-simpleflight = "src.sim_launch:main_restore_simpleflight"
 extract-simulator-specs = "src.simulator_specs:main"
 highres-imu-smoke = "src.highres_imu_smoke:main"
+sim-highres-imu-smoke = "src.sim_launch:main_highres_imu_smoke"
 timesync-smoke = "src.timesync_smoke:main"
 sim-timesync-smoke = "src.sim_launch:main_timesync_smoke"
 

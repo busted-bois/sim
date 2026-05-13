@@ -245,6 +245,7 @@ def land_with_telemetry(
                 sampler.set_command("hover_settle")
             print(f"[{label}] Hover settle: {min_hover_seconds:.2f}s")
             time.sleep(min_hover_seconds)
+        _wait_for_imu_stability(client, landing_cfg, sampler=sampler, label=label)
 
         if profile == "very_soft":
             print(f"[{label}] Hover settle complete — starting final land.")
@@ -276,6 +277,7 @@ def land_with_telemetry(
             if sampler:
                 sampler.set_command("hover_async")
             client.hoverAsync().join()
+            _wait_for_imu_stability(client, landing_cfg, sampler=sampler, label=label)
 
         if sampler:
             sampler.set_command("land_async")
@@ -346,3 +348,66 @@ def _landing_telemetry_if_enabled(
     sampler.set_command("start")
     sampler.start()
     return sampler
+
+
+def _wait_for_imu_stability(
+    client: FlightClient,
+    landing_cfg: dict,
+    *,
+    sampler: LandingTelemetrySampler | None,
+    label: str,
+) -> bool:
+    imu_cfg = landing_cfg.get("imu_stability_check", {})
+    if not bool(imu_cfg.get("enabled", True)):
+        return False
+    sample_getter = getattr(client, "getHighresImu", None)
+    health_getter = getattr(client, "getHighresImuHealth", None)
+    if not callable(sample_getter) or not callable(health_getter):
+        return False
+
+    hold_seconds = max(0.2, float(imu_cfg.get("hold_seconds", 0.4)))
+    timeout_s = max(hold_seconds, float(imu_cfg.get("timeout_seconds", 3.0)))
+    max_gyro_norm_rads = max(0.05, float(imu_cfg.get("max_gyro_norm_rads", 0.35)))
+    max_accel_delta_ms2 = max(0.1, float(imu_cfg.get("max_accel_delta_ms2", 1.8)))
+    gravity_ms2 = max(0.1, float(imu_cfg.get("gravity_ms2", 9.81)))
+    deadline = time.monotonic() + timeout_s
+    stable_started_s: float | None = None
+    if sampler is not None:
+        sampler.set_command("imu_stability_wait")
+
+    while time.monotonic() < deadline:
+        health = health_getter()
+        sample = sample_getter()
+        if health is None or sample is None:
+            return False
+        if health.status not in {"ok", "degraded"}:
+            stable_started_s = None
+            time.sleep(0.05)
+            continue
+        gyro_norm = sample.angular_velocity_norm()
+        accel_norm = sample.acceleration_norm()
+        accel_delta = None if accel_norm is None else abs(accel_norm - gravity_ms2)
+        stable = (
+            gyro_norm is not None
+            and accel_delta is not None
+            and gyro_norm <= max_gyro_norm_rads
+            and accel_delta <= max_accel_delta_ms2
+        )
+        if stable:
+            if stable_started_s is None:
+                stable_started_s = time.monotonic()
+            elif (time.monotonic() - stable_started_s) >= hold_seconds:
+                print(
+                    f"[{label}] IMU settle ready: gyro_norm={gyro_norm:.3f} "
+                    f"accel_delta={accel_delta:.3f}"
+                )
+                return True
+        else:
+            stable_started_s = None
+        time.sleep(0.05)
+
+    print(
+        f"[{label}] IMU settle timeout after {timeout_s:.1f}s; proceeding with landing anyway.",
+        file=sys.stderr,
+    )
+    return False

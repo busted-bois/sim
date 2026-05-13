@@ -7,7 +7,7 @@ import os
 import time
 
 from src.config import apply_low_end_overrides, load_config
-from src.control.highres_imu import format_highres_imu_health
+from src.control.highres_imu import format_highres_imu_health, format_highres_imu_sample
 from src.control.mavlink_client import PymavlinkFlightClient
 from src.mavlink_endpoints import resolve_control_transport
 
@@ -56,14 +56,10 @@ def _build_parser() -> argparse.ArgumentParser:
 def _print_snapshot(label: str, client: PymavlinkFlightClient) -> None:
     health = client.getHighresImuHealth()
     sample = client.getHighresImu()
-    sample_text = "sample=none"
-    if sample is not None:
-        sample_text = (
-            f"sample(id={sample.sensor_id},time_usec={sample.time_usec},"
-            f"xacc={sample.xacc},yacc={sample.yacc},zacc={sample.zacc},"
-            f"xgyro={sample.xgyro},ygyro={sample.ygyro},zgyro={sample.zgyro})"
-        )
-    print(f"[highres-imu-smoke] {label} {format_highres_imu_health(health)} {sample_text}")
+    print(
+        f"[highres-imu-smoke] {label} "
+        f"{format_highres_imu_health(health)} {format_highres_imu_sample(sample)}"
+    )
 
 
 def _highres_imu_client(
@@ -73,12 +69,14 @@ def _highres_imu_client(
     transport = resolve_control_transport(config)
     if transport != "mavlink":
         raise SystemExit(
-            'HIGHRES_IMU smoke test requires MAVLink transport. Set control.transport="mavlink".'
+            'HIGHRES_IMU smoke test requires MAVLink transport. '
+            'Set control.transport="mavlink", or run it via `uv run sim-highres-imu-smoke`.'
         )
 
     control_cfg = config.get("control", {})
     mav_cfg = control_cfg.get("mavlink", {})
     imu_cfg = mav_cfg.get("highres_imu", {})
+    capture_cfg = imu_cfg.get("capture_log", {})
     endpoint = (
         (args.endpoint or "").strip()
         or os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip()
@@ -104,6 +102,13 @@ def _highres_imu_client(
         ),
         highres_imu_log_messages=bool(args.verbose_highres_imu),
         highres_imu_max_staleness_ms=float(imu_cfg.get("max_staleness_ms", 1000.0)),
+        highres_imu_summary_interval_s=float(imu_cfg.get("summary_interval_seconds", 5.0)),
+        highres_imu_warn_on_stale=bool(imu_cfg.get("warn_on_stale", True)),
+        highres_imu_capture_path=(
+            str(capture_cfg.get("path", "logs/highres_imu_capture.csv")).strip()
+            if bool(capture_cfg.get("enabled", False))
+            else None
+        ),
     )
     return client, endpoint, imu_cfg.get("smoke_test", {})
 
