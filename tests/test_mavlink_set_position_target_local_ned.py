@@ -8,6 +8,8 @@ from src.control.flight_client import (
     SET_POSITION_FRAME_BODY_NED,
     SetPositionTargetLocalNedCommand,
     build_position_target_type_mask,
+    build_position_type_mask,
+    build_velocity_type_mask,
 )
 from src.control.mavlink_client import PymavlinkFlightClient
 
@@ -183,8 +185,8 @@ class PymavlinkSetPositionTargetLocalNedTests(unittest.TestCase):
             client.close()
 
         self.assertEqual(len(connection.mav.position_target_calls), 3)
-        velocity_mask = build_position_target_type_mask(use_velocity=True, force_set=True)
-        position_mask = build_position_target_type_mask(use_position=True)
+        velocity_mask = build_velocity_type_mask()
+        position_mask = build_position_type_mask()
 
         local_velocity_call = connection.mav.position_target_calls[0]
         body_velocity_call = connection.mav.position_target_calls[1]
@@ -201,6 +203,16 @@ class PymavlinkSetPositionTargetLocalNedTests(unittest.TestCase):
         self.assertEqual(local_position_call[3], mavutil.mavlink.MAV_FRAME_LOCAL_NED)
         self.assertEqual(local_position_call[4], position_mask)
         self.assertEqual(local_position_call[5:8], (3.0, 4.0, -5.0))
+
+    def test_short_mask_helpers_match_general_builder(self) -> None:
+        self.assertEqual(
+            build_velocity_type_mask(),
+            build_position_target_type_mask(use_velocity=True, force_set=True),
+        )
+        self.assertEqual(
+            build_position_type_mask(),
+            build_position_target_type_mask(use_position=True),
+        )
 
     def test_full_payload_mixed_fields_passthrough(self) -> None:
         client, connection = self._make_client()

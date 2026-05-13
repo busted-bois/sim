@@ -65,6 +65,17 @@ def build_position_target_type_mask(
     return int(mask)
 
 
+def build_velocity_type_mask(*, force_set: bool = True) -> int:
+    return build_position_target_type_mask(
+        use_velocity=True,
+        force_set=force_set,
+    )
+
+
+def build_position_type_mask() -> int:
+    return build_position_target_type_mask(use_position=True)
+
+
 class FlightClient(Protocol):
 
     def enableApiControl(self, enable: bool) -> None: ...
