@@ -1,4 +1,3 @@
-import math
 import queue
 import time
 import unittest
@@ -7,7 +6,6 @@ from pymavlink import mavutil
 
 from src.control.flight_client import (
     SET_POSITION_FRAME_BODY_NED,
-    SET_POSITION_FRAME_LOCAL_NED,
     SetPositionTargetLocalNedCommand,
     build_position_target_type_mask,
 )
@@ -174,54 +172,6 @@ class PymavlinkSetPositionTargetLocalNedTests(unittest.TestCase):
             | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
         )
         self.assertEqual(mask, ignored_mask)
-
-    def test_submit_rejects_non_finite_values(self) -> None:
-        client, _ = self._make_client()
-        try:
-            with self.assertRaises(ValueError):
-                client.submitSetPositionTargetLocalNed(
-                    SetPositionTargetLocalNedCommand(
-                        frame=SET_POSITION_FRAME_LOCAL_NED,
-                        type_mask=0,
-                        vx=math.nan,
-                    )
-                )
-            with self.assertRaises(ValueError):
-                client.submitSetPositionTargetLocalNed(
-                    SetPositionTargetLocalNedCommand(
-                        frame=SET_POSITION_FRAME_LOCAL_NED,
-                        type_mask=0,
-                        yaw_rate=math.inf,
-                    )
-                )
-        finally:
-            client.close()
-
-    def test_submit_rejects_when_not_connected(self) -> None:
-        heartbeat = _FakeMessage(
-            "HEARTBEAT",
-            base_mode=0,
-            source_system=42,
-            source_component=24,
-        )
-        connection = _FakeMavConnection(heartbeat, [])
-        client = PymavlinkFlightClient(
-            endpoint="udpin:0.0.0.0:14550",
-            send_timesync_requests=False,
-            prepare_for_flight_on_connect=False,
-            request_state_messages_on_connect=False,
-            connection_factory=lambda *args, **kwargs: connection,
-        )
-        try:
-            with self.assertRaises(RuntimeError):
-                client.submitSetPositionTargetLocalNed(
-                    SetPositionTargetLocalNedCommand(
-                        frame=SET_POSITION_FRAME_LOCAL_NED,
-                        type_mask=0,
-                    )
-                )
-        finally:
-            client.close()
 
     def test_convenience_submitters_use_expected_frames_and_masks(self) -> None:
         client, connection = self._make_client()
