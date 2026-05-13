@@ -34,6 +34,7 @@ import numpy as np
 import airsim
 from src.control.algorithms import Algorithm, register
 from src.control.flight_client import FlightClient
+from src.control.highres_imu import format_highres_imu_health
 from src.control.primitives import rotate_yaw, takeoff_with_settle
 from src.control.utils import _clamp, _yaw_from_orientation, make_vz_trim
 from src.vision.processing import (
@@ -153,6 +154,9 @@ class AutonomousExplore(Algorithm):
             f"duration_s={duration_s:.1f} n_cols={n_cols} z_hold={z_hold:.1f} "
             f"inverse_depth={inverse_depth}"
         )
+        imu_health = self.highres_imu_health(client)
+        if imu_health is not None:
+            print(f"[autonomous_explore] imu_health {format_highres_imu_health(imu_health)}")
 
         takeoff_with_settle(client, max_attempts=4, label="autonomous_explore")
         print("[autonomous_explore] takeoff complete")

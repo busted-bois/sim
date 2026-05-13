@@ -194,18 +194,31 @@ def apply_low_end_overrides(config: Config | dict[str, Any]) -> None:
         return
     print("Low-end mode enabled: prioritizing smooth flight over detailed logging.")
     low_end_cfg = raw.setdefault("low_end_profile", {})
+    conformant_sim = bool(raw.setdefault("simulator", {}).get("specification_required", False))
 
     vision_cfg = raw.setdefault("vision", {})
-    vision_cfg["enabled"] = bool(low_end_cfg.get("vision_enabled", False))
-    if vision_cfg["enabled"]:
-        vision_cfg["fps"] = float(low_end_cfg.get("vision_fps", 8.0))
+    if conformant_sim:
+        print(
+            "Low-end mode requested while simulator specification is required; "
+            "preserving camera timing and command-rate limits."
+        )
+    else:
+        print("Low-end mode is using a performance-oriented, non-conformant profile.")
+        vision_cfg["enabled"] = bool(low_end_cfg.get("vision_enabled", False))
+        if vision_cfg["enabled"]:
+            vision_cfg["fps"] = float(low_end_cfg.get("vision_fps", 8.0))
 
     control_cfg = raw.setdefault("control", {})
-    command_rate_hz = float(low_end_cfg.get("command_rate_hz", 25.0))
-    control_cfg["command_rate_hz"] = max(10.0, min(35.0, command_rate_hz))
+    if not conformant_sim:
+        command_rate_hz = float(low_end_cfg.get("command_rate_hz", 25.0))
+        control_cfg["command_rate_hz"] = max(10.0, min(35.0, command_rate_hz))
     latency_cfg = control_cfg.setdefault("latency_tuning", {})
     latency_cfg["enabled"] = False
     latency_cfg.setdefault("autotuner", {})["enabled"] = False
+    mav_cfg = control_cfg.setdefault("mavlink", {})
+    highres_imu_cfg = mav_cfg.setdefault("highres_imu", {})
+    highres_imu_cfg["enabled"] = bool(low_end_cfg.get("highres_imu_enabled", False))
+    highres_imu_cfg["request_hz"] = float(low_end_cfg.get("highres_imu_request_hz", 10.0))
 
     landing_cfg = raw.setdefault("landing", {})
     landing_cfg.setdefault("telemetry_log", {})["enabled"] = False
