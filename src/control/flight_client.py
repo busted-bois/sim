@@ -149,11 +149,11 @@ class AirSimAdapter:
             return True
         return self._command_rate_gate.allow()
 
-    def _forward_optional(self, method: str, *args: Any, **kwargs: Any) -> Any:
+    def _forward_optional(self, method: str, *args: Any) -> Any:
         fn = getattr(self._client, method, None)
         if not callable(fn):
             raise NotImplementedError(f"{method} is unavailable for AirSim")
-        return fn(*args, **kwargs)
+        return fn(*args)
 
     def enableApiControl(self, enable: bool) -> None:
         return self._client.enableApiControl(enable)
