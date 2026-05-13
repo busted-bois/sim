@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Protocol
+
+from src.control.command_rate import CommandRateGate, CommandRateGateStats, SkippedAsyncResult
+from src.control.highres_imu import HighresImuHealth, HighresImuSample
 
 
 class FlightClient(Protocol):
@@ -45,11 +49,24 @@ class FlightClient(Protocol):
     ) -> None: ...
 
     def confirmConnection(self) -> None: ...
+    def getCommandRateStats(self) -> CommandRateGateStats | None: ...
+    def getHighresImu(self) -> HighresImuSample | None: ...
+    def getHighresImuHealth(self) -> HighresImuHealth | None: ...
 
 
 class AirSimAdapter:
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: Any, *, command_rate_hz: float | None = None) -> None:
         self._client = client
+        self._command_rate_gate = (
+            None
+            if command_rate_hz is None
+            else CommandRateGate(command_rate_hz, label="AirSim motion commands")
+        )
+
+    def _motion_command_allowed(self) -> bool:
+        if self._command_rate_gate is None:
+            return True
+        return self._command_rate_gate.allow()
 
     def enableApiControl(self, enable: bool) -> None:
         return self._client.enableApiControl(enable)
@@ -78,19 +95,27 @@ class AirSimAdapter:
     def moveByVelocityAsync(
         self, vx: float, vy: float, vz: float, duration: float, **kwargs
     ) -> Any:
+        if not self._motion_command_allowed():
+            return SkippedAsyncResult()
         return self._client.moveByVelocityAsync(vx, vy, vz, duration, **kwargs)
 
     def moveByVelocityZAsync(self, vx: float, vy: float, z: float, duration: float) -> Any:
+        if not self._motion_command_allowed():
+            return SkippedAsyncResult()
         return self._client.moveByVelocityZAsync(vx, vy, z, duration)
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
     ) -> Any:
+        if not self._motion_command_allowed():
+            return SkippedAsyncResult()
         return self._client.moveByAngleThrottleAsync(roll, pitch, yaw, throttle, duration)
 
     def moveByAngleRateThrottleAsync(
         self, roll_rate: float, pitch_rate: float, yaw_rate: float, throttle: float, duration: float
     ) -> Any:
+        if not self._motion_command_allowed():
+            return SkippedAsyncResult()
         return self._client.moveByAngleRateThrottleAsync(
             roll_rate, pitch_rate, yaw_rate, throttle, duration
         )
@@ -98,14 +123,20 @@ class AirSimAdapter:
     def moveByRollPitchYawThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
     ) -> Any:
+        if not self._motion_command_allowed():
+            return SkippedAsyncResult()
         return self._client.moveByRollPitchYawThrottleAsync(
             roll, pitch, yaw, throttle, duration
         )
 
     def rotateByYawRateAsync(self, yaw_rate: float, duration: float) -> Any:
+        if not self._motion_command_allowed():
+            return SkippedAsyncResult()
         return self._client.rotateByYawRateAsync(yaw_rate, duration)
 
     def hoverAsync(self) -> Any:
+        if not self._motion_command_allowed():
+            return SkippedAsyncResult()
         return self._client.hoverAsync()
 
     def simSetCameraPose(self, camera_name: str, pose: Any) -> None:
@@ -124,3 +155,69 @@ class AirSimAdapter:
 
     def confirmConnection(self) -> None:
         return self._client.confirmConnection()
+
+    def getCommandRateStats(self) -> CommandRateGateStats | None:
+        if self._command_rate_gate is None:
+            return None
+        return self._command_rate_gate.stats()
+
+    def getHighresImu(self) -> HighresImuSample | None:
+        imu = self._client.getImuData()
+        mag = self._client.getMagnetometerData()
+        baro = self._client.getBarometerData()
+        received_ns = time.monotonic_ns()
+        return HighresImuSample(
+            time_usec=int(getattr(imu, "time_stamp", 0)),
+            xacc=float(imu.linear_acceleration.x_val),
+            yacc=float(imu.linear_acceleration.y_val),
+            zacc=float(imu.linear_acceleration.z_val),
+            xgyro=float(imu.angular_velocity.x_val),
+            ygyro=float(imu.angular_velocity.y_val),
+            zgyro=float(imu.angular_velocity.z_val),
+            xmag=float(mag.magnetic_field_body.x_val),
+            ymag=float(mag.magnetic_field_body.y_val),
+            zmag=float(mag.magnetic_field_body.z_val),
+            abs_pressure=float(getattr(baro, "pressure", 0.0)),
+            diff_pressure=None,
+            pressure_alt=float(getattr(baro, "altitude", 0.0)),
+            temperature=None,
+            fields_updated=0,
+            sensor_id=0,
+            source_system=None,
+            source_component=None,
+            local_received_monotonic_ns=received_ns,
+            transport="airsim",
+        )
+
+    def getHighresImuHealth(self) -> HighresImuHealth | None:
+        try:
+            sample = self.getHighresImu()
+        except Exception as exc:
+            return HighresImuHealth(
+                status="error",
+                reason=f"AirSim IMU fetch failed: {exc}",
+                enabled=True,
+                sample_count=0,
+                stream_rate_hz=None,
+                update_age_ms=None,
+                max_staleness_ms=1000.0,
+            )
+        if sample is None:
+            return HighresImuHealth(
+                status="missing",
+                reason="AirSim IMU fetch returned no sample",
+                enabled=True,
+                sample_count=0,
+                stream_rate_hz=None,
+                update_age_ms=None,
+                max_staleness_ms=1000.0,
+            )
+        return HighresImuHealth(
+            status="ok",
+            reason="AirSim IMU RPC fetch available",
+            enabled=True,
+            sample_count=1,
+            stream_rate_hz=None,
+            update_age_ms=0.0,
+            max_staleness_ms=1000.0,
+        )
