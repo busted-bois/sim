@@ -347,6 +347,11 @@ class PymavlinkFlightClient:
             )
         )
 
+    def streamSetPositionTargetLocalNedAsync(
+        self, command: SetPositionTargetLocalNedCommand, duration: float
+    ) -> _Joinable:
+        return _Joinable(lambda: self._stream_set_position_target_local_ned(command, duration))
+
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
     ) -> _Joinable:
@@ -763,23 +768,30 @@ class PymavlinkFlightClient:
     def _stream_velocity(self, vx: float, vy: float, vz: float, duration_s: float) -> None:
         assert self._mav is not None and self._target_system is not None
         self._set_guided_mode()
-        period_s = self._command_rate_gate.period_s
         velocity_only_type_mask = build_velocity_type_mask()
+        self._stream_set_position_target_local_ned(
+            SetPositionTargetLocalNedCommand(
+                frame=SET_POSITION_FRAME_LOCAL_NED,
+                type_mask=velocity_only_type_mask,
+                vx=float(vx),
+                vy=float(vy),
+                vz=float(vz),
+            ),
+            duration_s,
+        )
 
+    def _stream_set_position_target_local_ned(
+        self, command: SetPositionTargetLocalNedCommand, duration_s: float
+    ) -> None:
+        assert self._mav is not None and self._target_system is not None
+        self._set_guided_mode()
+        period_s = self._command_rate_gate.period_s
         deadline = time.monotonic() + max(0.0, float(duration_s))
         next_tick = time.monotonic()
         while time.monotonic() < deadline:
             now_s = time.monotonic()
             if self._command_rate_gate.allow(now_s):
-                self._send_set_position_target_local_ned(
-                    SetPositionTargetLocalNedCommand(
-                        frame=SET_POSITION_FRAME_LOCAL_NED,
-                        type_mask=velocity_only_type_mask,
-                        vx=float(vx),
-                        vy=float(vy),
-                        vz=float(vz),
-                    )
-                )
+                self._send_set_position_target_local_ned(command)
             next_tick += period_s
             sleep_s = next_tick - time.monotonic()
             if sleep_s > 0:

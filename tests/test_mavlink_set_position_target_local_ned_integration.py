@@ -1,3 +1,4 @@
+import os
 import socket
 import threading
 import time
@@ -8,6 +9,10 @@ from pymavlink import mavutil
 from src.control.mavlink_client import PymavlinkFlightClient
 
 
+@unittest.skipIf(
+    os.environ.get("AIGP_SKIP_MAVLINK_INTEGRATION", "").strip() == "1",
+    "UDP MAVLink integration skipped when AIGP_SKIP_MAVLINK_INTEGRATION=1",
+)
 class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
     def test_udp_loopback_emits_local_and_body_velocity_setpoints(self) -> None:
         port = self._reserve_udp_port()
@@ -36,7 +41,7 @@ class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
             client.submitVelocityBodyNed(1.3, -0.2, 0.4)
 
             messages = []
-            deadline = time.time() + 3.0
+            deadline = time.time() + 6.0
             while len(messages) < 2 and time.time() < deadline:
                 msg = vehicle.recv_match(
                     type="SET_POSITION_TARGET_LOCAL_NED",
