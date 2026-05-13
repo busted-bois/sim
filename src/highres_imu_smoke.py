@@ -9,7 +9,11 @@ import time
 from src.config import apply_low_end_overrides, load_config
 from src.control.highres_imu import format_highres_imu_health, format_highres_imu_sample
 from src.control.mavlink_client import PymavlinkFlightClient
-from src.mavlink_endpoints import resolve_control_transport
+from src.mavlink_endpoints import (
+    describe_mavlink_heartbeat_failure,
+    probe_mavlink_heartbeat,
+    resolve_control_transport,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -69,8 +73,9 @@ def _highres_imu_client(
     transport = resolve_control_transport(config)
     if transport != "mavlink":
         raise SystemExit(
-            'HIGHRES_IMU smoke test requires MAVLink transport. '
-            'Set control.transport="mavlink", or run it via `uv run sim-highres-imu-smoke`.'
+            "HIGHRES_IMU smoke test requires MAVLink transport, but the current session "
+            f"resolved to {transport!r}. Set control.transport=\"mavlink\", or run it via "
+            "`uv run sim-highres-imu-smoke` so the launcher can establish a MAVLink heartbeat."
         )
 
     control_cfg = config.get("control", {})
@@ -138,7 +143,12 @@ def main() -> None:
     )
 
     try:
-        client.confirmConnection()
+        try:
+            client.confirmConnection()
+        except TimeoutError as exc:
+            probe = probe_mavlink_heartbeat(config, timeout_s=2.0)
+            failure_detail = describe_mavlink_heartbeat_failure(config, probe)
+            raise SystemExit(f"{exc} {failure_detail}") from exc
         deadline = time.monotonic() + duration_s
         next_poll = time.monotonic()
         while time.monotonic() < deadline:
