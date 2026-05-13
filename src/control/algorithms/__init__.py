@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.control.flight_client import FlightClient
-from src.control.highres_imu import HighresImuHealth, HighresImuSample, SensorSnapshot
+from src.control.highres_imu import HighresImuHealth, HighresImuSample
 
 if TYPE_CHECKING:
     from src.config import Config
@@ -51,12 +51,6 @@ class Algorithm:
 
     def highres_imu_health(self, client: FlightClient) -> HighresImuHealth | None:
         getter = getattr(client, "getHighresImuHealth", None)
-        if not callable(getter):
-            return None
-        return getter()
-
-    def latest_sensor_snapshot(self, client: FlightClient) -> SensorSnapshot | None:
-        getter = getattr(client, "getSensorSnapshot", None)
         if not callable(getter):
             return None
         return getter()

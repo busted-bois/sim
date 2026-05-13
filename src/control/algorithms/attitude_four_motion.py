@@ -146,8 +146,7 @@ class AttitudeFourMotion(Algorithm):
                 should_log_step = step == 0 or step == steps - 1 or step % log_every_steps == 0
                 if should_log_step and not basic_flight_logs:
                     frame = self.latest_frame()
-                    snapshot = self.latest_sensor_snapshot(client)
-                    imu = None if snapshot is None else snapshot.highres_imu
+                    imu = self.latest_highres_imu(client)
                     frame_log = ""
                     if frame is not None:
                         frame_log = (
@@ -161,10 +160,6 @@ class AttitudeFourMotion(Algorithm):
                             f" imu(zacc={imu.zacc},zgyro={imu.zgyro},"
                             f"temp={imu.temperature},src={imu.transport})"
                         )
-                    if snapshot is not None and snapshot.highres_imu_health is not None:
-                        health = snapshot.highres_imu_health
-                        if health.status != "ok":
-                            imu_log += f" imu_health={health.status}"
                     loop_elapsed_ms = (time.perf_counter() - loop_started_s) * 1000.0
                     print(
                         f"[attitude_four_motion] phase={label} step={step + 1}/{steps} "
