@@ -227,6 +227,27 @@ That path streams local-NED velocity setpoints at `control.command_rate_hz` (sam
 
 UDP loopback integration tests: `tests/test_mavlink_set_position_target_local_ned_integration.py`. Set `AIGP_SKIP_MAVLINK_INTEGRATION=1` to skip on CI if needed. Checklist: `docs/set_position_target_pr_test_plan.md`.
 
+### MAVLink local setpoint API
+
+When running MAVLink transport, `PymavlinkFlightClient` exposes helpers for `SET_POSITION_TARGET_LOCAL_NED`:
+
+- `submitSetPositionTargetLocalNed(SetPositionTargetLocalNedCommand(...))`
+- `submitVelocityLocalNed(vx, vy, vz)`
+- `submitVelocityBodyNed(vx, vy, vz)`
+- `submitPositionLocalNed(x, y, z)`
+
+Type masks can be composed with:
+
+- `build_position_target_type_mask(...)` (full control)
+- `build_velocity_type_mask()` (velocity + force bit defaults)
+- `build_position_type_mask()` (position-only defaults)
+
+`six_directions` also supports a MAVLink-submit demo mode via:
+
+- `sim.config.json -> six_directions.mavlink_setpoint_demo_enabled = true`
+
+This path sends repeated local-NED setpoints at 20 Hz using the submit API instead of `moveByVelocityAsync`.
+
 ## 👥 Team
 
 ### Advisors
