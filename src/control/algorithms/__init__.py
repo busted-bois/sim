@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.control.flight_client import FlightClient
+from src.control.highres_imu import HighresImuHealth, HighresImuSample
 
 if TYPE_CHECKING:
     from src.config import Config
@@ -41,6 +42,18 @@ class Algorithm:
         if self._vision_feed is None:
             return None
         return self._vision_feed.get_stats()
+
+    def latest_highres_imu(self, client: FlightClient) -> HighresImuSample | None:
+        getter = getattr(client, "getHighresImu", None)
+        if not callable(getter):
+            return None
+        return getter()
+
+    def highres_imu_health(self, client: FlightClient) -> HighresImuHealth | None:
+        getter = getattr(client, "getHighresImuHealth", None)
+        if not callable(getter):
+            return None
+        return getter()
 
 
 def register(name: str):
