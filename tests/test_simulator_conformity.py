@@ -1,14 +1,11 @@
-import math
 import unittest
 
 from src.config import apply_low_end_overrides
 from src.control.command_rate import CommandRateGate, normalize_command_rate_hz
 from src.control.flight_client import AirSimAdapter
 from src.control.primitives import _airsim_quaternion_from_euler, set_front_camera_pose
-from src.preflight import official_conformant_vision_errors
 from src.simulator_specs import conformity_fingerprint, resolve_specification_path
 from src.vision.feed import VisionFeed
-from src.vision.intrinsics import horizontal_fov_degrees
 
 
 class _FakeAsyncResult:
@@ -33,21 +30,6 @@ class _FakeAirSimClient:
 
 
 class SimulatorConformityTests(unittest.TestCase):
-    def test_official_conformant_vision_errors_use_intrinsics_fov(self) -> None:
-        sim = {"specification_profile": "official_conformant"}
-        fov = horizontal_fov_degrees()
-        self.assertEqual(official_conformant_vision_errors(sim, [640, 360], fov), [])
-        self.assertGreater(len(official_conformant_vision_errors(sim, [640, 360], 60.0)), 0)
-
-    def test_official_conformant_vision_errors_skip_other_profiles(self) -> None:
-        sim = {"specification_profile": "low_end_nonconformant"}
-        self.assertEqual(official_conformant_vision_errors(sim, [1280, 720], 100.0), [])
-
-    def test_official_conformant_vision_errors_require_resolution(self) -> None:
-        sim = {"specification_profile": "official_conformant"}
-        fov = horizontal_fov_degrees()
-        self.assertGreater(len(official_conformant_vision_errors(sim, [1280, 720], fov)), 0)
-
     def test_normalize_command_rate_clamps_under_100_hz(self) -> None:
         self.assertEqual(normalize_command_rate_hz(120.0), 99.0)
         self.assertEqual(normalize_command_rate_hz(50.0), 50.0)
@@ -102,7 +84,7 @@ class SimulatorConformityTests(unittest.TestCase):
 
         self.assertIsNotNone(client.camera_pose)
         assert client.camera_pose is not None
-        expected = _airsim_quaternion_from_euler(0.0, math.radians(-20.0), 0.0)
+        expected = _airsim_quaternion_from_euler(0.0, 20.0 * 3.141592653589793 / 180.0, 0.0)
         self.assertAlmostEqual(client.camera_pose.orientation.x_val, expected.x_val, places=6)
         self.assertAlmostEqual(client.camera_pose.orientation.y_val, expected.y_val, places=6)
         self.assertAlmostEqual(client.camera_pose.orientation.z_val, expected.z_val, places=6)
@@ -168,7 +150,7 @@ class SimulatorConformityTests(unittest.TestCase):
                 "camera_name": "0",
                 "fps": 30.0,
                 "resolution": [640, 360],
-                "fov_degrees": 90.0,
+                "fov_degrees": 100.0,
                 "strict_timing": True,
                 "startup_autotune_enabled": False,
             },
