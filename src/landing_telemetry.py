@@ -1,4 +1,4 @@
-"""Sample altitude, vertical velocity, and command label during landing for CSV tuning logs."""
+"""Sample altitude, vertical velocity, command, and optional IMU data during landing."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class LandingTelemetrySampler:
         self._lock = threading.Lock()
         self._command = "init"
         self._t0 = 0.0
-        self._rows: list[tuple[float, float, float, str]] = []
+        self._rows: list[tuple[float, float, float, str, float, float]] = []
 
     def set_command(self, cmd: str) -> None:
         with self._lock:
@@ -59,9 +59,14 @@ class LandingTelemetrySampler:
             z = float(s.position.z_val)
             vz = float(s.linear_velocity.z_val)
             alt_m = max(0.0, -z)
-            self._rows.append((t, alt_m, vz, cmd))
+            imu = self._client.getHighresImu()
+            imu_zacc = float("nan") if imu is None or imu.zacc is None else float(imu.zacc)
+            imu_zgyro = float("nan") if imu is None or imu.zgyro is None else float(imu.zgyro)
+            self._rows.append((t, alt_m, vz, cmd, imu_zacc, imu_zgyro))
         except Exception:
-            self._rows.append((t, float("nan"), float("nan"), f"{cmd}|sample_error"))
+            self._rows.append(
+                (t, float("nan"), float("nan"), f"{cmd}|sample_error", float("nan"), float("nan"))
+            )
 
     def stop(self) -> None:
         self._stop.set()
@@ -71,5 +76,5 @@ class LandingTelemetrySampler:
         self.out_path.parent.mkdir(parents=True, exist_ok=True)
         with self.out_path.open("w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["t_s", "altitude_m", "vz_ms", "command"])
+            w.writerow(["t_s", "altitude_m", "vz_ms", "command", "imu_zacc_ms2", "imu_zgyro_rads"])
             w.writerows(self._rows)
