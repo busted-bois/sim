@@ -264,9 +264,9 @@ Type masks can be composed with:
 
 - `sim.config.json -> six_directions.mavlink_setpoint_demo_enabled = true`
 
-That path uses `streamSetPositionTargetLocalNedAsync` with local-NED velocity setpoints at the configured `control.command_rate_hz` (same as other MAVLink motion commands), instead of `moveByVelocityAsync`. Optional `six_directions.mavlink_submit_hz` (positive number, with `submitSetPositionTargetLocalNed` available) caps the demo to that rate up to `command_rate_hz` by sending discrete setpoints instead of the async stream.
+That path streams local-NED velocity setpoints at `control.command_rate_hz` (same as other MAVLink motion), instead of `moveByVelocityAsync`. With `mavlink_submit_hz` set to a positive value, the demo uses discrete `submitSetPositionTargetLocalNed` calls at `min(that rate, command_rate_hz)` instead of the async stream.
 
-UDP loopback integration tests live in `tests/test_mavlink_set_position_target_local_ned_integration.py`. Set `AIGP_SKIP_MAVLINK_INTEGRATION=1` to skip them on constrained CI hosts. PR-focused checklist and smoke expectations: `docs/set_position_target_pr_test_plan.md`.
+UDP loopback integration tests: `tests/test_mavlink_set_position_target_local_ned_integration.py`. Set `AIGP_SKIP_MAVLINK_INTEGRATION=1` to skip on CI if needed. Checklist: `docs/set_position_target_pr_test_plan.md`.
 
 ## 👥 Team
 
