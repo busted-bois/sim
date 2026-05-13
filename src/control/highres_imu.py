@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
-from typing import Any
 
 HIGHRES_IMU_UPDATED_XACC = 1 << 0
 HIGHRES_IMU_UPDATED_YACC = 1 << 1
@@ -104,7 +103,7 @@ class HighresImuHealth:
 
 @dataclass(frozen=True, slots=True)
 class SensorSnapshot:
-    state: Any | None
+    state: object
     highres_imu: HighresImuSample | None
     highres_imu_health: HighresImuHealth | None
     captured_monotonic_ns: int

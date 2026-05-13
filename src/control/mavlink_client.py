@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import csv
 import math
+import struct
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, TextIO
 
 from pymavlink import mavutil
 
@@ -178,7 +179,7 @@ class PymavlinkFlightClient:
         self._highres_imu_last_monotonic_ns: int | None = None
         self._highres_imu_last_health_status: str | None = None
         self._highres_imu_last_summary_monotonic_ns: int | None = None
-        self._highres_imu_capture_file: Any | None = None
+        self._highres_imu_capture_file: TextIO | None = None
         self._highres_imu_capture_writer: csv.writer | None = None
         self._timesync_store = TimesyncStore(
             local_system=self._source_system,
@@ -483,14 +484,14 @@ class PymavlinkFlightClient:
         if self._highres_imu_capture_file is not None:
             try:
                 self._highres_imu_capture_file.close()
-            except Exception:
+            except OSError:
                 pass
             self._highres_imu_capture_file = None
             self._highres_imu_capture_writer = None
         if self._mav is not None:
             try:
                 self._mav.close()
-            except Exception:
+            except OSError:
                 pass
             self._mav = None
 
@@ -605,7 +606,7 @@ class PymavlinkFlightClient:
                 elif message_type == "HIGHRES_IMU":
                     self._handle_highres_imu(message)
                 self._maybe_emit_highres_imu_runtime_logs()
-            except Exception:
+            except (OSError, EOFError, struct.error, ValueError):
                 continue
 
     def _handle_local_position(self, message: Any) -> None:
@@ -736,7 +737,7 @@ class PymavlinkFlightClient:
             return None
         try:
             return int(getter())
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     def _maybe_emit_highres_imu_runtime_logs(self, *, force: bool = False) -> None:
