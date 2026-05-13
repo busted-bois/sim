@@ -8,144 +8,10 @@ is rad/s (converted in ``PymavlinkFlightClient``).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from src.control.command_rate import CommandRateGate, CommandRateGateStats, SkippedAsyncResult
 from src.control.highres_imu import HighresImuHealth, HighresImuSample
-
-SetPositionTargetFrame = Literal["local_ned", "body_ned"]
-SET_POSITION_FRAME_LOCAL_NED: SetPositionTargetFrame = "local_ned"
-SET_POSITION_FRAME_BODY_NED: SetPositionTargetFrame = "body_ned"
-
-
-@dataclass(frozen=True, slots=True)
-class SetAttitudeTargetCommand:
-    """Parameters for a MAVLink SET_ATTITUDE_TARGET message.
-
-    quaternion is (w, x, y, z) — pymavlink convention.
-    thrust is normalised [0.0, 1.0].
-    Build type_mask with build_attitude_target_type_mask() or the
-    convenience helpers build_attitude_only_type_mask() / build_body_rate_type_mask().
-    """
-
-    type_mask: int
-    quaternion: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
-    body_roll_rate: float = 0.0
-    body_pitch_rate: float = 0.0
-    body_yaw_rate: float = 0.0
-    thrust: float = 0.5
-
-
-def build_attitude_target_type_mask(
-    *,
-    ignore_attitude: bool = False,
-    ignore_roll_rate: bool = True,
-    ignore_pitch_rate: bool = True,
-    ignore_yaw_rate: bool = True,
-    ignore_thrust: bool = False,
-    throttle_body_z: bool = False,
-) -> int:
-    """Build a bitmask for SET_ATTITUDE_TARGET.
-
-    By default, only attitude + thrust are used (body rates are ignored).
-    Set ``ignore_attitude=True`` and ``ignore_*_rate=False`` to switch to
-    body-rate-only control. With ``throttle_body_z=True``, OR in the
-    ``ATTITUDE_TARGET_TYPEMASK_THROTTLE_BODY_SET`` bit when supported by pymavlink.
-    """
-    from pymavlink import mavutil
-
-    mask = 0
-    if ignore_attitude:
-        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE)
-    if ignore_roll_rate:
-        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE)
-    if ignore_pitch_rate:
-        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
-    if ignore_yaw_rate:
-        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
-    if ignore_thrust:
-        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_THROTTLE_IGNORE)
-    if throttle_body_z:
-        mask |= int(getattr(mavutil.mavlink, "ATTITUDE_TARGET_TYPEMASK_THROTTLE_BODY_SET", 32))
-    return int(mask)
-
-
-def build_attitude_only_type_mask(*, throttle_body_z: bool = False) -> int:
-    """Attitude + thrust; all body rates ignored."""
-    return build_attitude_target_type_mask(throttle_body_z=throttle_body_z)
-
-
-def build_body_rate_type_mask(*, throttle_body_z: bool = False) -> int:
-    """Body rates + thrust; attitude ignored."""
-    return build_attitude_target_type_mask(
-        ignore_attitude=True,
-        ignore_roll_rate=False,
-        ignore_pitch_rate=False,
-        ignore_yaw_rate=False,
-        throttle_body_z=throttle_body_z,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class SetPositionTargetLocalNedCommand:
-    frame: SetPositionTargetFrame
-    type_mask: int
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-    vx: float = 0.0
-    vy: float = 0.0
-    vz: float = 0.0
-    afx: float = 0.0
-    afy: float = 0.0
-    afz: float = 0.0
-    yaw: float = 0.0
-    yaw_rate: float = 0.0
-
-
-def build_position_target_type_mask(
-    *,
-    use_position: bool = False,
-    use_velocity: bool = False,
-    use_acceleration: bool = False,
-    use_yaw: bool = False,
-    use_yaw_rate: bool = False,
-    force_set: bool = False,
-) -> int:
-    from pymavlink import mavutil
-
-    mask = 0
-    if not use_position:
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE)
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE)
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE)
-    if not use_velocity:
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VX_IGNORE)
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VY_IGNORE)
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VZ_IGNORE)
-    if not use_acceleration:
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE)
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE)
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE)
-    if not use_yaw:
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE)
-    if not use_yaw_rate:
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
-    if force_set:
-        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_FORCE_SET)
-    return int(mask)
-
-
-def build_velocity_type_mask(*, force_set: bool = True) -> int:
-    return build_position_target_type_mask(
-        use_velocity=True,
-        force_set=force_set,
-    )
-
-
-def build_position_type_mask() -> int:
-    return build_position_target_type_mask(use_position=True)
 
 
 class FlightClient(Protocol):
@@ -222,12 +88,6 @@ class AirSimAdapter:
         if self._command_rate_gate is None:
             return True
         return self._command_rate_gate.allow()
-
-    def _forward_optional(self, method: str, *args: Any) -> Any:
-        fn = getattr(self._client, method, None)
-        if not callable(fn):
-            raise NotImplementedError(f"{method} is unavailable for AirSim")
-        return fn(*args)
 
     def enableApiControl(self, enable: bool) -> None:
         return self._client.enableApiControl(enable)
