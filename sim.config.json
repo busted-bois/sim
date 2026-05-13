@@ -192,8 +192,7 @@
     "duration_s": 5.0,
     "speed_ms": 2.0,
     "direction_labels": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"],
-    "mavlink_setpoint_demo_enabled": false,
-    "mavlink_submit_hz": null
+    "mavlink_setpoint_demo_enabled": false
   },
   "control": {
     "transport": "auto",
