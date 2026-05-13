@@ -37,10 +37,15 @@ class SixDirections(Algorithm):
         if not selected:
             selected = DIRECTIONS
         mavlink_setpoint_demo_enabled = bool(cfg.get("mavlink_setpoint_demo_enabled", False))
-        mavlink_submit_hz_raw = cfg.get("mavlink_submit_hz")
         stream_local_ned = getattr(client, "streamSetPositionTargetLocalNedAsync", None)
         submit_local_ned = getattr(client, "submitSetPositionTargetLocalNed", None)
         cmd_hz = max(0.5, float(control_cfg.get("command_rate_hz", 50.0)))
+        submit_cap_hz: float | None = None
+        raw_submit_hz = cfg.get("mavlink_submit_hz")
+        if raw_submit_hz is not None and callable(submit_local_ned):
+            candidate = float(raw_submit_hz)
+            if candidate > 0.0:
+                submit_cap_hz = candidate
 
         takeoff_with_settle(client, max_attempts=4, label="six_directions")
 
@@ -58,12 +63,8 @@ class SixDirections(Algorithm):
                     vy=vy_cmd,
                     vz=vz_cmd,
                 )
-                use_capped_submit = False
-                if mavlink_submit_hz_raw is not None and callable(submit_local_ned):
-                    cap_hz = float(mavlink_submit_hz_raw)
-                    use_capped_submit = cap_hz > 0.0
-                if use_capped_submit:
-                    rate_hz = max(0.5, min(cmd_hz, cap_hz, 99.0))
+                if submit_cap_hz is not None:
+                    rate_hz = max(0.5, min(cmd_hz, submit_cap_hz, 99.0))
                     period_s = 1.0 / rate_hz
                     deadline = time.perf_counter() + duration_s
                     next_tick = time.perf_counter()
