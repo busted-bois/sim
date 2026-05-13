@@ -3,11 +3,18 @@
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
+    "map_asset": "/Game/FlyingCPP/Maps/FlyingExampleMapV2",
+    "specification_profile": "official_conformant",
+    "pawn_asset": "Class'/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C'",
+    "gate_search_tokens": "gate,ring,torus,hoop",
     "extra_ue_args": [],
     "windowed": true,
     "res_x": 1280,
     "res_y": 720,
     "airsim_port": 41451,
+    "physics_update_hz": 120,
+    "specification_path": "docs/simulator_specs.json",
+    "specification_required": true,
     "rpc_ready_timeout_seconds": 120,
     "trace": {
       "enabled": true,
@@ -18,13 +25,13 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-    "pitch_up_degrees": -20,
     "fps": 18,
     "min_fps": 5,
     "fov_degrees": 100,
     "compress": true,
     "resolution": [640, 360],
-    "startup_autotune_enabled": true,
+    "strict_timing": true,
+    "startup_autotune_enabled": false,
     "startup_autotune_seconds": 3.0,
     "startup_autotune_min_samples": 8,
     "startup_autotune_headroom": 0.9,
@@ -65,11 +72,56 @@
     "cruise_speed_ms": 2.5,
     "segment_duration_s": 3.0
   },
-  "profiles": {},
+  "profiles": {
+    "official_conformant": {
+      "simulator": {
+        "specification_required": true
+      },
+      "vision": {
+        "fps": 30,
+        "min_fps": 30,
+        "fov_degrees": 100,
+        "resolution": [640, 360],
+        "strict_timing": true,
+        "startup_autotune_enabled": false
+      },
+      "control": {
+        "command_rate_hz": 90,
+        "latency_tuning": {
+          "enabled": false,
+          "max_command_rate_hz": 90,
+          "autotuner": {
+            "enabled": false
+          }
+        }
+      },
+      "camera": {
+        "pose_offset": [0.35, 0.0, -0.05],
+        "pitch_up_degrees": 20.0,
+        "roll_degrees": 0.0,
+        "yaw_degrees": 0.0
+      }
+    },
+    "low_end_nonconformant": {
+      "simulator": {
+        "specification_required": false
+      },
+      "algorithm": "attitude_four_motion",
+      "vision": {
+        "enabled": false
+      },
+      "control": {
+        "command_rate_hz": 25
+      }
+    }
+  },
   "low_end_profile": {
+    "breaks_specification": true,
     "algorithm": "attitude_four_motion",
     "command_rate_hz": 25.0,
     "algorithm_timeout_seconds": 90.0,
+    "highres_imu_enabled": false,
+    "highres_imu_request_hz": 10.0,
     "sim_res_x": 854,
     "sim_res_y": 480,
     "vision_enabled": false,
@@ -151,6 +203,19 @@
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,
+      "highres_imu": {
+        "enabled": true,
+        "request_hz": 50.0,
+        "require_stream": false,
+        "log_messages": false,
+        "max_staleness_ms": 1000.0,
+        "smoke_test": {
+          "duration_seconds": 8.0,
+          "poll_interval_seconds": 1.0,
+          "min_samples": 3,
+          "require_fresh": true
+        }
+      },
       "timesync": {
         "send_requests": true,
         "request_interval_seconds": 1.0,
@@ -181,11 +246,11 @@
         "lock_step": false
       }
     },
-    "command_rate_hz": 50,
+    "command_rate_hz": 90,
     "latency_tuning": {
-      "enabled": true,
+      "enabled": false,
       "commands_per_frame": 2.0,
-      "max_command_rate_hz": 60,
+      "max_command_rate_hz": 90,
       "autotuner": {
         "enabled": false,
         "duration_seconds": 8.0,
@@ -228,6 +293,9 @@
     "z_ceiling": -0.5
   },
   "camera": {
-    "pose_offset": [0.35, 0.0, -0.05]
+    "pose_offset": [0.35, 0.0, -0.05],
+    "pitch_up_degrees": 20.0,
+    "roll_degrees": 0.0,
+    "yaw_degrees": 0.0
   }
 }

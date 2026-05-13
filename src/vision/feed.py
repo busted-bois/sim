@@ -40,21 +40,25 @@ class VisionFeed:
         self._client = client
         self._enabled = bool(config.get("enabled", False))
         self._camera_name = str(config.get("camera_name", "0"))
-        self._fps = max(1.0, float(config.get("fps", 18.0)))
+        self._fps = max(1.0, float(config.get("fps", 30.0)))
         self._configured_fps = self._fps
         self._fov_degrees = float(config.get("fov_degrees", 100.0))
         self._compress = bool(config.get("compress", True))
         self._save_debug_frames = bool(config.get("save_debug_frames", False))
         self._debug_output_dir = Path(str(config.get("debug_output_dir", "logs/vision_frames")))
         self._target_width, self._target_height = self._parse_target_resolution(config)
+        self._strict_timing = bool(config.get("strict_timing", False))
         self._startup_autotune_enabled = bool(config.get("startup_autotune_enabled", True))
+        if self._strict_timing:
+            self._startup_autotune_enabled = False
         self._startup_autotune_seconds = max(
             1.0, float(config.get("startup_autotune_seconds", 3.0))
         )
         self._startup_autotune_min_samples = max(
             4, int(config.get("startup_autotune_min_samples", 8))
         )
-        self._startup_min_fps = max(1.0, float(config.get("min_fps", 5.0)))
+        startup_min_fps = self._fps if self._strict_timing else 5.0
+        self._startup_min_fps = max(1.0, float(config.get("min_fps", startup_min_fps)))
         self._startup_headroom = min(
             1.0,
             max(0.6, float(config.get("startup_autotune_headroom", 0.9))),

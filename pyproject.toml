@@ -30,6 +30,8 @@ sim-very-soft = "src.sim_launch:main_very_soft"
 sim-low-end = "src.sim_launch:main_low_end"
 calibrate = "src.sim_launch:main_calibrate"
 preflight = "src.preflight:main"
+extract-simulator-specs = "src.simulator_specs:main"
+highres-imu-smoke = "src.highres_imu_smoke:main"
 timesync-smoke = "src.timesync_smoke:main"
 sim-timesync-smoke = "src.sim_launch:main_timesync_smoke"
 

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.control.algorithms import Algorithm, register
 from src.control.flight_client import FlightClient
+from src.control.highres_imu import format_highres_imu_health
 from src.control.primitives import takeoff_with_settle
 from src.control.utils import _clamp
 from src.vision.processing import mean_rgb_summary
@@ -85,6 +86,9 @@ class AttitudeFourMotion(Algorithm):
             f"target_z={target_z:.2f} z_bounds=[{z_floor:.2f},{z_ceiling:.2f}] "
             f"configured_rate_hz={configured_rate_hz:.1f}"
         )
+        imu_health = self.highres_imu_health(client)
+        if imu_health is not None:
+            print(f"[attitude_four_motion] imu_health {format_highres_imu_health(imu_health)}")
 
         def apply_control(
             roll_deg: float,
@@ -142,6 +146,7 @@ class AttitudeFourMotion(Algorithm):
                 should_log_step = step == 0 or step == steps - 1 or step % log_every_steps == 0
                 if should_log_step and not basic_flight_logs:
                     frame = self.latest_frame()
+                    imu = self.latest_highres_imu(client)
                     frame_log = ""
                     if frame is not None:
                         frame_log = (
@@ -149,13 +154,19 @@ class AttitudeFourMotion(Algorithm):
                             f"shape={frame.height}x{frame.width})"
                         )
                         frame_log += mean_rgb_summary(frame.image_rgb)
+                    imu_log = ""
+                    if imu is not None:
+                        imu_log = (
+                            f" imu(zacc={imu.zacc},zgyro={imu.zgyro},"
+                            f"temp={imu.temperature},src={imu.transport})"
+                        )
                     loop_elapsed_ms = (time.perf_counter() - loop_started_s) * 1000.0
                     print(
                         f"[attitude_four_motion] phase={label} step={step + 1}/{steps} "
                         f"pos=({x:.2f},{y:.2f},{z:.2f}) vel=({vx:.2f},{vy:.2f},{vz:.2f}) "
                         f"cmd(r,p,y,t)=({roll_deg:.2f},{pitch_deg:.2f},{yaw_deg:.2f},"
                         f"{_clamp(throttle, 0.0, 1.0):.2f}) "
-                        f"loop_ms={loop_elapsed_ms:.2f}{frame_log}"
+                        f"loop_ms={loop_elapsed_ms:.2f}{frame_log}{imu_log}"
                     )
                 loop_elapsed_s = time.perf_counter() - loop_started_s
                 loop_total_s += loop_elapsed_s
