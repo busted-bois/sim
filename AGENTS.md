@@ -96,6 +96,17 @@ Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonom
 
 **NED** (North-East-Down). Negative z = above ground. Drone at 5m altitude → `z = -5.0`.
 
+### MAVLink `SET_POSITION_TARGET_LOCAL_NED`
+
+Outbound setpoints use MAVLink2 NED conventions:
+
+- **`MAV_FRAME_LOCAL_NED`**: origin is a fixed point on the ground (typically where the vehicle was armed); `x` north, `y` east, `z` down.
+- **`MAV_FRAME_BODY_NED`**: origin is the vehicle; `x` forward, `y` right, `z` down. Velocity/acceleration in this frame are body-relative; behavior for position fields depends on the autopilot—prefer explicit masks and test against your stack.
+
+Helpers live on `PymavlinkFlightClient` and on the `FlightClient` protocol (`submitVelocityLocalNed`, `streamSetPositionTargetLocalNedAsync`, etc.). See `README.md` (MAVLink local setpoint API).
+
+- **`AIGP_SKIP_MAVLINK_INTEGRATION=1`**: skip UDP loopback integration tests in `tests/test_mavlink_set_position_target_local_ned_integration.py` if the runner cannot bind UDP or is timing-sensitive.
+
 ## Algorithm Config Sections in sim.config.json
 
 Each algorithm has its own top-level config key matching its name (e.g. `"autonomous_explore"`, `"attitude_four_motion"`, `"vision_guided_control"`). These are read by the algorithm constructor via `self._config`.

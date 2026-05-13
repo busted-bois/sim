@@ -1,93 +1,17 @@
-import queue
-import time
 import unittest
 
 from pymavlink import mavutil
 
 from src.control.flight_client import (
     SET_POSITION_FRAME_BODY_NED,
+    SET_POSITION_FRAME_LOCAL_NED,
     SetPositionTargetLocalNedCommand,
     build_position_target_type_mask,
     build_position_type_mask,
     build_velocity_type_mask,
 )
 from src.control.mavlink_client import PymavlinkFlightClient
-
-
-class _FakeMessage:
-    def __init__(self, message_type: str, **fields) -> None:
-        self._message_type = message_type
-        self._source_system = int(fields.pop("source_system", 1))
-        self._source_component = int(fields.pop("source_component", 1))
-        for key, value in fields.items():
-            setattr(self, key, value)
-
-    def get_type(self) -> str:
-        return self._message_type
-
-    def get_srcSystem(self) -> int:
-        return self._source_system
-
-    def get_srcComponent(self) -> int:
-        return self._source_component
-
-
-class _FakeMavSender:
-    def __init__(self) -> None:
-        self.command_long_calls: list[tuple] = []
-        self.message_interval_calls: list[tuple] = []
-        self.position_target_calls: list[tuple] = []
-        self.attitude_target_calls: list[tuple] = []
-        self.timesync_calls: list[tuple[int, int]] = []
-
-    def command_long_send(self, *args) -> None:
-        self.command_long_calls.append(args)
-
-    def message_interval_send(self, *args) -> None:
-        self.message_interval_calls.append(args)
-
-    def set_position_target_local_ned_send(self, *args) -> None:
-        self.position_target_calls.append(args)
-
-    def set_attitude_target_send(self, *args) -> None:
-        self.attitude_target_calls.append(args)
-
-    def timesync_send(self, tc1: int, ts1: int) -> None:
-        self.timesync_calls.append((tc1, ts1))
-
-
-class _FakeMavConnection:
-    def __init__(self, heartbeat: _FakeMessage, queued_messages: list[_FakeMessage]) -> None:
-        self._heartbeat = heartbeat
-        self._queue: queue.Queue[_FakeMessage] = queue.Queue()
-        for message in queued_messages:
-            self.push_message(message)
-        self.target_system = heartbeat.get_srcSystem()
-        self.target_component = heartbeat.get_srcComponent()
-        self.mav = _FakeMavSender()
-        self.closed = False
-
-    def wait_heartbeat(self, timeout: float | None = None):
-        _ = timeout
-        return self._heartbeat
-
-    def recv_match(self, type=None, blocking=True, timeout=None):
-        _ = blocking
-        deadline = time.time() + (timeout or 0.0)
-        while True:
-            remaining = max(0.0, deadline - time.time()) if timeout is not None else None
-            try:
-                message = self._queue.get(timeout=remaining)
-            except queue.Empty:
-                return None
-            if type is None or message.get_type() in type:
-                return message
-
-    def close(self) -> None:
-        self.closed = True
-
-    def push_message(self, message: _FakeMessage) -> None:
-        self._queue.put(message)
+from tests.mavlink_fakes import FakeMavConnection, FakeMessage
 
 
 class PymavlinkSetPositionTargetLocalNedTests(unittest.TestCase):
@@ -244,17 +168,39 @@ class PymavlinkSetPositionTargetLocalNedTests(unittest.TestCase):
         self.assertEqual(call[14], 0.25)
         self.assertEqual(call[15], 0.0)
 
+    def test_stream_set_position_repeats_setpoint_at_command_rate(self) -> None:
+        client, connection = self._make_client(command_rate_hz=20.0)
+        try:
+            client.streamSetPositionTargetLocalNedAsync(
+                SetPositionTargetLocalNedCommand(
+                    frame=SET_POSITION_FRAME_LOCAL_NED,
+                    type_mask=build_velocity_type_mask(),
+                    vx=0.5,
+                    vy=0.0,
+                    vz=0.0,
+                ),
+                0.25,
+            ).join()
+        finally:
+            client.close()
+
+        self.assertGreaterEqual(len(connection.mav.position_target_calls), 3)
+
     @staticmethod
-    def _make_client() -> tuple[PymavlinkFlightClient, _FakeMavConnection]:
-        heartbeat = _FakeMessage(
+    def _make_client(
+        *,
+        command_rate_hz: float = 50.0,
+    ) -> tuple[PymavlinkFlightClient, FakeMavConnection]:
+        heartbeat = FakeMessage(
             "HEARTBEAT",
             base_mode=0,
             source_system=42,
             source_component=24,
         )
-        connection = _FakeMavConnection(heartbeat, [])
+        connection = FakeMavConnection(heartbeat, [])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
+            command_rate_hz=command_rate_hz,
             send_timesync_requests=False,
             prepare_for_flight_on_connect=False,
             request_state_messages_on_connect=False,
