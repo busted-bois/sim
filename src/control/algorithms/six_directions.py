@@ -31,18 +31,28 @@ class SixDirections(Algorithm):
         selected = [d for d in DIRECTIONS if d[0] in set(direction_labels)]
         if not selected:
             selected = DIRECTIONS
+        mavlink_setpoint_demo_enabled = bool(cfg.get("mavlink_setpoint_demo_enabled", False))
+        submit_velocity_local_ned = getattr(client, "submitVelocityLocalNed", None)
 
         takeoff_with_settle(client, max_attempts=4, label="six_directions")
 
         for label, vx, vy, vz in selected:
             print(f"[six_directions] Moving {label} for {duration_s:.1f}s")
             t0 = time.perf_counter()
-            client.moveByVelocityAsync(
-                vx * speed_ms / SPEED_MS,
-                vy * speed_ms / SPEED_MS,
-                vz * speed_ms / SPEED_MS,
-                duration_s,
-            ).join()
+            vx_cmd = vx * speed_ms / SPEED_MS
+            vy_cmd = vy * speed_ms / SPEED_MS
+            vz_cmd = vz * speed_ms / SPEED_MS
+            if mavlink_setpoint_demo_enabled and callable(submit_velocity_local_ned):
+                next_tick = time.perf_counter()
+                deadline = next_tick + duration_s
+                while time.perf_counter() < deadline:
+                    submit_velocity_local_ned(vx_cmd, vy_cmd, vz_cmd)
+                    next_tick += 0.05
+                    sleep_s = next_tick - time.perf_counter()
+                    if sleep_s > 0:
+                        time.sleep(sleep_s)
+            else:
+                client.moveByVelocityAsync(vx_cmd, vy_cmd, vz_cmd, duration_s).join()
             elapsed = time.perf_counter() - t0
             shortfall = duration_s - elapsed
             if shortfall > 1e-3:
