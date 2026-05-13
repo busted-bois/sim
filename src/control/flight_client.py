@@ -149,6 +149,12 @@ class AirSimAdapter:
             return True
         return self._command_rate_gate.allow()
 
+    def _forward_optional(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        fn = getattr(self._client, method, None)
+        if not callable(fn):
+            raise NotImplementedError(f"{method} is unavailable for AirSim")
+        return fn(*args, **kwargs)
+
     def enableApiControl(self, enable: bool) -> None:
         return self._client.enableApiControl(enable)
 
@@ -186,38 +192,21 @@ class AirSimAdapter:
         return self._client.moveByVelocityZAsync(vx, vy, z, duration)
 
     def submitSetPositionTargetLocalNed(self, command: SetPositionTargetLocalNedCommand) -> None:
-        sender = getattr(self._client, "submitSetPositionTargetLocalNed", None)
-        if not callable(sender):
-            raise NotImplementedError("submitSetPositionTargetLocalNed is unavailable for AirSim")
-        sender(command)
+        self._forward_optional("submitSetPositionTargetLocalNed", command)
 
     def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None:
-        sender = getattr(self._client, "submitVelocityLocalNed", None)
-        if not callable(sender):
-            raise NotImplementedError("submitVelocityLocalNed is unavailable for AirSim")
-        sender(vx, vy, vz)
+        self._forward_optional("submitVelocityLocalNed", vx, vy, vz)
 
     def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
-        sender = getattr(self._client, "submitVelocityBodyNed", None)
-        if not callable(sender):
-            raise NotImplementedError("submitVelocityBodyNed is unavailable for AirSim")
-        sender(vx, vy, vz)
+        self._forward_optional("submitVelocityBodyNed", vx, vy, vz)
 
     def submitPositionLocalNed(self, x: float, y: float, z: float) -> None:
-        sender = getattr(self._client, "submitPositionLocalNed", None)
-        if not callable(sender):
-            raise NotImplementedError("submitPositionLocalNed is unavailable for AirSim")
-        sender(x, y, z)
+        self._forward_optional("submitPositionLocalNed", x, y, z)
 
     def streamSetPositionTargetLocalNedAsync(
         self, command: SetPositionTargetLocalNedCommand, duration: float
     ) -> Any:
-        sender = getattr(self._client, "streamSetPositionTargetLocalNedAsync", None)
-        if not callable(sender):
-            raise NotImplementedError(
-                "streamSetPositionTargetLocalNedAsync is unavailable for AirSim"
-            )
-        return sender(command, duration)
+        return self._forward_optional("streamSetPositionTargetLocalNedAsync", command, duration)
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
