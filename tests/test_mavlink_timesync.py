@@ -187,13 +187,23 @@ class TimesyncStoreTests(unittest.TestCase):
             def get_type(self) -> str:
                 return "TIMESYNC"
 
-        snapshot = TimesyncStore()
-        event = snapshot.handle_message(_MinimalTimesyncMessage())
+        store = TimesyncStore()
+        event = store.handle_message(_MinimalTimesyncMessage())
 
         self.assertEqual(event.target_system, 0)
         self.assertEqual(event.target_component, 0)
         self.assertIsNone(event.source_system)
         self.assertIsNone(event.source_component)
+
+    def test_handle_message_return_snapshot_matches_subsequent_snapshot(self) -> None:
+        store = TimesyncStore()
+        msg = _FakeTimesyncMessage(tc1=0, ts1=888)
+        event, snap_inline = store.handle_message(msg, return_snapshot=True)
+        snap_after = store.snapshot()
+        self.assertIs(snap_inline, snap_after)
+        self.assertEqual(event.ts1, 888)
+        self.assertEqual(snap_inline.message_count, snap_after.message_count)
+        self.assertEqual(snap_inline.last_message, event)
 
     def test_response_matching_request_computes_measurement(self) -> None:
         store = TimesyncStore(local_system=255, local_component=1)
