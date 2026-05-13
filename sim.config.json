@@ -122,6 +122,9 @@
     "algorithm_timeout_seconds": 90.0,
     "highres_imu_enabled": false,
     "highres_imu_request_hz": 10.0,
+    "highres_imu_log_messages": false,
+    "highres_imu_summary_interval_seconds": 10.0,
+    "highres_imu_capture_enabled": false,
     "sim_res_x": 854,
     "sim_res_y": 480,
     "vision_enabled": false,
@@ -210,6 +213,12 @@
         "require_stream": false,
         "log_messages": false,
         "max_staleness_ms": 1000.0,
+        "summary_interval_seconds": 5.0,
+        "warn_on_stale": true,
+        "capture_log": {
+          "enabled": false,
+          "path": "logs/highres_imu_capture.csv"
+        },
         "smoke_test": {
           "duration_seconds": 8.0,
           "poll_interval_seconds": 1.0,
