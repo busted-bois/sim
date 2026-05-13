@@ -309,8 +309,7 @@ class PymavlinkFlightClient:
         return _Joinable(_run)
 
     def submitSetPositionTargetLocalNed(self, command: SetPositionTargetLocalNedCommand) -> None:
-        if self._mav is None or self._target_system is None:
-            raise RuntimeError("MAVLink connection is not ready. Call confirmConnection() first.")
+        assert self._mav is not None and self._target_system is not None
         self._set_guided_mode()
         self._send_set_position_target_local_ned(command)
 
@@ -782,7 +781,7 @@ class PymavlinkFlightClient:
             if self._command_rate_gate.allow(now_s):
                 self._send_set_position_target_local_ned(
                     SetPositionTargetLocalNedCommand(
-                        frame="local_ned",
+                        frame=SET_POSITION_FRAME_LOCAL_NED,
                         type_mask=velocity_only_type_mask,
                         vx=float(vx),
                         vy=float(vy),
@@ -802,18 +801,12 @@ class PymavlinkFlightClient:
         *,
         t_ms: int | None = None,
     ) -> None:
-        if self._mav is None or self._target_system is None:
-            raise RuntimeError("MAVLink connection is not ready. Call confirmConnection() first.")
-        frame = str(command.frame).strip().lower()
+        assert self._mav is not None and self._target_system is not None
+        frame = command.frame
         if frame not in self._POSITION_TARGET_FRAME_MAP:
             raise ValueError(
                 f"Unsupported SET_POSITION_TARGET_LOCAL_NED frame {command.frame!r}. "
                 "Expected one of: local_ned, body_ned."
-            )
-        type_mask = int(command.type_mask)
-        if type_mask < 0 or type_mask > 0xFFFF:
-            raise ValueError(
-                f"SET_POSITION_TARGET_LOCAL_NED type_mask must fit uint16, got {type_mask}."
             )
 
         timestamp_ms = int((time.time() * 1000) % 2**32) if t_ms is None else int(t_ms)
@@ -822,28 +815,19 @@ class PymavlinkFlightClient:
             self._target_system,
             self._target_component or 1,
             self._POSITION_TARGET_FRAME_MAP[frame],
-            type_mask,
-            self._coerce_finite("x", command.x),
-            self._coerce_finite("y", command.y),
-            self._coerce_finite("z", command.z),
-            self._coerce_finite("vx", command.vx),
-            self._coerce_finite("vy", command.vy),
-            self._coerce_finite("vz", command.vz),
-            self._coerce_finite("afx", command.afx),
-            self._coerce_finite("afy", command.afy),
-            self._coerce_finite("afz", command.afz),
-            self._coerce_finite("yaw", command.yaw),
-            self._coerce_finite("yaw_rate", command.yaw_rate),
+            int(command.type_mask),
+            float(command.x),
+            float(command.y),
+            float(command.z),
+            float(command.vx),
+            float(command.vy),
+            float(command.vz),
+            float(command.afx),
+            float(command.afy),
+            float(command.afz),
+            float(command.yaw),
+            float(command.yaw_rate),
         )
-
-    @staticmethod
-    def _coerce_finite(field_name: str, value: Any) -> float:
-        number = float(value)
-        if not math.isfinite(number):
-            raise ValueError(
-                f"SET_POSITION_TARGET_LOCAL_NED field {field_name!r} must be finite; got {value!r}."
-            )
-        return number
 
     def _stream_attitude_target(
         self,
