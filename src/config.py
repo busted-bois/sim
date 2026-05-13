@@ -203,7 +203,6 @@ def apply_low_end_overrides(config: Config | dict[str, Any]) -> None:
             "preserving camera timing and command-rate limits."
         )
     else:
-        print("Low-end mode is using a performance-oriented, non-conformant profile.")
         vision_cfg["enabled"] = bool(low_end_cfg.get("vision_enabled", False))
         if vision_cfg["enabled"]:
             vision_cfg["fps"] = float(low_end_cfg.get("vision_fps", 8.0))

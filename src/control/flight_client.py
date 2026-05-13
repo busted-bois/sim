@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from typing import Any, Protocol
 
-from src.control.command_rate import CommandRateGate, CommandRateGateStats, SkippedAsyncResult
+from src.control.command_rate import CommandRateGate, SkippedAsyncResult
 from src.control.highres_imu import HighresImuHealth, HighresImuSample
 
 
@@ -66,7 +66,6 @@ class FlightClient(Protocol):
     ) -> None: ...
 
     def confirmConnection(self) -> None: ...
-    def getCommandRateStats(self) -> CommandRateGateStats | None: ...
     def getHighresImu(self) -> HighresImuSample | None: ...
     def getHighresImuHealth(self) -> HighresImuHealth | None: ...
 
@@ -75,9 +74,7 @@ class AirSimAdapter:
     def __init__(self, client: Any, *, command_rate_hz: float | None = None) -> None:
         self._client = client
         self._command_rate_gate = (
-            None
-            if command_rate_hz is None
-            else CommandRateGate(command_rate_hz, label="AirSim motion commands")
+            None if command_rate_hz is None else CommandRateGate(command_rate_hz)
         )
 
     def _motion_command_allowed(self) -> bool:
@@ -197,11 +194,6 @@ class AirSimAdapter:
 
     def confirmConnection(self) -> None:
         return self._client.confirmConnection()
-
-    def getCommandRateStats(self) -> CommandRateGateStats | None:
-        if self._command_rate_gate is None:
-            return None
-        return self._command_rate_gate.stats()
 
     def getHighresImu(self) -> HighresImuSample | None:
         imu = self._client.getImuData()

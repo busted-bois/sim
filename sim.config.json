@@ -4,9 +4,8 @@
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
     "map_asset": "/Game/FlyingCPP/Maps/FlyingExampleMapV2",
-    "specification_profile": "official_conformant",
-    "pawn_asset": "Class'/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C'",
-    "gate_search_tokens": "gate,ring,torus,hoop",
+    "pawn_asset": "/AirSim/Blueprints/BP_FlyingPawn",
+    "gate_search_tokens": "gate,ring,torus",
     "extra_ue_args": [],
     "windowed": true,
     "res_x": 1280,
@@ -25,8 +24,9 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-    "fps": 18,
-    "min_fps": 5,
+    "pitch_up_degrees": -20,
+    "fps": 30,
+    "min_fps": 30,
     "fov_degrees": 100,
     "compress": true,
     "resolution": [640, 360],
@@ -204,6 +204,19 @@
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,
+      "highres_imu": {
+        "enabled": true,
+        "request_hz": 50.0,
+        "require_stream": false,
+        "log_messages": false,
+        "max_staleness_ms": 1000.0,
+        "smoke_test": {
+          "duration_seconds": 8.0,
+          "poll_interval_seconds": 1.0,
+          "min_samples": 3,
+          "require_fresh": true
+        }
+      },
       "timesync": {
         "send_requests": true,
         "request_interval_seconds": 1.0,
