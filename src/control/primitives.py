@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -89,7 +90,6 @@ def suppress_api_cleanup_warning(exc: BaseException) -> bool:
 
 
 def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
-    import threading
     import traceback
 
     error_holder: dict[str, BaseException] = {}
@@ -104,12 +104,15 @@ def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
     worker.start()
     started = time.perf_counter()
     deadline = started + timeout_seconds
+    # Join in short slices so the main thread can run an RPC heartbeat (>= 2 Hz).
     join_slice_s = 0.25
     while worker.is_alive():
         remaining = deadline - time.perf_counter()
         if remaining <= 0:
             break
         worker.join(timeout=min(join_slice_s, remaining))
+        if worker.is_alive():
+            airsim_rpc_heartbeat_tick(client, label="algorithm_runner")
     elapsed_s = time.perf_counter() - started
 
     if worker.is_alive():
@@ -323,3 +326,103 @@ def _landing_telemetry_if_enabled(
     sampler.set_command("start")
     sampler.start()
     return sampler
+
+
+def airsim_rpc_heartbeat_tick(
+    client: FlightClient,
+    *,
+    label: str = "primitives",
+) -> bool:
+    """One lightweight AirSim RPC round-trip via ``ping()``."""
+    try:
+        if client.ping():
+            return True
+        print(f"[{label}] RPC heartbeat: ping returned falsy", file=sys.stderr)
+        return False
+    except Exception as exc:
+        print(f"[{label}] RPC heartbeat (ping) failed: {exc}", file=sys.stderr)
+        return False
+
+
+def airsim_rpc_heartbeat_tick_with_timeout(
+    client: FlightClient,
+    *,
+    label: str,
+    timeout_s: float,
+) -> bool:
+    """Run a single heartbeat tick with a hard wall-clock timeout (RPC runs in a daemon thread)."""
+    result: list[bool | None] = [None]
+
+    def _tick() -> None:
+        try:
+            result[0] = airsim_rpc_heartbeat_tick(client, label=label)
+        except BaseException:
+            result[0] = False
+
+    t = threading.Thread(target=_tick, name="airsim_heartbeat_tick", daemon=True)
+    t.start()
+    t.join(timeout=max(0.01, timeout_s))
+    if t.is_alive():
+        print(
+            f"[{label}] RPC heartbeat tick timed out after {timeout_s:.2f}s",
+            file=sys.stderr,
+        )
+        return False
+    return bool(result[0])
+
+
+def probe_airsim_rpc_heartbeat(
+    client: FlightClient,
+    *,
+    duration_s: float = 2.0,
+    min_rate_hz: float = 2.0,
+    tick_timeout_s: float = 0.3,
+    label: str = "primitives",
+    require_zero_tick_overruns: bool = True,
+) -> bool:
+    """Send heartbeats at ~``min_rate_hz`` for ``duration_s``; each tick capped by ``tick_timeout_s``.
+
+    When ``require_zero_tick_overruns`` is True, any tick whose wall time exceeds ``period_s``
+    fails the probe (strict scheduling vs slow RPC).
+    """
+    period_s = 1.0 / max(min_rate_hz, 0.1)
+    min_duration = 2.0 * period_s
+    if duration_s < min_duration:
+        raise ValueError(
+            f"duration_s={duration_s} too short to verify {min_rate_hz}Hz "
+            f"(need >= {min_duration}s)"
+        )
+    if tick_timeout_s >= period_s:
+        raise ValueError(
+            f"tick_timeout_s={tick_timeout_s} must be < period_s={period_s:.4f} "
+            f"(from min_rate_hz={min_rate_hz})"
+        )
+
+    end = time.monotonic() + duration_s
+    next_t = time.monotonic()
+    ticks_late = 0
+
+    while time.monotonic() < end:
+        tick_start = time.monotonic()
+        if not airsim_rpc_heartbeat_tick_with_timeout(
+            client, label=label, timeout_s=tick_timeout_s
+        ):
+            return False
+
+        elapsed = time.monotonic() - tick_start
+        if elapsed > period_s:
+            ticks_late += 1
+
+        next_t += period_s
+        sleep_s = next_t - time.monotonic()
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+
+    if require_zero_tick_overruns and ticks_late > 0:
+        print(
+            f"[{label}] probe_airsim_rpc_heartbeat: {ticks_late} tick(s) exceeded "
+            f"period_s={period_s:.4f}s",
+            file=sys.stderr,
+        )
+        return False
+    return True

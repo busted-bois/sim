@@ -45,6 +45,7 @@ class FlightClient(Protocol):
     ) -> None: ...
 
     def confirmConnection(self) -> None: ...
+    def ping(self) -> bool: ...
 
 
 class AirSimAdapter:
@@ -124,3 +125,6 @@ class AirSimAdapter:
 
     def confirmConnection(self) -> None:
         return self._client.confirmConnection()
+
+    def ping(self) -> bool:
+        return bool(self._client.ping())
