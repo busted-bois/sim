@@ -3,10 +3,65 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 from src.control.command_rate import CommandRateGate, CommandRateGateStats, SkippedAsyncResult
 from src.control.highres_imu import HighresImuHealth, HighresImuSample
+
+SetPositionTargetFrame = Literal["local_ned", "body_ned"]
+SET_POSITION_FRAME_LOCAL_NED: SetPositionTargetFrame = "local_ned"
+SET_POSITION_FRAME_BODY_NED: SetPositionTargetFrame = "body_ned"
+
+
+@dataclass(frozen=True, slots=True)
+class SetPositionTargetLocalNedCommand:
+    frame: SetPositionTargetFrame
+    type_mask: int
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    vx: float = 0.0
+    vy: float = 0.0
+    vz: float = 0.0
+    afx: float = 0.0
+    afy: float = 0.0
+    afz: float = 0.0
+    yaw: float = 0.0
+    yaw_rate: float = 0.0
+
+
+def build_position_target_type_mask(
+    *,
+    use_position: bool = False,
+    use_velocity: bool = False,
+    use_acceleration: bool = False,
+    use_yaw: bool = False,
+    use_yaw_rate: bool = False,
+    force_set: bool = False,
+) -> int:
+    from pymavlink import mavutil
+
+    mask = 0
+    if not use_position:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE)
+    if not use_velocity:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VX_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VY_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VZ_IGNORE)
+    if not use_acceleration:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE)
+    if not use_yaw:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE)
+    if not use_yaw_rate:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
+    if force_set:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_FORCE_SET)
+    return int(mask)
 
 
 class FlightClient(Protocol):
@@ -25,6 +80,9 @@ class FlightClient(Protocol):
     ) -> Any: ...
 
     def moveByVelocityZAsync(self, vx: float, vy: float, z: float, duration: float) -> Any: ...
+    def submitSetPositionTargetLocalNed(
+        self, command: SetPositionTargetLocalNedCommand
+    ) -> None: ...
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
@@ -103,6 +161,12 @@ class AirSimAdapter:
         if not self._motion_command_allowed():
             return SkippedAsyncResult()
         return self._client.moveByVelocityZAsync(vx, vy, z, duration)
+
+    def submitSetPositionTargetLocalNed(self, command: SetPositionTargetLocalNedCommand) -> None:
+        sender = getattr(self._client, "submitSetPositionTargetLocalNed", None)
+        if not callable(sender):
+            raise NotImplementedError("submitSetPositionTargetLocalNed is unavailable for AirSim")
+        sender(command)
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float

@@ -14,6 +14,12 @@ from src.control.command_rate import (
     CommandRateGateStats,
     normalize_command_rate_hz,
 )
+from src.control.flight_client import (
+    SET_POSITION_FRAME_BODY_NED,
+    SET_POSITION_FRAME_LOCAL_NED,
+    SetPositionTargetLocalNedCommand,
+    build_position_target_type_mask,
+)
 from src.control.highres_imu import (
     HighresImuHealth,
     HighresImuSample,
@@ -87,6 +93,10 @@ class PymavlinkFlightClient:
     """AirSim-like MAVLink runtime client with TIMESYNC observability."""
 
     _DEFAULT_ENDPOINT: Final[str] = "udpin:0.0.0.0:14550"
+    _POSITION_TARGET_FRAME_MAP: Final[dict[str, int]] = {
+        "local_ned": int(mavutil.mavlink.MAV_FRAME_LOCAL_NED),
+        "body_ned": int(mavutil.mavlink.MAV_FRAME_BODY_NED),
+    }
 
     def __init__(
         self,
@@ -297,6 +307,51 @@ class PymavlinkFlightClient:
             self._stream_velocity(vx, vy, vz, duration)
 
         return _Joinable(_run)
+
+    def submitSetPositionTargetLocalNed(self, command: SetPositionTargetLocalNedCommand) -> None:
+        if self._mav is None or self._target_system is None:
+            raise RuntimeError("MAVLink connection is not ready. Call confirmConnection() first.")
+        self._set_guided_mode()
+        self._send_set_position_target_local_ned(command)
+
+    def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None:
+        self.submitSetPositionTargetLocalNed(
+            SetPositionTargetLocalNedCommand(
+                frame=SET_POSITION_FRAME_LOCAL_NED,
+                type_mask=build_position_target_type_mask(
+                    use_velocity=True,
+                    force_set=True,
+                ),
+                vx=vx,
+                vy=vy,
+                vz=vz,
+            )
+        )
+
+    def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
+        self.submitSetPositionTargetLocalNed(
+            SetPositionTargetLocalNedCommand(
+                frame=SET_POSITION_FRAME_BODY_NED,
+                type_mask=build_position_target_type_mask(
+                    use_velocity=True,
+                    force_set=True,
+                ),
+                vx=vx,
+                vy=vy,
+                vz=vz,
+            )
+        )
+
+    def submitPositionLocalNed(self, x: float, y: float, z: float) -> None:
+        self.submitSetPositionTargetLocalNed(
+            SetPositionTargetLocalNedCommand(
+                frame=SET_POSITION_FRAME_LOCAL_NED,
+                type_mask=build_position_target_type_mask(use_position=True),
+                x=x,
+                y=y,
+                z=z,
+            )
+        )
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
@@ -715,16 +770,9 @@ class PymavlinkFlightClient:
         assert self._mav is not None and self._target_system is not None
         self._set_guided_mode()
         period_s = self._command_rate_gate.period_s
-        type_mask = (
-            int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE)
-            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE)
-            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE)
-            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE)
-            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE)
-            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE)
-            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_FORCE_SET)
-            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE)
-            | int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
+        velocity_only_type_mask = build_position_target_type_mask(
+            use_velocity=True,
+            force_set=True,
         )
 
         deadline = time.monotonic() + max(0.0, float(duration_s))
@@ -732,24 +780,14 @@ class PymavlinkFlightClient:
         while time.monotonic() < deadline:
             now_s = time.monotonic()
             if self._command_rate_gate.allow(now_s):
-                t_ms = int((time.time() * 1000) % 2**32)
-                self._mav.mav.set_position_target_local_ned_send(
-                    t_ms,
-                    self._target_system,
-                    self._target_component or 1,
-                    mavutil.mavlink.MAV_FRAME_LOCAL_NED,
-                    type_mask,
-                    0.0,
-                    0.0,
-                    0.0,
-                    float(vx),
-                    float(vy),
-                    float(vz),
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
+                self._send_set_position_target_local_ned(
+                    SetPositionTargetLocalNedCommand(
+                        frame="local_ned",
+                        type_mask=velocity_only_type_mask,
+                        vx=float(vx),
+                        vy=float(vy),
+                        vz=float(vz),
+                    )
                 )
             next_tick += period_s
             sleep_s = next_tick - time.monotonic()
@@ -757,6 +795,55 @@ class PymavlinkFlightClient:
                 time.sleep(sleep_s)
             else:
                 next_tick = time.monotonic()
+
+    def _send_set_position_target_local_ned(
+        self,
+        command: SetPositionTargetLocalNedCommand,
+        *,
+        t_ms: int | None = None,
+    ) -> None:
+        if self._mav is None or self._target_system is None:
+            raise RuntimeError("MAVLink connection is not ready. Call confirmConnection() first.")
+        frame = str(command.frame).strip().lower()
+        if frame not in self._POSITION_TARGET_FRAME_MAP:
+            raise ValueError(
+                f"Unsupported SET_POSITION_TARGET_LOCAL_NED frame {command.frame!r}. "
+                "Expected one of: local_ned, body_ned."
+            )
+        type_mask = int(command.type_mask)
+        if type_mask < 0 or type_mask > 0xFFFF:
+            raise ValueError(
+                f"SET_POSITION_TARGET_LOCAL_NED type_mask must fit uint16, got {type_mask}."
+            )
+
+        timestamp_ms = int((time.time() * 1000) % 2**32) if t_ms is None else int(t_ms)
+        self._mav.mav.set_position_target_local_ned_send(
+            timestamp_ms,
+            self._target_system,
+            self._target_component or 1,
+            self._POSITION_TARGET_FRAME_MAP[frame],
+            type_mask,
+            self._coerce_finite("x", command.x),
+            self._coerce_finite("y", command.y),
+            self._coerce_finite("z", command.z),
+            self._coerce_finite("vx", command.vx),
+            self._coerce_finite("vy", command.vy),
+            self._coerce_finite("vz", command.vz),
+            self._coerce_finite("afx", command.afx),
+            self._coerce_finite("afy", command.afy),
+            self._coerce_finite("afz", command.afz),
+            self._coerce_finite("yaw", command.yaw),
+            self._coerce_finite("yaw_rate", command.yaw_rate),
+        )
+
+    @staticmethod
+    def _coerce_finite(field_name: str, value: Any) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError(
+                f"SET_POSITION_TARGET_LOCAL_NED field {field_name!r} must be finite; got {value!r}."
+            )
+        return number
 
     def _stream_attitude_target(
         self,
