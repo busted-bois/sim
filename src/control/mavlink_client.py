@@ -578,11 +578,10 @@ class PymavlinkFlightClient:
             self._telemetry = _Telemetry(state=previous.state, armed=armed)
 
     def _handle_timesync(self, message: Any) -> None:
-        event = self._timesync_store.handle_message(message)
-        if event.is_request and self._respond_to_timesync_requests:
-            self._send_timesync_response(event.ts1)
         if self._timesync_log_messages:
-            snapshot = self._timesync_store.snapshot()
+            event, snapshot = self._timesync_store.handle_message(message, return_snapshot=True)
+            if event.is_request and self._respond_to_timesync_requests:
+                self._send_timesync_response(event.ts1)
             direction = "request" if event.is_request else "response"
             measurement = snapshot.last_measurement
             health = snapshot.sync_health
@@ -607,6 +606,11 @@ class PymavlinkFlightClient:
                 f" health={health.status}"
                 f"{measurement_log}{stable_log}{jitter_log}"
             )
+            return
+
+        event = self._timesync_store.handle_message(message)
+        if event.is_request and self._respond_to_timesync_requests:
+            self._send_timesync_response(event.ts1)
 
     def _handle_highres_imu(self, message: Any) -> None:
         previous = self.getHighresImu()
