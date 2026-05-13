@@ -25,7 +25,6 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-    "pitch_up_degrees": -20,
     "fps": 18,
     "min_fps": 5,
     "fov_degrees": 100,
@@ -76,7 +75,6 @@
   "profiles": {
     "official_conformant": {
       "simulator": {
-        "physics_update_hz": 120,
         "specification_required": true
       },
       "vision": {
@@ -206,6 +204,19 @@
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,
+      "highres_imu": {
+        "enabled": true,
+        "request_hz": 50.0,
+        "require_stream": false,
+        "log_messages": false,
+        "max_staleness_ms": 1000.0,
+        "smoke_test": {
+          "duration_seconds": 8.0,
+          "poll_interval_seconds": 1.0,
+          "min_samples": 3,
+          "require_fresh": true
+        }
+      },
       "timesync": {
         "send_requests": true,
         "request_interval_seconds": 1.0,
@@ -236,7 +247,7 @@
         "lock_step": false
       }
     },
-    "command_rate_hz": 50,
+    "command_rate_hz": 90,
     "latency_tuning": {
       "enabled": false,
       "commands_per_frame": 2.0,
