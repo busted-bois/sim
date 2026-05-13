@@ -70,16 +70,6 @@ class HighresImuSample:
     def magnetic_field_norm(self) -> float | None:
         return _norm3(self.xmag, self.ymag, self.zmag)
 
-    def age_ms(self, now_monotonic_ns: int | None = None) -> float:
-        now_ns = time_monotonic_ns() if now_monotonic_ns is None else int(now_monotonic_ns)
-        return max(0.0, (now_ns - self.local_received_monotonic_ns) / 1_000_000.0)
-
-    def is_field_updated(self, field_name: str) -> bool:
-        bit = HIGHRES_IMU_FIELD_BITS.get(field_name)
-        if bit is None:
-            raise KeyError(f"Unknown HIGHRES_IMU field: {field_name!r}")
-        return self.fields_updated == 0 or bool(self.fields_updated & bit)
-
 
 @dataclass(frozen=True, slots=True)
 class HighresImuHealth:
@@ -90,29 +80,6 @@ class HighresImuHealth:
     stream_rate_hz: float | None
     update_age_ms: float | None
     max_staleness_ms: float
-    sensor_count: int = 0
-    active_sensor_ids: tuple[int, ...] = ()
-    expected_rate_hz: float | None = None
-
-    def is_stale(self) -> bool:
-        return self.status == "stale"
-
-    def is_healthy(self) -> bool:
-        return self.status == "ok"
-
-
-@dataclass(frozen=True, slots=True)
-class SensorSnapshot:
-    state: object
-    highres_imu: HighresImuSample | None
-    highres_imu_health: HighresImuHealth | None
-    captured_monotonic_ns: int
-    transport: str
-
-    def imu_age_ms(self) -> float | None:
-        if self.highres_imu is None:
-            return None
-        return self.highres_imu.age_ms(self.captured_monotonic_ns)
 
 
 def merge_highres_imu_sample(
@@ -180,30 +147,10 @@ def format_highres_imu_health(health: HighresImuHealth | None) -> str:
         return "unsupported"
     rate_text = "none" if health.stream_rate_hz is None else f"{health.stream_rate_hz:.2f}"
     age_text = "none" if health.update_age_ms is None else f"{health.update_age_ms:.1f}"
-    expected_rate_text = "none"
-    if health.expected_rate_hz is not None:
-        expected_rate_text = f"{health.expected_rate_hz:.2f}"
-    sensors_text = ",".join(str(sensor_id) for sensor_id in health.active_sensor_ids) or "none"
     return (
         f"status={health.status} reason={health.reason!r} enabled={health.enabled} "
         f"samples={health.sample_count} rate_hz={rate_text} age_ms={age_text} "
-        f"expected_rate_hz={expected_rate_text} sensors={health.sensor_count}[{sensors_text}] "
         f"max_staleness_ms={health.max_staleness_ms:.1f}"
-    )
-
-
-def format_highres_imu_sample(sample: HighresImuSample | None) -> str:
-    if sample is None:
-        return "sample=none"
-    accel_norm = sample.acceleration_norm()
-    gyro_norm = sample.angular_velocity_norm()
-    accel_text = "none" if accel_norm is None else f"{accel_norm:.3f}"
-    gyro_text = "none" if gyro_norm is None else f"{gyro_norm:.3f}"
-    return (
-        "sample("
-        f"id={sample.sensor_id},transport={sample.transport},time_usec={sample.time_usec},"
-        f"age_ms={sample.age_ms():.1f},accel_norm={accel_text},gyro_norm={gyro_text},"
-        f"zacc={sample.zacc},zgyro={sample.zgyro})"
     )
 
 
@@ -211,9 +158,3 @@ def _norm3(x: float | None, y: float | None, z: float | None) -> float | None:
     if x is None or y is None or z is None:
         return None
     return math.sqrt((x * x) + (y * y) + (z * z))
-
-
-def time_monotonic_ns() -> int:
-    import time
-
-    return time.monotonic_ns()

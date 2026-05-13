@@ -4,8 +4,9 @@
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
     "map_asset": "/Game/FlyingCPP/Maps/FlyingExampleMapV2",
-    "pawn_asset": "/AirSim/Blueprints/BP_FlyingPawn",
-    "gate_search_tokens": "gate,ring,torus",
+    "specification_profile": "official_conformant",
+    "pawn_asset": "Class'/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C'",
+    "gate_search_tokens": "gate,ring,torus,hoop",
     "extra_ue_args": [],
     "windowed": true,
     "res_x": 1280,
@@ -24,9 +25,9 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-    "pitch_up_degrees": -20,
-    "fps": 30,
-    "min_fps": 30,
+"pitch_up_degrees": -20,
+    "fps": 18,
+    "min_fps": 5,
     "fov_degrees": 100,
     "compress": true,
     "resolution": [640, 360],
@@ -122,9 +123,6 @@
     "algorithm_timeout_seconds": 90.0,
     "highres_imu_enabled": false,
     "highres_imu_request_hz": 10.0,
-    "highres_imu_log_messages": false,
-    "highres_imu_summary_interval_seconds": 10.0,
-    "highres_imu_capture_enabled": false,
     "sim_res_x": 854,
     "sim_res_y": 480,
     "vision_enabled": false,
@@ -207,6 +205,19 @@
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,
+      "highres_imu": {
+        "enabled": true,
+        "request_hz": 50.0,
+        "require_stream": false,
+        "log_messages": false,
+        "max_staleness_ms": 1000.0,
+        "smoke_test": {
+          "duration_seconds": 8.0,
+          "poll_interval_seconds": 1.0,
+          "min_samples": 3,
+          "require_fresh": true
+        }
+      },
       "timesync": {
         "send_requests": true,
         "request_interval_seconds": 1.0,
@@ -237,7 +248,7 @@
         "lock_step": false
       }
     },
-    "command_rate_hz": 50,
+    "command_rate_hz": 90,
     "latency_tuning": {
       "enabled": false,
       "commands_per_frame": 2.0,
