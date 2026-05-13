@@ -125,7 +125,7 @@ def _mavlink_highres_imu(
             if connection is not None:
                 try:
                     connection.close()
-                except Exception:
+                except OSError:
                     pass
     return False, last_err, endpoints
 
