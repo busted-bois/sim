@@ -66,12 +66,27 @@ class FakeMavConnection:
 
     def recv_match(
         self,
+        type: str | list[str] | None = None,
+        condition: str | None = None,
         blocking: bool = True,
         timeout: float | None = None,
-        **kwargs: Any,
     ) -> FakeMessage | None:
-        message_types = kwargs.get("type")
-        _ = blocking
+        _ = condition
+        if type is None:
+            types_filter: list[str] | None = None
+        elif isinstance(type, str):
+            types_filter = [type]
+        else:
+            types_filter = list(type)
+        if not blocking:
+            while True:
+                try:
+                    message = self._queue.get_nowait()
+                except queue.Empty:
+                    return None
+                if types_filter is None or message.get_type() in types_filter:
+                    return message
+
         deadline = time.time() + (timeout or 0.0)
         while True:
             remaining = max(0.0, deadline - time.time()) if timeout is not None else None
@@ -79,7 +94,7 @@ class FakeMavConnection:
                 message = self._queue.get(timeout=remaining)
             except queue.Empty:
                 return None
-            if message_types is None or message.get_type() in message_types:
+            if types_filter is None or message.get_type() in types_filter:
                 return message
 
     def close(self) -> None:
