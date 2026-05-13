@@ -4,10 +4,65 @@ rates in rad and rad/s, rotateByYawRateAsync in deg/s, throttle 0..1."""
 from __future__ import annotations
 
 import time
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 from src.control.command_rate import CommandRateGate, CommandRateGateStats, SkippedAsyncResult
 from src.control.highres_imu import HighresImuHealth, HighresImuSample
+
+SetPositionTargetFrame = Literal["local_ned", "body_ned"]
+SET_POSITION_FRAME_LOCAL_NED: SetPositionTargetFrame = "local_ned"
+SET_POSITION_FRAME_BODY_NED: SetPositionTargetFrame = "body_ned"
+
+
+@dataclass(frozen=True, slots=True)
+class SetPositionTargetLocalNedCommand:
+    frame: SetPositionTargetFrame
+    type_mask: int
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    vx: float = 0.0
+    vy: float = 0.0
+    vz: float = 0.0
+    afx: float = 0.0
+    afy: float = 0.0
+    afz: float = 0.0
+    yaw: float = 0.0
+    yaw_rate: float = 0.0
+
+
+def build_position_target_type_mask(
+    *,
+    use_position: bool = False,
+    use_velocity: bool = False,
+    use_acceleration: bool = False,
+    use_yaw: bool = False,
+    use_yaw_rate: bool = False,
+    force_set: bool = False,
+) -> int:
+    from pymavlink import mavutil
+
+    mask = 0
+    if not use_position:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE)
+    if not use_velocity:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VX_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VY_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_VZ_IGNORE)
+    if not use_acceleration:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE)
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE)
+    if not use_yaw:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE)
+    if not use_yaw_rate:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE)
+    if force_set:
+        mask |= int(mavutil.mavlink.POSITION_TARGET_TYPEMASK_FORCE_SET)
+    return int(mask)
 
 
 class FlightClient(Protocol):
@@ -29,19 +84,6 @@ class FlightClient(Protocol):
     def submitSetPositionTargetLocalNed(
         self, command: SetPositionTargetLocalNedCommand
     ) -> None: ...
-
-    def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None: ...
-    def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None: ...
-    def submitPositionLocalNed(self, x: float, y: float, z: float) -> None: ...
-    def streamSetPositionTargetLocalNedAsync(
-        self, command: SetPositionTargetLocalNedCommand, duration: float
-    ) -> Any: ...
-
-    def submitSetAttitudeTarget(self, command: SetAttitudeTargetCommand) -> None: ...
-
-    def streamSetAttitudeTargetAsync(
-        self, command: SetAttitudeTargetCommand, duration: float
-    ) -> Any: ...
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
@@ -122,29 +164,10 @@ class AirSimAdapter:
         return self._client.moveByVelocityZAsync(vx, vy, z, duration)
 
     def submitSetPositionTargetLocalNed(self, command: SetPositionTargetLocalNedCommand) -> None:
-        self._forward_optional("submitSetPositionTargetLocalNed", command)
-
-    def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None:
-        self._forward_optional("submitVelocityLocalNed", vx, vy, vz)
-
-    def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
-        self._forward_optional("submitVelocityBodyNed", vx, vy, vz)
-
-    def submitPositionLocalNed(self, x: float, y: float, z: float) -> None:
-        self._forward_optional("submitPositionLocalNed", x, y, z)
-
-    def streamSetPositionTargetLocalNedAsync(
-        self, command: SetPositionTargetLocalNedCommand, duration: float
-    ) -> Any:
-        return self._forward_optional("streamSetPositionTargetLocalNedAsync", command, duration)
-
-    def submitSetAttitudeTarget(self, command: SetAttitudeTargetCommand) -> None:
-        self._forward_optional("submitSetAttitudeTarget", command)
-
-    def streamSetAttitudeTargetAsync(
-        self, command: SetAttitudeTargetCommand, duration: float
-    ) -> Any:
-        return self._forward_optional("streamSetAttitudeTargetAsync", command, duration)
+        sender = getattr(self._client, "submitSetPositionTargetLocalNed", None)
+        if not callable(sender):
+            raise NotImplementedError("submitSetPositionTargetLocalNed is unavailable for AirSim")
+        sender(command)
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
