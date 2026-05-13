@@ -118,6 +118,15 @@ def _highres_imu_client(
     return client, endpoint, imu_cfg.get("smoke_test", {})
 
 
+def _confirm_connection(client: PymavlinkFlightClient, config) -> None:
+    try:
+        client.confirmConnection()
+    except TimeoutError as exc:
+        probe = probe_mavlink_heartbeat(config, timeout_s=2.0)
+        failure_detail = describe_mavlink_heartbeat_failure(config, probe)
+        raise SystemExit(f"{exc} {failure_detail}") from exc
+
+
 def main() -> None:
     args = _build_parser().parse_args()
     config = load_config()
@@ -143,12 +152,7 @@ def main() -> None:
     )
 
     try:
-        try:
-            client.confirmConnection()
-        except TimeoutError as exc:
-            probe = probe_mavlink_heartbeat(config, timeout_s=2.0)
-            failure_detail = describe_mavlink_heartbeat_failure(config, probe)
-            raise SystemExit(f"{exc} {failure_detail}") from exc
+        _confirm_connection(client, config)
         deadline = time.monotonic() + duration_s
         next_poll = time.monotonic()
         while time.monotonic() < deadline:
