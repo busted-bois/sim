@@ -94,6 +94,7 @@ class PymavlinkFlightClient:
     """AirSim-like MAVLink runtime client with TIMESYNC observability."""
 
     _DEFAULT_ENDPOINT: Final[str] = "udpin:0.0.0.0:14550"
+    _GUIDED_MODE_MIN_RESEND_INTERVAL_S: Final[float] = 1.0
     _POSITION_TARGET_FRAME_MAP: Final[dict[str, int]] = {
         "local_ned": int(mavutil.mavlink.MAV_FRAME_LOCAL_NED),
         "body_ned": int(mavutil.mavlink.MAV_FRAME_BODY_NED),
@@ -192,6 +193,7 @@ class PymavlinkFlightClient:
         self._state_ready_evt = threading.Event()
         self._stop_evt = threading.Event()
         self._thread: threading.Thread | None = None
+        self._guided_mode_last_sent_monotonic_s: float | None = None
 
     def confirmConnection(self) -> None:
         self._mav = self._connection_factory(
@@ -235,7 +237,7 @@ class PymavlinkFlightClient:
             self._request_message_intervals()
         self._start_telemetry_pump()
         if self._prepare_for_flight_on_connect:
-            self._set_guided_mode()
+            self._set_guided_mode(force=True)
 
     def enableApiControl(self, enable: bool) -> None:
         _ = enable
@@ -311,7 +313,7 @@ class PymavlinkFlightClient:
 
     def submitSetPositionTargetLocalNed(self, command: SetPositionTargetLocalNedCommand) -> None:
         assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode()
+        self._set_guided_mode(force=False)
         self._send_set_position_target_local_ned(command)
 
     def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None:
@@ -494,10 +496,11 @@ class PymavlinkFlightClient:
             except Exception:
                 pass
             self._mav = None
+            self._guided_mode_last_sent_monotonic_s = None
 
     def _takeoff(self) -> None:
         self._state_ready_evt.wait(timeout=self._heartbeat_timeout_s)
-        self._set_guided_mode()
+        self._set_guided_mode(force=True)
         self._send_takeoff_command()
 
         target_z = -abs(self._takeoff_altitude_m)
@@ -731,9 +734,16 @@ class PymavlinkFlightClient:
         except Exception:
             return None
 
-    def _set_guided_mode(self) -> None:
+    def _set_guided_mode(self, *, force: bool = False) -> None:
         if self._mav is None or self._target_system is None:
             return
+        now_s = time.monotonic()
+        if not force and self._guided_mode_last_sent_monotonic_s is not None:
+            if (
+                now_s - self._guided_mode_last_sent_monotonic_s
+                < self._GUIDED_MODE_MIN_RESEND_INTERVAL_S
+            ):
+                return
         self._mav.mav.command_long_send(
             self._target_system,
             self._target_component or 1,
@@ -747,6 +757,7 @@ class PymavlinkFlightClient:
             0,
             0,
         )
+        self._guided_mode_last_sent_monotonic_s = now_s
 
     def _send_takeoff_command(self) -> None:
         if self._mav is None or self._target_system is None:
@@ -767,7 +778,6 @@ class PymavlinkFlightClient:
 
     def _stream_velocity(self, vx: float, vy: float, vz: float, duration_s: float) -> None:
         assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode()
         velocity_only_type_mask = build_velocity_type_mask()
         self._stream_set_position_target_local_ned(
             SetPositionTargetLocalNedCommand(
@@ -784,7 +794,7 @@ class PymavlinkFlightClient:
         self, command: SetPositionTargetLocalNedCommand, duration_s: float
     ) -> None:
         assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode()
+        self._set_guided_mode(force=False)
         period_s = self._command_rate_gate.period_s
         deadline = time.monotonic() + max(0.0, float(duration_s))
         next_tick = time.monotonic()

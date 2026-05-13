@@ -191,7 +191,7 @@ class MyAlgo(Algorithm):
 ### Quick test tuning (low-end mode)
 
 - `low_end_profile` in `sim.config.json` controls `uv run sim low-end` behavior (algorithm, reduced command rate, simulator resolution, and lightweight logging/telemetry).
-- `six_directions` settings (`duration_s`, `speed_ms`, `direction_labels`) are used by normal runs and can be overridden by low-end mode for fast sanity checks.
+- `six_directions` settings (`duration_s`, `speed_ms`, `direction_labels`, optional `mavlink_setpoint_demo_enabled` / `mavlink_submit_hz`) are used by normal runs and can be overridden by low-end mode for fast sanity checks.
 
 ### MAVLink local setpoint API
 
@@ -211,9 +211,9 @@ Type masks can be composed with:
 
 - `sim.config.json -> six_directions.mavlink_setpoint_demo_enabled = true`
 
-That path uses `streamSetPositionTargetLocalNedAsync` with local-NED velocity setpoints at the configured `control.command_rate_hz` (same as other MAVLink motion commands), instead of `moveByVelocityAsync`.
+That path uses `streamSetPositionTargetLocalNedAsync` with local-NED velocity setpoints at the configured `control.command_rate_hz` (same as other MAVLink motion commands), instead of `moveByVelocityAsync`. Optional `six_directions.mavlink_submit_hz` (positive number, with `submitSetPositionTargetLocalNed` available) caps the demo to that rate up to `command_rate_hz` by sending discrete setpoints instead of the async stream.
 
-UDP loopback integration tests live in `tests/test_mavlink_set_position_target_local_ned_integration.py`. Set `AIGP_SKIP_MAVLINK_INTEGRATION=1` to skip them on constrained CI hosts.
+UDP loopback integration tests live in `tests/test_mavlink_set_position_target_local_ned_integration.py`. Set `AIGP_SKIP_MAVLINK_INTEGRATION=1` to skip them on constrained CI hosts. PR-focused checklist and smoke expectations: `docs/set_position_target_pr_test_plan.md`.
 
 ## 👥 Team
 

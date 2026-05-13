@@ -94,7 +94,7 @@ Outbound setpoints use MAVLink2 NED conventions:
 - **`MAV_FRAME_LOCAL_NED`**: origin is a fixed point on the ground (typically where the vehicle was armed); `x` north, `y` east, `z` down.
 - **`MAV_FRAME_BODY_NED`**: origin is the vehicle; `x` forward, `y` right, `z` down. Velocity/acceleration in this frame are body-relative; behavior for position fields depends on the autopilot—prefer explicit masks and test against your stack.
 
-Helpers live on `PymavlinkFlightClient` and on the `FlightClient` protocol (`submitVelocityLocalNed`, `streamSetPositionTargetLocalNedAsync`, etc.). See `README.md` (MAVLink local setpoint API).
+Helpers live on `PymavlinkFlightClient` and on the `FlightClient` protocol (`submitVelocityLocalNed`, `streamSetPositionTargetLocalNedAsync`, etc.). See `README.md` (MAVLink local setpoint API). For a PR-oriented test checklist, see `docs/set_position_target_pr_test_plan.md`.
 
 - **`AIGP_SKIP_MAVLINK_INTEGRATION=1`**: skip UDP loopback integration tests in `tests/test_mavlink_set_position_target_local_ned_integration.py` if the runner cannot bind UDP or is timing-sensitive.
 

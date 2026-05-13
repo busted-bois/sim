@@ -22,12 +22,20 @@ class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
             source_component=24,
         )
         stop_evt = threading.Event()
-        heartbeat_thread = threading.Thread(
-            target=self._heartbeat_loop,
-            args=(vehicle, stop_evt),
-            daemon=True,
-        )
-        heartbeat_thread.start()
+
+        def _pump_heartbeats() -> None:
+            while not stop_evt.is_set():
+                vehicle.mav.heartbeat_send(
+                    mavutil.mavlink.MAV_TYPE_QUADROTOR,
+                    mavutil.mavlink.MAV_AUTOPILOT_PX4,
+                    0,
+                    0,
+                    mavutil.mavlink.MAV_STATE_ACTIVE,
+                )
+                time.sleep(0.02)
+
+        pump_thread = threading.Thread(target=_pump_heartbeats, daemon=True)
+        pump_thread.start()
 
         client = PymavlinkFlightClient(
             endpoint=f"udpin:0.0.0.0:{port}",
@@ -37,6 +45,8 @@ class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
         )
         try:
             client.confirmConnection()
+            stop_evt.set()
+            pump_thread.join(timeout=1.0)
             client.submitVelocityLocalNed(0.3, 0.2, -0.1)
             client.submitVelocityBodyNed(1.3, -0.2, 0.4)
 
@@ -58,21 +68,9 @@ class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
             self.assertAlmostEqual(float(messages[1].vx), 1.3, places=3)
         finally:
             stop_evt.set()
-            heartbeat_thread.join(timeout=1.0)
+            pump_thread.join(timeout=1.0)
             client.close()
             vehicle.close()
-
-    @staticmethod
-    def _heartbeat_loop(connection, stop_evt: threading.Event) -> None:
-        while not stop_evt.is_set():
-            connection.mav.heartbeat_send(
-                mavutil.mavlink.MAV_TYPE_QUADROTOR,
-                mavutil.mavlink.MAV_AUTOPILOT_PX4,
-                0,
-                0,
-                mavutil.mavlink.MAV_STATE_ACTIVE,
-            )
-            time.sleep(0.1)
 
     @staticmethod
     def _reserve_udp_port() -> int:
