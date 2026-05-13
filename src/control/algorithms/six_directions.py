@@ -37,7 +37,10 @@ class SixDirections(Algorithm):
         if not selected:
             selected = DIRECTIONS
         mavlink_setpoint_demo_enabled = bool(cfg.get("mavlink_setpoint_demo_enabled", False))
+        mavlink_submit_hz_raw = cfg.get("mavlink_submit_hz")
         stream_local_ned = getattr(client, "streamSetPositionTargetLocalNedAsync", None)
+        submit_local_ned = getattr(client, "submitSetPositionTargetLocalNed", None)
+        cmd_hz = max(0.5, float(control_cfg.get("command_rate_hz", 50.0)))
 
         takeoff_with_settle(client, max_attempts=4, label="six_directions")
 
@@ -47,7 +50,7 @@ class SixDirections(Algorithm):
             vx_cmd = vx * speed_ms / SPEED_MS
             vy_cmd = vy * speed_ms / SPEED_MS
             vz_cmd = vz * speed_ms / SPEED_MS
-            if mavlink_setpoint_demo_enabled and callable(stream_local_ned):
+            if mavlink_setpoint_demo_enabled:
                 command = SetPositionTargetLocalNedCommand(
                     frame=SET_POSITION_FRAME_LOCAL_NED,
                     type_mask=build_velocity_type_mask(),
@@ -55,7 +58,27 @@ class SixDirections(Algorithm):
                     vy=vy_cmd,
                     vz=vz_cmd,
                 )
-                stream_local_ned(command, duration_s).join()
+                use_capped_submit = False
+                if mavlink_submit_hz_raw is not None and callable(submit_local_ned):
+                    cap_hz = float(mavlink_submit_hz_raw)
+                    use_capped_submit = cap_hz > 0.0
+                if use_capped_submit:
+                    rate_hz = max(0.5, min(cmd_hz, cap_hz, 99.0))
+                    period_s = 1.0 / rate_hz
+                    deadline = time.perf_counter() + duration_s
+                    next_tick = time.perf_counter()
+                    while time.perf_counter() < deadline:
+                        submit_local_ned(command)
+                        next_tick += period_s
+                        sleep_s = next_tick - time.perf_counter()
+                        if sleep_s > 0:
+                            time.sleep(sleep_s)
+                        else:
+                            next_tick = time.perf_counter()
+                elif callable(stream_local_ned):
+                    stream_local_ned(command, duration_s).join()
+                else:
+                    client.moveByVelocityAsync(vx_cmd, vy_cmd, vz_cmd, duration_s).join()
             else:
                 client.moveByVelocityAsync(vx_cmd, vy_cmd, vz_cmd, duration_s).join()
             elapsed = time.perf_counter() - t0
