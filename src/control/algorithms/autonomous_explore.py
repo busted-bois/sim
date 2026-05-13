@@ -294,7 +294,7 @@ class AutonomousExplore(Algorithm):
             if pursue_targets and frame is not None:
                 now_s = time.monotonic()
                 blue_active = pursue_blue_rings and now_s >= blue_suppressed_until_s
-                
+
                 # We track "real" detections separately from "recovered" ones.
                 # Recovered detections (dropout recovery) keep the drone on course
                 # but don't reset the timer for active scanning.
@@ -565,7 +565,7 @@ class AutonomousExplore(Algorithm):
                 state_label = "uniform"
             else:
                 norm = (obstacle_score - obstacle_score.min()) / max(1e-6, raw_range)
-                
+
                 # --- TARGET BIASING ---
                 # If we recently saw a target, slightly favor columns in that direction
                 # to prevent the drone from turning away from the gate area because
@@ -617,7 +617,7 @@ class AutonomousExplore(Algorithm):
                     yaw_rate = search_scan_offset
                     state_label = "SCANNING"
                 elif time_since_target > 0.5:
-                    # Brief "coasting" period: suppress aggressive depth-wander 
+                    # Brief "coasting" period: suppress aggressive depth-wander
                     # immediately after losing a target to prevent the "snap-away"
                     # behavior where it avoids the gate rim.
                     yaw_rate *= 0.2
