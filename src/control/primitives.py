@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -112,7 +113,6 @@ def suppress_api_cleanup_warning(exc: BaseException) -> bool:
 
 
 def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
-    import threading
     import traceback
 
     error_holder: dict[str, BaseException] = {}
@@ -127,12 +127,15 @@ def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
     worker.start()
     started = time.perf_counter()
     deadline = started + timeout_seconds
+    # Join in short slices so the main thread can run an RPC heartbeat (>= 2 Hz).
     join_slice_s = 0.25
     while worker.is_alive():
         remaining = deadline - time.perf_counter()
         if remaining <= 0:
             break
         worker.join(timeout=min(join_slice_s, remaining))
+        if worker.is_alive():
+            airsim_rpc_heartbeat_tick(client, label="algorithm_runner")
     elapsed_s = time.perf_counter() - started
 
     if worker.is_alive():
@@ -350,64 +353,101 @@ def _landing_telemetry_if_enabled(
     return sampler
 
 
-def _wait_for_imu_stability(
+def airsim_rpc_heartbeat_tick(
     client: FlightClient,
-    landing_cfg: dict,
     *,
-    sampler: LandingTelemetrySampler | None,
-    label: str,
+    label: str = "primitives",
 ) -> bool:
-    imu_cfg = landing_cfg.get("imu_stability_check", {})
-    if not bool(imu_cfg.get("enabled", True)):
+    """One lightweight AirSim RPC round-trip via ``ping()``."""
+    try:
+        if client.ping():
+            return True
+        print(f"[{label}] RPC heartbeat: ping returned falsy", file=sys.stderr)
         return False
-    sample_getter = getattr(client, "getHighresImu", None)
-    health_getter = getattr(client, "getHighresImuHealth", None)
-    if not callable(sample_getter) or not callable(health_getter):
+    except Exception as exc:
+        print(f"[{label}] RPC heartbeat (ping) failed: {exc}", file=sys.stderr)
         return False
 
-    hold_seconds = max(0.2, float(imu_cfg.get("hold_seconds", 0.4)))
-    timeout_s = max(hold_seconds, float(imu_cfg.get("timeout_seconds", 3.0)))
-    max_gyro_norm_rads = max(0.05, float(imu_cfg.get("max_gyro_norm_rads", 0.35)))
-    max_accel_delta_ms2 = max(0.1, float(imu_cfg.get("max_accel_delta_ms2", 1.8)))
-    gravity_ms2 = max(0.1, float(imu_cfg.get("gravity_ms2", 9.81)))
-    deadline = time.monotonic() + timeout_s
-    stable_started_s: float | None = None
-    if sampler is not None:
-        sampler.set_command("imu_stability_wait")
 
-    while time.monotonic() < deadline:
-        health = health_getter()
-        sample = sample_getter()
-        if health is None or sample is None:
-            return False
-        if health.status not in {"ok", "degraded"}:
-            stable_started_s = None
-            time.sleep(0.05)
-            continue
-        gyro_norm = sample.angular_velocity_norm()
-        accel_norm = sample.acceleration_norm()
-        accel_delta = None if accel_norm is None else abs(accel_norm - gravity_ms2)
-        stable = (
-            gyro_norm is not None
-            and accel_delta is not None
-            and gyro_norm <= max_gyro_norm_rads
-            and accel_delta <= max_accel_delta_ms2
+def airsim_rpc_heartbeat_tick_with_timeout(
+    client: FlightClient,
+    *,
+    label: str,
+    timeout_s: float,
+) -> bool:
+    """Run a single heartbeat tick with a hard wall-clock timeout (RPC runs in a daemon thread)."""
+    result: list[bool | None] = [None]
+
+    def _tick() -> None:
+        try:
+            result[0] = airsim_rpc_heartbeat_tick(client, label=label)
+        except BaseException:
+            result[0] = False
+
+    t = threading.Thread(target=_tick, name="airsim_heartbeat_tick", daemon=True)
+    t.start()
+    t.join(timeout=max(0.01, timeout_s))
+    if t.is_alive():
+        print(
+            f"[{label}] RPC heartbeat tick timed out after {timeout_s:.2f}s",
+            file=sys.stderr,
         )
-        if stable:
-            if stable_started_s is None:
-                stable_started_s = time.monotonic()
-            elif (time.monotonic() - stable_started_s) >= hold_seconds:
-                print(
-                    f"[{label}] IMU settle ready: gyro_norm={gyro_norm:.3f} "
-                    f"accel_delta={accel_delta:.3f}"
-                )
-                return True
-        else:
-            stable_started_s = None
-        time.sleep(0.05)
+        return False
+    return bool(result[0])
 
-    print(
-        f"[{label}] IMU settle timeout after {timeout_s:.1f}s; proceeding with landing anyway.",
-        file=sys.stderr,
-    )
-    return False
+
+def probe_airsim_rpc_heartbeat(
+    client: FlightClient,
+    *,
+    duration_s: float = 2.0,
+    min_rate_hz: float = 2.0,
+    tick_timeout_s: float = 0.3,
+    label: str = "primitives",
+    require_zero_tick_overruns: bool = True,
+) -> bool:
+    """Send heartbeats at ~``min_rate_hz`` for ``duration_s``; each tick capped by ``tick_timeout_s``.
+
+    When ``require_zero_tick_overruns`` is True, any tick whose wall time exceeds ``period_s``
+    fails the probe (strict scheduling vs slow RPC).
+    """
+    period_s = 1.0 / max(min_rate_hz, 0.1)
+    min_duration = 2.0 * period_s
+    if duration_s < min_duration:
+        raise ValueError(
+            f"duration_s={duration_s} too short to verify {min_rate_hz}Hz "
+            f"(need >= {min_duration}s)"
+        )
+    if tick_timeout_s >= period_s:
+        raise ValueError(
+            f"tick_timeout_s={tick_timeout_s} must be < period_s={period_s:.4f} "
+            f"(from min_rate_hz={min_rate_hz})"
+        )
+
+    end = time.monotonic() + duration_s
+    next_t = time.monotonic()
+    ticks_late = 0
+
+    while time.monotonic() < end:
+        tick_start = time.monotonic()
+        if not airsim_rpc_heartbeat_tick_with_timeout(
+            client, label=label, timeout_s=tick_timeout_s
+        ):
+            return False
+
+        elapsed = time.monotonic() - tick_start
+        if elapsed > period_s:
+            ticks_late += 1
+
+        next_t += period_s
+        sleep_s = next_t - time.monotonic()
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+
+    if require_zero_tick_overruns and ticks_late > 0:
+        print(
+            f"[{label}] probe_airsim_rpc_heartbeat: {ticks_late} tick(s) exceeded "
+            f"period_s={period_s:.4f}s",
+            file=sys.stderr,
+        )
+        return False
+    return True
