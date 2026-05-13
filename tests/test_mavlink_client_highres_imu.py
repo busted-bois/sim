@@ -100,6 +100,7 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
             request_state_messages_on_connect=True,
             highres_imu_enabled=True,
             highres_imu_request_hz=40.0,
+            highres_imu_summary_interval_s=0.0,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:
@@ -147,6 +148,7 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
             send_timesync_requests=False,
             prepare_for_flight_on_connect=False,
             highres_imu_enabled=True,
+            highres_imu_summary_interval_s=0.0,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:
@@ -217,6 +219,7 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
             send_timesync_requests=False,
             prepare_for_flight_on_connect=False,
             highres_imu_enabled=True,
+            highres_imu_summary_interval_s=0.0,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:
@@ -262,6 +265,8 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
             prepare_for_flight_on_connect=False,
             highres_imu_enabled=True,
             highres_imu_max_staleness_ms=5.0,
+            highres_imu_summary_interval_s=0.0,
+            highres_imu_warn_on_stale=False,
             connection_factory=lambda *args, **kwargs: connection,
         )
         try:
@@ -276,6 +281,120 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
         assert health is not None
         self.assertEqual(health.status, "stale")
         self.assertGreater(health.update_age_ms or 0.0, 5.0)
+
+    def test_sensor_map_tracks_multiple_sensor_ids(self) -> None:
+        heartbeat = _FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
+        imu_a = _FakeMessage(
+            "HIGHRES_IMU",
+            time_usec=100,
+            xacc=1.0,
+            yacc=2.0,
+            zacc=3.0,
+            xgyro=0.1,
+            ygyro=0.2,
+            zgyro=0.3,
+            xmag=0.0,
+            ymag=0.0,
+            zmag=0.0,
+            abs_pressure=1.0,
+            diff_pressure=0.0,
+            pressure_alt=2.0,
+            temperature=20.0,
+            fields_updated=0,
+            id=1,
+            source_system=42,
+            source_component=24,
+        )
+        imu_b = _FakeMessage(
+            "HIGHRES_IMU",
+            time_usec=101,
+            xacc=4.0,
+            yacc=5.0,
+            zacc=6.0,
+            xgyro=0.4,
+            ygyro=0.5,
+            zgyro=0.6,
+            xmag=0.0,
+            ymag=0.0,
+            zmag=0.0,
+            abs_pressure=2.0,
+            diff_pressure=0.0,
+            pressure_alt=3.0,
+            temperature=21.0,
+            fields_updated=0,
+            id=2,
+            source_system=42,
+            source_component=24,
+        )
+        connection = _FakeMavConnection(heartbeat, [imu_a, imu_b])
+        client = PymavlinkFlightClient(
+            endpoint="udpin:0.0.0.0:14550",
+            send_timesync_requests=False,
+            prepare_for_flight_on_connect=False,
+            highres_imu_enabled=True,
+            highres_imu_summary_interval_s=0.0,
+            connection_factory=lambda *args, **kwargs: connection,
+        )
+        try:
+            client.confirmConnection()
+            self._wait_for_sample(client, min_count=2)
+            sensors = client.getHighresImuSensors()
+            health = client.getHighresImuHealth()
+        finally:
+            client.close()
+
+        self.assertEqual(sorted(sensors), [1, 2])
+        self.assertEqual(sensors[1].sensor_id, 1)
+        self.assertEqual(sensors[2].sensor_id, 2)
+        self.assertEqual(client.getHighresImuBySensorId(2).time_usec, 101)
+        self.assertIsNotNone(health)
+        assert health is not None
+        self.assertEqual(health.sensor_count, 2)
+        self.assertEqual(health.active_sensor_ids, (1, 2))
+
+    def test_sensor_snapshot_exposes_latest_imu_view(self) -> None:
+        heartbeat = _FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
+        highres = _FakeMessage(
+            "HIGHRES_IMU",
+            time_usec=123456,
+            xacc=1.1,
+            yacc=2.2,
+            zacc=3.3,
+            xgyro=0.1,
+            ygyro=0.2,
+            zgyro=0.3,
+            xmag=0.01,
+            ymag=0.02,
+            zmag=0.03,
+            abs_pressure=1013.25,
+            diff_pressure=0.0,
+            pressure_alt=120.0,
+            temperature=24.5,
+            fields_updated=0,
+            id=2,
+            source_system=42,
+            source_component=24,
+        )
+        connection = _FakeMavConnection(heartbeat, [highres])
+        client = PymavlinkFlightClient(
+            endpoint="udpin:0.0.0.0:14550",
+            send_timesync_requests=False,
+            prepare_for_flight_on_connect=False,
+            highres_imu_enabled=True,
+            highres_imu_summary_interval_s=0.0,
+            connection_factory=lambda *args, **kwargs: connection,
+        )
+        try:
+            client.confirmConnection()
+            self._wait_for_sample(client)
+            snapshot = client.getSensorSnapshot()
+        finally:
+            client.close()
+
+        self.assertEqual(snapshot.transport, "mavlink")
+        self.assertIsNotNone(snapshot.highres_imu)
+        self.assertIsNotNone(snapshot.highres_imu_health)
+        self.assertGreaterEqual(snapshot.imu_age_ms() or 0.0, 0.0)
 
     @staticmethod
     def _wait_for_sample(
@@ -296,6 +415,7 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
 class AirSimAdapterHighresImuTests(unittest.TestCase):
     def test_adapter_maps_airsim_sensor_calls_to_highres_imu_shape(self) -> None:
         fake_client = SimpleNamespace(
+            getMultirotorState=lambda: SimpleNamespace(kinematics_estimated="state"),
             getImuData=lambda: SimpleNamespace(
                 time_stamp=123,
                 angular_velocity=SimpleNamespace(x_val=0.1, y_val=0.2, z_val=0.3),
@@ -326,6 +446,14 @@ class AirSimAdapterHighresImuTests(unittest.TestCase):
         self.assertIsNotNone(health)
         assert health is not None
         self.assertEqual(health.status, "ok")
+        self.assertEqual(health.sensor_count, 1)
+        self.assertEqual(health.active_sensor_ids, (0,))
+        self.assertEqual(sorted(adapter.getHighresImuSensors()), [0])
+        self.assertEqual(adapter.getHighresImuBySensorId(0).sensor_id, 0)
+        snapshot = adapter.getSensorSnapshot()
+        self.assertEqual(snapshot.transport, "airsim")
+        self.assertIsNotNone(snapshot.highres_imu)
+        self.assertIsNotNone(snapshot.highres_imu_health)
 
 
 if __name__ == "__main__":

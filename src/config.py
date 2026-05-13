@@ -218,6 +218,12 @@ def apply_low_end_overrides(config: Config | dict[str, Any]) -> None:
     highres_imu_cfg = mav_cfg.setdefault("highres_imu", {})
     highres_imu_cfg["enabled"] = bool(low_end_cfg.get("highres_imu_enabled", False))
     highres_imu_cfg["request_hz"] = float(low_end_cfg.get("highres_imu_request_hz", 10.0))
+    highres_imu_cfg["log_messages"] = bool(low_end_cfg.get("highres_imu_log_messages", False))
+    highres_imu_cfg["summary_interval_seconds"] = float(
+        low_end_cfg.get("highres_imu_summary_interval_seconds", 10.0)
+    )
+    capture_cfg = highres_imu_cfg.setdefault("capture_log", {})
+    capture_cfg["enabled"] = bool(low_end_cfg.get("highres_imu_capture_enabled", False))
 
     landing_cfg = raw.setdefault("landing", {})
     landing_cfg.setdefault("telemetry_log", {})["enabled"] = False

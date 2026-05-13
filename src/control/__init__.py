@@ -1,5 +1,5 @@
 from src.control.algorithms import Algorithm, get_algorithm, list_algorithms, register
-from src.control.highres_imu import HighresImuHealth, HighresImuSample
+from src.control.highres_imu import HighresImuHealth, HighresImuSample, SensorSnapshot
 from src.control.mavlink_timesync import (
     TimesyncEvent,
     TimesyncHealth,
@@ -14,6 +14,7 @@ __all__ = [
     "Algorithm",
     "HighresImuHealth",
     "HighresImuSample",
+    "SensorSnapshot",
     "TimesyncEvent",
     "TimesyncHealth",
     "TimesyncMeasurement",

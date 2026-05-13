@@ -147,6 +147,7 @@ class AutonomousExplore(Algorithm):
 
         dt = 1.0 / rate_hz
         center_idx = (n_cols - 1) / 2.0
+        imu_status_log_every_steps = max(1, int(rate_hz * 5.0))
 
         print(
             "[autonomous_explore] start "
@@ -230,6 +231,15 @@ class AutonomousExplore(Algorithm):
 
         while time.monotonic() - t0 < duration_s:
             tick_start = time.monotonic()
+            if steps % imu_status_log_every_steps == 0:
+                snapshot = self.latest_sensor_snapshot(client)
+                if snapshot is not None and snapshot.highres_imu_health is not None:
+                    health = snapshot.highres_imu_health
+                    if health.status != "ok":
+                        print(
+                            "[autonomous_explore] imu_runtime "
+                            f"{format_highres_imu_health(health)}"
+                        )
 
             # If we're committed to flying through a ring, ignore the camera
             # entirely and drive forward on the locked heading. The ring will

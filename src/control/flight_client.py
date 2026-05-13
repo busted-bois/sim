@@ -6,7 +6,7 @@ import time
 from typing import Any, Protocol
 
 from src.control.command_rate import CommandRateGate, SkippedAsyncResult
-from src.control.highres_imu import HighresImuHealth, HighresImuSample
+from src.control.highres_imu import HighresImuHealth, HighresImuSample, SensorSnapshot
 
 
 class FlightClient(Protocol):
@@ -51,6 +51,9 @@ class FlightClient(Protocol):
     def confirmConnection(self) -> None: ...
     def getHighresImu(self) -> HighresImuSample | None: ...
     def getHighresImuHealth(self) -> HighresImuHealth | None: ...
+    def getHighresImuBySensorId(self, sensor_id: int) -> HighresImuSample | None: ...
+    def getHighresImuSensors(self) -> dict[int, HighresImuSample]: ...
+    def getSensorSnapshot(self) -> SensorSnapshot: ...
 
 
 class AirSimAdapter:
@@ -153,7 +156,7 @@ class AirSimAdapter:
     def confirmConnection(self) -> None:
         return self._client.confirmConnection()
 
-    def getHighresImu(self) -> HighresImuSample | None:
+    def _current_highres_imu_sample(self) -> HighresImuSample | None:
         imu = self._client.getImuData()
         mag = self._client.getMagnetometerData()
         baro = self._client.getBarometerData()
@@ -181,9 +184,12 @@ class AirSimAdapter:
             transport="airsim",
         )
 
+    def getHighresImu(self) -> HighresImuSample | None:
+        return self._current_highres_imu_sample()
+
     def getHighresImuHealth(self) -> HighresImuHealth | None:
         try:
-            sample = self.getHighresImu()
+            sample = self._current_highres_imu_sample()
         except Exception as exc:
             return HighresImuHealth(
                 status="error",
@@ -193,6 +199,8 @@ class AirSimAdapter:
                 stream_rate_hz=None,
                 update_age_ms=None,
                 max_staleness_ms=1000.0,
+                sensor_count=0,
+                active_sensor_ids=(),
             )
         if sample is None:
             return HighresImuHealth(
@@ -203,6 +211,8 @@ class AirSimAdapter:
                 stream_rate_hz=None,
                 update_age_ms=None,
                 max_staleness_ms=1000.0,
+                sensor_count=0,
+                active_sensor_ids=(),
             )
         return HighresImuHealth(
             status="ok",
@@ -212,4 +222,29 @@ class AirSimAdapter:
             stream_rate_hz=None,
             update_age_ms=0.0,
             max_staleness_ms=1000.0,
+            sensor_count=1,
+            active_sensor_ids=(sample.sensor_id,),
+        )
+
+    def getHighresImuBySensorId(self, sensor_id: int) -> HighresImuSample | None:
+        sample = self._current_highres_imu_sample()
+        if sample is None or sample.sensor_id != int(sensor_id):
+            return None
+        return sample
+
+    def getHighresImuSensors(self) -> dict[int, HighresImuSample]:
+        sample = self._current_highres_imu_sample()
+        if sample is None:
+            return {}
+        return {sample.sensor_id: sample}
+
+    def getSensorSnapshot(self) -> SensorSnapshot:
+        captured_ns = time.monotonic_ns()
+        sample = self._current_highres_imu_sample()
+        return SensorSnapshot(
+            state=self.getMultirotorState(),
+            highres_imu=sample,
+            highres_imu_health=self.getHighresImuHealth(),
+            captured_monotonic_ns=captured_ns,
+            transport="airsim",
         )

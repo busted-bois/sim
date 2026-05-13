@@ -6,7 +6,7 @@ import airsim
 from src.config import apply_low_end_overrides, load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm, list_algorithms
 from src.control.flight_client import AirSimAdapter
-from src.control.highres_imu import format_highres_imu_health
+from src.control.highres_imu import format_highres_imu_health, format_highres_imu_sample
 from src.control.mavlink_client import PymavlinkFlightClient
 from src.control.primitives import (
     apply_trace_style,
@@ -64,14 +64,10 @@ def _log_highres_imu_status(client, label: str) -> None:
         return
     health = health_getter()
     sample = sample_getter()
-    sample_log = "sample=none"
-    if sample is not None:
-        sample_log = (
-            f"sample(id={sample.sensor_id},time_usec={sample.time_usec},"
-            f"xacc={sample.xacc},yacc={sample.yacc},zacc={sample.zacc},"
-            f"xgyro={sample.xgyro},ygyro={sample.ygyro},zgyro={sample.zgyro})"
-        )
-    print(f"[{label}] HIGHRES_IMU {format_highres_imu_health(health)} {sample_log}")
+    print(
+        f"[{label}] HIGHRES_IMU "
+        f"{format_highres_imu_health(health)} {format_highres_imu_sample(sample)}"
+    )
 
 
 def main() -> None:
@@ -97,6 +93,7 @@ def main() -> None:
         mav_cfg = config.get("control", {}).get("mavlink", {})
         timesync_cfg = mav_cfg.get("timesync", {})
         highres_imu_cfg = mav_cfg.get("highres_imu", {})
+        highres_capture_cfg = highres_imu_cfg.get("capture_log", {})
         endpoint = os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip() or str(
             mav_cfg.get("endpoint", "udpin:0.0.0.0:14550")
         ).strip()
@@ -120,6 +117,15 @@ def main() -> None:
             highres_imu_log_messages=bool(highres_imu_cfg.get("log_messages", False)),
             highres_imu_max_staleness_ms=float(
                 highres_imu_cfg.get("max_staleness_ms", 1000.0)
+            ),
+            highres_imu_summary_interval_s=float(
+                highres_imu_cfg.get("summary_interval_seconds", 5.0)
+            ),
+            highres_imu_warn_on_stale=bool(highres_imu_cfg.get("warn_on_stale", True)),
+            highres_imu_capture_path=(
+                str(highres_capture_cfg.get("path", "logs/highres_imu_capture.csv")).strip()
+                if bool(highres_capture_cfg.get("enabled", False))
+                else None
             ),
             timesync_pending_request_limit=int(timesync_cfg.get("pending_request_limit", 64)),
             timesync_stable_window_size=int(timesync_cfg.get("stable_window_size", 9)),
