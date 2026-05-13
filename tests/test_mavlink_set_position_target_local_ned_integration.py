@@ -1,4 +1,3 @@
-import os
 import socket
 import threading
 import time
@@ -9,10 +8,6 @@ from pymavlink import mavutil
 from src.control.mavlink_client import PymavlinkFlightClient
 
 
-@unittest.skipIf(
-    os.environ.get("AIGP_SKIP_MAVLINK_INTEGRATION", "").strip() == "1",
-    "UDP MAVLink integration skipped when AIGP_SKIP_MAVLINK_INTEGRATION=1",
-)
 class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
     def test_udp_loopback_emits_local_and_body_velocity_setpoints(self) -> None:
         port = self._reserve_udp_port()
@@ -22,20 +17,12 @@ class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
             source_component=24,
         )
         stop_evt = threading.Event()
-
-        def _pump_heartbeats() -> None:
-            while not stop_evt.is_set():
-                vehicle.mav.heartbeat_send(
-                    mavutil.mavlink.MAV_TYPE_QUADROTOR,
-                    mavutil.mavlink.MAV_AUTOPILOT_PX4,
-                    0,
-                    0,
-                    mavutil.mavlink.MAV_STATE_ACTIVE,
-                )
-                time.sleep(0.02)
-
-        pump_thread = threading.Thread(target=_pump_heartbeats, daemon=True)
-        pump_thread.start()
+        heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            args=(vehicle, stop_evt),
+            daemon=True,
+        )
+        heartbeat_thread.start()
 
         client = PymavlinkFlightClient(
             endpoint=f"udpin:0.0.0.0:{port}",
@@ -45,13 +32,11 @@ class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
         )
         try:
             client.confirmConnection()
-            stop_evt.set()
-            pump_thread.join(timeout=1.0)
             client.submitVelocityLocalNed(0.3, 0.2, -0.1)
             client.submitVelocityBodyNed(1.3, -0.2, 0.4)
 
             messages = []
-            deadline = time.time() + 6.0
+            deadline = time.time() + 3.0
             while len(messages) < 2 and time.time() < deadline:
                 msg = vehicle.recv_match(
                     type="SET_POSITION_TARGET_LOCAL_NED",
@@ -68,9 +53,21 @@ class SetPositionTargetLocalNedIntegrationTests(unittest.TestCase):
             self.assertAlmostEqual(float(messages[1].vx), 1.3, places=3)
         finally:
             stop_evt.set()
-            pump_thread.join(timeout=1.0)
+            heartbeat_thread.join(timeout=1.0)
             client.close()
             vehicle.close()
+
+    @staticmethod
+    def _heartbeat_loop(connection, stop_evt: threading.Event) -> None:
+        while not stop_evt.is_set():
+            connection.mav.heartbeat_send(
+                mavutil.mavlink.MAV_TYPE_QUADROTOR,
+                mavutil.mavlink.MAV_AUTOPILOT_PX4,
+                0,
+                0,
+                mavutil.mavlink.MAV_STATE_ACTIVE,
+            )
+            time.sleep(0.1)
 
     @staticmethod
     def _reserve_udp_port() -> int:
