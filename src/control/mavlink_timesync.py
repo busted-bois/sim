@@ -5,7 +5,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from statistics import median
-from typing import Protocol
+from typing import Literal, Protocol, overload
 
 __all__ = [
     "TimesyncEvent",
@@ -248,25 +248,64 @@ class TimesyncStore:
             )
         return request
 
+    @overload
     def handle_message(
         self,
         message: _TimesyncMessageLike | object,
         *,
         received_monotonic_ns: int | None = None,
         received_wall_ns: int | None = None,
-    ) -> TimesyncEvent:
+        return_snapshot: Literal[False] = False,
+    ) -> TimesyncEvent: ...
+
+    @overload
+    def handle_message(
+        self,
+        message: _TimesyncMessageLike | object,
+        *,
+        received_monotonic_ns: int | None = None,
+        received_wall_ns: int | None = None,
+        return_snapshot: Literal[True],
+    ) -> tuple[TimesyncEvent, TimesyncSnapshot]: ...
+
+    def handle_message(
+        self,
+        message: _TimesyncMessageLike | object,
+        *,
+        received_monotonic_ns: int | None = None,
+        received_wall_ns: int | None = None,
+        return_snapshot: bool = False,
+    ) -> TimesyncEvent | tuple[TimesyncEvent, TimesyncSnapshot]:
         event = parse_timesync_message(
             message,
             received_monotonic_ns=received_monotonic_ns,
             received_wall_ns=received_wall_ns,
         )
+        if return_snapshot:
+            snapshot = self.record_event(event, return_snapshot=True)
+            return event, snapshot
         self.record_event(event)
         return event
 
-    def record_event(self, event: TimesyncEvent) -> None:
+    @overload
+    def record_event(
+        self, event: TimesyncEvent, *, return_snapshot: Literal[False] = False
+    ) -> None: ...
+
+    @overload
+    def record_event(
+        self, event: TimesyncEvent, *, return_snapshot: Literal[True]
+    ) -> TimesyncSnapshot: ...
+
+    def record_event(
+        self, event: TimesyncEvent, *, return_snapshot: bool = False
+    ) -> TimesyncSnapshot | None:
         with self._lock:
             measurement = self._measurement_for_response_locked(event)
             self._snapshot = self._snapshot_after(event, measurement)
+            if return_snapshot:
+                return self._snapshot
+            return None
 
     def snapshot(self) -> TimesyncSnapshot:
         with self._lock:
