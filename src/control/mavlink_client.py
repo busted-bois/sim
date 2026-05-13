@@ -18,7 +18,8 @@ from src.control.flight_client import (
     SET_POSITION_FRAME_BODY_NED,
     SET_POSITION_FRAME_LOCAL_NED,
     SetPositionTargetLocalNedCommand,
-    build_position_target_type_mask,
+    build_position_type_mask,
+    build_velocity_type_mask,
 )
 from src.control.highres_imu import (
     HighresImuHealth,
@@ -317,10 +318,7 @@ class PymavlinkFlightClient:
         self.submitSetPositionTargetLocalNed(
             SetPositionTargetLocalNedCommand(
                 frame=SET_POSITION_FRAME_LOCAL_NED,
-                type_mask=build_position_target_type_mask(
-                    use_velocity=True,
-                    force_set=True,
-                ),
+                type_mask=build_velocity_type_mask(),
                 vx=vx,
                 vy=vy,
                 vz=vz,
@@ -331,10 +329,7 @@ class PymavlinkFlightClient:
         self.submitSetPositionTargetLocalNed(
             SetPositionTargetLocalNedCommand(
                 frame=SET_POSITION_FRAME_BODY_NED,
-                type_mask=build_position_target_type_mask(
-                    use_velocity=True,
-                    force_set=True,
-                ),
+                type_mask=build_velocity_type_mask(),
                 vx=vx,
                 vy=vy,
                 vz=vz,
@@ -345,7 +340,7 @@ class PymavlinkFlightClient:
         self.submitSetPositionTargetLocalNed(
             SetPositionTargetLocalNedCommand(
                 frame=SET_POSITION_FRAME_LOCAL_NED,
-                type_mask=build_position_target_type_mask(use_position=True),
+                type_mask=build_position_type_mask(),
                 x=x,
                 y=y,
                 z=z,
@@ -769,10 +764,7 @@ class PymavlinkFlightClient:
         assert self._mav is not None and self._target_system is not None
         self._set_guided_mode()
         period_s = self._command_rate_gate.period_s
-        velocity_only_type_mask = build_position_target_type_mask(
-            use_velocity=True,
-            force_set=True,
-        )
+        velocity_only_type_mask = build_velocity_type_mask()
 
         deadline = time.monotonic() + max(0.0, float(duration_s))
         next_tick = time.monotonic()
