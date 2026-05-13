@@ -1,0 +1,133 @@
+{
+  "metadata": {
+    "extracted_at_utc": "2026-05-13T04:51:25.155372+00:00",
+    "project_path": "C:/Users/trung/source/repos/Colosseum/Unreal/Environments/BlocksV2/BlocksV2.uproject",
+    "config_sha256": "406d11d4f4d89380ee08bd68e8c7fd14c6bca63b72017c9a2766cbae09acd92b",
+    "engine_version": "5.4.4-35576357+++UE5+Release-5.4",
+    "runtime_camera_spec": {
+      "camera_name": "0",
+      "fov_degrees": 100.0,
+      "fps": 30.0,
+      "pitch_up_degrees": 20.0,
+      "pose_offset_m": [
+        0.35,
+        0.0,
+        -0.05
+      ],
+      "resolution": [
+        640,
+        360
+      ],
+      "roll_degrees": 0.0,
+      "yaw_degrees": 0.0
+    }
+  },
+  "map_asset": "/Game/FlyingCPP/Maps/FlyingExampleMapV2",
+  "physics": {
+    "substepping": true,
+    "max_substep_delta_time_s": 0.008333333,
+    "max_substeps": 8,
+    "tick_physics_async": true,
+    "async_fixed_timestep_s": 0.008333333
+  },
+  "drone": {
+    "asset_path": "/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
+    "dimensions_m": [
+      0.981694,
+      0.981694,
+      0.292992
+    ],
+    "cameras": [
+      {
+        "name": "FrontRightCamera",
+        "class_name": "ChildActorComponent",
+        "relative_location_m": [
+          0.46,
+          0.125,
+          0.0
+        ],
+        "relative_rotation_deg": {
+          "pitch": 0.0,
+          "roll": 0.0,
+          "yaw": 0.0
+        }
+      },
+      {
+        "name": "FrontLeftCamera",
+        "class_name": "ChildActorComponent",
+        "relative_location_m": [
+          0.46,
+          -0.125,
+          0.0
+        ],
+        "relative_rotation_deg": {
+          "pitch": 0.0,
+          "roll": 0.0,
+          "yaw": 0.0
+        }
+      },
+      {
+        "name": "FrontCenterCamera",
+        "class_name": "ChildActorComponent",
+        "relative_location_m": [
+          0.46,
+          0.0,
+          0.0
+        ],
+        "relative_rotation_deg": {
+          "pitch": 0.0,
+          "roll": 0.0,
+          "yaw": 0.0
+        }
+      },
+      {
+        "name": "BackCenterCamera",
+        "class_name": "ChildActorComponent",
+        "relative_location_m": [
+          -0.46,
+          0.0,
+          0.0
+        ],
+        "relative_rotation_deg": {
+          "pitch": 0.0,
+          "roll": 0.0,
+          "yaw": 180.0
+        }
+      },
+      {
+        "name": "BottomCenterCamera",
+        "class_name": "ChildActorComponent",
+        "relative_location_m": [
+          0.0,
+          0.0,
+          -0.12
+        ],
+        "relative_rotation_deg": {
+          "pitch": -90.0,
+          "roll": 0.0,
+          "yaw": 0.0
+        }
+      }
+    ]
+  },
+  "gates": [
+    {
+      "label": "Torus_146CCCAE",
+      "class_name": "StaticMesh",
+      "asset_path": "/Game/FlyingCPP/Maps/_GENERATED/trung/Torus_146CCCAE.Torus_146CCCAE",
+      "dimensions_m": [
+        1.5,
+        1.5,
+        0.5
+      ]
+    }
+  ],
+  "gate_reference": {
+    "count": 1,
+    "dimensions_m": [
+      1.5,
+      1.5,
+      0.5
+    ]
+  }
+}
