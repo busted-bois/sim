@@ -12,7 +12,12 @@ from typing import Any
 
 from src.config import load_config, resolve_config_path, simulator_endpoint
 from src.control.algorithms import list_algorithms
-from src.mavlink_endpoints import candidate_mavlink_endpoints, resolve_control_transport
+from src.mavlink_endpoints import (
+    candidate_mavlink_endpoints,
+    describe_mavlink_heartbeat_failure,
+    probe_mavlink_heartbeat,
+    resolve_control_transport,
+)
 from src.simulator_specs import resolve_specification_path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,27 +73,14 @@ def _mavlink_heartbeat(
     *,
     connection_factory=None,
 ) -> tuple[bool, str, list[str]]:
-    from pymavlink import mavutil as _mavutil
-
-    factory = connection_factory or _mavutil.mavlink_connection
-    endpoints = candidate_mavlink_endpoints(config)
-    last_err = ""
-    for endpoint in endpoints:
-        connection = None
-        try:
-            connection = factory(endpoint, autoreconnect=False)
-            heartbeat = connection.wait_heartbeat(timeout=2.0)
-            if heartbeat is not None:
-                return True, endpoint, endpoints
-        except Exception as exc:
-            last_err = str(exc)
-        finally:
-            if connection is not None:
-                try:
-                    connection.close()
-                except Exception:
-                    pass
-    return False, last_err, endpoints
+    probe = probe_mavlink_heartbeat(
+        config,
+        timeout_s=2.0,
+        connection_factory=connection_factory,
+    )
+    if probe.endpoint is not None:
+        return True, probe.endpoint, list(probe.attempted_endpoints)
+    return False, describe_mavlink_heartbeat_failure(config, probe), list(probe.attempted_endpoints)
 
 
 def _mavlink_highres_imu(

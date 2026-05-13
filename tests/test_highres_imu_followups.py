@@ -135,7 +135,10 @@ class HighresImuFollowupTests(unittest.TestCase):
             with patch("src.sim_launch.launch") as launch_mock:
                 main_highres_imu_smoke()
 
-            launch_mock.assert_called_once_with(script_path="src/highres_imu_smoke.py")
+            launch_mock.assert_called_once_with(
+                script_path="src/highres_imu_smoke.py",
+                require_requested_transport=True,
+            )
             self.assertEqual(os.environ.get("AIGP_CONTROL_TRANSPORT"), "mavlink")
             self.assertEqual(os.environ.get("AIGP_ALLOW_MAVLINK_SIMPLEFLIGHT"), "1")
         finally:

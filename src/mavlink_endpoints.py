@@ -4,6 +4,15 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class MavlinkHeartbeatProbeResult:
+    endpoint: str | None
+    attempted_endpoints: tuple[str, ...]
+    last_error: str | None
+    elapsed_s: float
 
 
 def _mavlink_profile_looks_like_simpleflight(config: dict) -> bool:
@@ -92,37 +101,109 @@ def candidate_mavlink_endpoints(config: dict) -> list[str]:
     return ordered
 
 
-def first_mavlink_heartbeat_endpoint(config: dict, *, timeout_s: float) -> str | None:
-    """Return first endpoint that yields a valid HEARTBEAT, or None."""
+def probe_mavlink_heartbeat(
+    config: dict,
+    *,
+    timeout_s: float,
+    connection_factory=None,
+    heartbeat_timeout_s: float = 0.8,
+    retry_sleep_s: float = 0.5,
+) -> MavlinkHeartbeatProbeResult:
+    """Probe candidate endpoints and return the first heartbeat-bearing MAVLink link."""
 
     from pymavlink import mavutil as _mavutil
 
-    endpoints = candidate_mavlink_endpoints(config)
-    deadline = time.time() + max(0.1, float(timeout_s))
-    last_exc: str | None = None
+    factory = connection_factory or _mavutil.mavlink_connection
+    endpoints = tuple(candidate_mavlink_endpoints(config))
+    started_s = time.monotonic()
+    deadline = started_s + max(0.1, float(timeout_s))
+    last_error: str | None = None
 
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         for endpoint in endpoints:
             connection = None
             try:
-                connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
-                heartbeat = connection.wait_heartbeat(timeout=0.8)
+                connection = factory(endpoint, autoreconnect=False)
+                heartbeat = connection.wait_heartbeat(timeout=heartbeat_timeout_s)
                 target_system = int(getattr(connection, "target_system", 0) or 0)
                 if heartbeat is not None and target_system > 0:
-                    return endpoint
+                    return MavlinkHeartbeatProbeResult(
+                        endpoint=endpoint,
+                        attempted_endpoints=endpoints,
+                        last_error=None,
+                        elapsed_s=time.monotonic() - started_s,
+                    )
+                if heartbeat is not None:
+                    last_error = (
+                        f"{endpoint}: heartbeat received but target_system={target_system}"
+                    )
+                else:
+                    last_error = f"{endpoint}: no heartbeat within {heartbeat_timeout_s:.1f}s"
             except Exception as exc:
-                last_exc = str(exc)
+                last_error = f"{endpoint}: {exc}"
             finally:
                 if connection is not None:
                     try:
                         connection.close()
                     except Exception:
                         pass
-        time.sleep(0.5)
 
-    if last_exc:
-        print(f"MAVLink heartbeat probe failed: {last_exc}")
-    return None
+        remaining_s = deadline - time.monotonic()
+        if remaining_s > 0:
+            time.sleep(min(retry_sleep_s, remaining_s))
+
+    if last_error is None:
+        last_error = "no MAVLink heartbeat observed before timeout"
+    return MavlinkHeartbeatProbeResult(
+        endpoint=None,
+        attempted_endpoints=endpoints,
+        last_error=last_error,
+        elapsed_s=time.monotonic() - started_s,
+    )
+
+
+def first_mavlink_heartbeat_endpoint(config: dict, *, timeout_s: float) -> str | None:
+    """Return first endpoint that yields a valid HEARTBEAT, or None."""
+
+    return probe_mavlink_heartbeat(config, timeout_s=timeout_s).endpoint
+
+
+def describe_mavlink_heartbeat_failure(
+    config: dict,
+    probe: MavlinkHeartbeatProbeResult,
+) -> str:
+    """Human-readable diagnosis for missing MAVLink heartbeats."""
+
+    mav_cfg = config.get("control", {}).get("mavlink", {})
+    profile = mav_cfg.get("airsim_profile", {})
+    attempted = ", ".join(probe.attempted_endpoints) or "(none)"
+    vehicle_type = str(profile.get("vehicle_type", "unknown")).strip() or "unknown"
+    udp_port = int(profile.get("udp_port", 14560))
+    control_port_local = int(profile.get("control_port_local", 14540))
+    control_port_remote = int(profile.get("control_port_remote", 14580))
+    qgc_port = int(profile.get("qgc_port", 14550))
+    likely_causes = (
+        "Likely causes: the simulator is still using AirSim-only transport, the AirSim "
+        "MAVLink backend is not configured in settings.json, the endpoint/port is wrong, "
+        "or the upstream autopilot bridge never started publishing heartbeats."
+    )
+    if _mavlink_profile_looks_like_simpleflight(config):
+        likely_causes = (
+            "Likely causes: the profile still looks like SimpleFlight/RpcLib-only, which "
+            "will not emit PX4-style heartbeats, the endpoint/port is wrong, or the upstream "
+            "autopilot bridge never started publishing heartbeats."
+        )
+    last_error = probe.last_error or "no probe error captured"
+    return (
+        "No MAVLink HEARTBEAT detected "
+        f"within {probe.elapsed_s:.1f}s. Tried endpoints: {attempted}. "
+        f"Last probe result: {last_error}. "
+        "AirSim MAVLink profile: "
+        f"vehicle_type={vehicle_type!r}, udp_port={udp_port}, "
+        f"control_port_local={control_port_local}, "
+        f"control_port_remote={control_port_remote}, qgc_port={qgc_port}. "
+        f"{likely_causes}"
+    )
 
 
 def resolve_control_transport(config: dict) -> str:

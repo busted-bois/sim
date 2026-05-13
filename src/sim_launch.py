@@ -334,8 +334,13 @@ def _wait_for_control_link(
     config: dict,
     wait_timeout_s: float,
     transport: str,
+    *,
+    require_requested_transport: bool = False,
 ) -> tuple[str, str | None]:
-    from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint
+    from src.mavlink_endpoints import (
+        describe_mavlink_heartbeat_failure,
+        probe_mavlink_heartbeat,
+    )
 
     requested = str(transport).strip().lower()
     timeout_s = max(15.0, float(wait_timeout_s))
@@ -347,21 +352,20 @@ def _wait_for_control_link(
             f"within {timeout_s:.0f}s. Ensure Unreal finished loading the map."
         )
 
-    strict = os.environ.get("AIGP_MAVLINK_STRICT", "").strip() == "1"
+    strict = require_requested_transport or os.environ.get("AIGP_MAVLINK_STRICT", "").strip() == "1"
     mav_phase_s = min(30.0, max(8.0, timeout_s * 0.25))
-    resolved = first_mavlink_heartbeat_endpoint(config, timeout_s=mav_phase_s)
-    if resolved is not None:
-        return "mavlink", resolved
+    probe = probe_mavlink_heartbeat(config, timeout_s=mav_phase_s)
+    if probe.endpoint is not None:
+        return "mavlink", probe.endpoint
+
+    failure_detail = describe_mavlink_heartbeat_failure(config, probe)
 
     if strict:
-        raise SystemExit(
-            f"AIGP_MAVLINK_STRICT=1: no MAVLink HEARTBEAT within {timeout_s:.0f}s. "
-            "Check MAVLink wiring in the simulator."
-        )
+        raise SystemExit(failure_detail)
 
     rest_s = max(10.0, timeout_s - mav_phase_s)
     print(
-        "No MAVLink HEARTBEAT detected yet. "
+        f"{failure_detail} "
         f"Trying AirSim RPC for up to {rest_s:.0f}s. "
         'Set AIGP_MAVLINK_STRICT=1 to require MAVLink.'
     )
@@ -370,7 +374,8 @@ def _wait_for_control_link(
         return "airsim", None
 
     raise SystemExit(
-        f"Neither MAVLink HEARTBEAT nor AirSim RPC became ready within {timeout_s:.0f}s."
+        f"{failure_detail} AirSim RPC was also not ready on {host}:{airsim_port} "
+        f"within {timeout_s:.0f}s."
     )
 
 
@@ -765,6 +770,7 @@ def launch(
     manual_debug: bool = False,
     use_vjoy: bool = False,
     script_path: str = "main.py",
+    require_requested_transport: bool = False,
 ) -> None:
     _register_signal_handlers_once()
     _handles.ue = None
@@ -862,6 +868,7 @@ def launch(
                 config,
                 rpc_ready_timeout_s,
                 transport,
+                require_requested_transport=require_requested_transport,
             )
         except KeyboardInterrupt:
             _cleanup_on_interrupt()
@@ -881,6 +888,7 @@ def launch(
                 config,
                 rpc_ready_timeout_s,
                 transport,
+                require_requested_transport=require_requested_transport,
             )
         except KeyboardInterrupt:
             _cleanup_on_interrupt()
@@ -1013,7 +1021,10 @@ def main_timesync_smoke() -> None:
 def main_highres_imu_smoke() -> None:
     os.environ["AIGP_CONTROL_TRANSPORT"] = "mavlink"
     os.environ.setdefault("AIGP_ALLOW_MAVLINK_SIMPLEFLIGHT", "1")
-    launch(script_path="src/highres_imu_smoke.py")
+    launch(
+        script_path="src/highres_imu_smoke.py",
+        require_requested_transport=True,
+    )
 
 
 if __name__ == "__main__":
