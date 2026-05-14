@@ -76,6 +76,7 @@
   "profiles": {
     "official_conformant": {
       "simulator": {
+        "physics_update_hz": 120,
         "specification_required": true
       },
       "vision": {
