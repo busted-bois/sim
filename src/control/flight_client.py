@@ -15,6 +15,70 @@ SET_POSITION_FRAME_BODY_NED: SetPositionTargetFrame = "body_ned"
 
 
 @dataclass(frozen=True, slots=True)
+class SetAttitudeTargetCommand:
+    """Parameters for a MAVLink SET_ATTITUDE_TARGET message.
+
+    ``quaternion`` is (w, x, y, z) — matching the pymavlink convention.
+    ``thrust`` is normalised [0.0, 1.0].
+    Set ``type_mask`` using :func:`build_attitude_target_type_mask` or the
+    convenience helpers :func:`build_attitude_only_type_mask` /
+    :func:`build_body_rate_type_mask`.
+    """
+
+    type_mask: int
+    quaternion: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+    body_roll_rate: float = 0.0
+    body_pitch_rate: float = 0.0
+    body_yaw_rate: float = 0.0
+    thrust: float = 0.5
+
+
+def build_attitude_target_type_mask(
+    *,
+    ignore_attitude: bool = False,
+    ignore_roll_rate: bool = True,
+    ignore_pitch_rate: bool = True,
+    ignore_yaw_rate: bool = True,
+    ignore_thrust: bool = False,
+) -> int:
+    """Build a bitmask for SET_ATTITUDE_TARGET.
+
+    By default, only attitude + thrust are used (body rates are ignored).
+    Set ``ignore_attitude=True`` and ``ignore_*_rate=False`` to switch to
+    body-rate-only control.
+    """
+    from pymavlink import mavutil
+
+    mask = 0
+    if ignore_attitude:
+        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE)
+    if ignore_roll_rate:
+        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE)
+    if ignore_pitch_rate:
+        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
+    if ignore_yaw_rate:
+        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
+    if ignore_thrust:
+        mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_THROTTLE_IGNORE)
+    return int(mask)
+
+
+def build_attitude_only_type_mask() -> int:
+    """Attitude + thrust; all body rates ignored."""
+    return build_attitude_target_type_mask()
+
+
+def build_body_rate_type_mask() -> int:
+    """Body rates + thrust; attitude ignored."""
+    return build_attitude_target_type_mask(
+        ignore_attitude=True,
+        ignore_roll_rate=False,
+        ignore_pitch_rate=False,
+        ignore_yaw_rate=False,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class SetPositionTargetLocalNedCommand:
     frame: SetPositionTargetFrame
     type_mask: int
@@ -100,6 +164,12 @@ class FlightClient(Protocol):
     def submitPositionLocalNed(self, x: float, y: float, z: float) -> None: ...
     def streamSetPositionTargetLocalNedAsync(
         self, command: SetPositionTargetLocalNedCommand, duration: float
+    ) -> Any: ...
+
+    def submitSetAttitudeTarget(self, command: SetAttitudeTargetCommand) -> None: ...
+
+    def streamSetAttitudeTargetAsync(
+        self, command: SetAttitudeTargetCommand, duration: float
     ) -> Any: ...
 
     def moveByAngleThrottleAsync(
@@ -202,6 +272,14 @@ class AirSimAdapter:
         self, command: SetPositionTargetLocalNedCommand, duration: float
     ) -> Any:
         return self._forward_optional("streamSetPositionTargetLocalNedAsync", command, duration)
+
+    def submitSetAttitudeTarget(self, command: SetAttitudeTargetCommand) -> None:
+        self._forward_optional("submitSetAttitudeTarget", command)
+
+    def streamSetAttitudeTargetAsync(
+        self, command: SetAttitudeTargetCommand, duration: float
+    ) -> Any:
+        return self._forward_optional("streamSetAttitudeTargetAsync", command, duration)
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
