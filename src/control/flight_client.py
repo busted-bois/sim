@@ -23,11 +23,10 @@ SET_POSITION_FRAME_BODY_NED: SetPositionTargetFrame = "body_ned"
 class SetAttitudeTargetCommand:
     """Parameters for a MAVLink SET_ATTITUDE_TARGET message.
 
-    ``quaternion`` is (w, x, y, z) — matching the pymavlink convention.
-    ``thrust`` is normalised [0.0, 1.0].
-    Set ``type_mask`` using :func:`build_attitude_target_type_mask` or the
-    convenience helpers :func:`build_attitude_only_type_mask` /
-    :func:`build_body_rate_type_mask`.
+    quaternion is (w, x, y, z) — pymavlink convention.
+    thrust is normalised [0.0, 1.0].
+    Build type_mask with build_attitude_target_type_mask() or the
+    convenience helpers build_attitude_only_type_mask() / build_body_rate_type_mask().
     """
 
     type_mask: int
