@@ -6,7 +6,7 @@
 - **Linter:** Ruff (`uvx ruff check --fix`). Runs via lefthook pre-commit on staged `*.{py,toml}`.
 - **Ruff config:** line-length=100, rules `E F W I UP RUF`, `known-first-party = ["src"]`. See `pyproject.toml [tool.ruff]`.
 - **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
-- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` and `uv run verify-sim-physics-metadata` (checks `docs/simulator_specs.json` physics block). Optional: `.github/workflows/extract-simulator-specs.yml` (`workflow_dispatch`) runs `extract-simulator-specs` when repository secret `UE_PROJECT_PATH` is set on a Windows runner with Unreal + Colosseum.
+- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` and `uv run verify-sim-physics-metadata` (checks `docs/simulator_specs.json` physics block). Both enable `setup-uv` dependency caching. Optional: `.github/workflows/extract-simulator-specs.yml` (`workflow_dispatch`) runs `extract-simulator-specs` when repository secret `UE_PROJECT_PATH` is set on a Windows runner with Unreal + Colosseum.
 
 ## Simulator physics (120 Hz)
 
@@ -65,7 +65,7 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 
 ## Project Layout
 
-- `main.py` — Entry point. Connects to AirSim RPC, loads algorithm from config, runs it.
+- `main.py` — Entry point. Connects to AirSim RPC, loads algorithm from config, runs it. When `simulator.specification_required` is true, validates `docs/simulator_specs.json` before connecting (same check as `sim_launch`).
 - `sim.config.json` — Runtime config (algorithm name, sim ports, waypoints, control limits, vision, landing profiles).
 - `.env.local` — `PROJECT_PATH` to UE5 project. Loaded by `uv run sim` / `launch.sh` / `launch.ps1`. Not committed.
 - `src/config.py` — Reads `sim.config.json` from project root.
@@ -74,7 +74,7 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `src/preflight.py` — Preflight safety check. Entry point for `uv run preflight`.
 - `src/landing_telemetry.py` — Optional CSV samples during landing.
 - `src/control/algorithms/` — Pluggable flight algorithms via `@register("name")` decorator.
-- `src/vision/` — Vision subsystem: `feed.py` (FPV capture), `depth_perception.py` (MiDaS ONNX), `processing.py`, `frame_metrics.py`, `mapping.py`.
+- `src/vision/` — Vision subsystem: `feed.py` (FPV capture), `intrinsics.py` (official pinhole K), `depth_perception.py` (MiDaS ONNX), `processing.py`, `frame_metrics.py`, `mapping.py`.
 - `models/midas_v21_small.onnx` — Monocular depth estimation model.
 - `airsim/` — Vendored AirSim Python RPC client. **Do not modify.**
 - `msgpackrpc/` — Custom msgpack-rpc shim for Python 3.12 compat. **Do not modify.**

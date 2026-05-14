@@ -26,9 +26,9 @@
     "enabled": true,
     "camera_name": "0",
 "pitch_up_degrees": -20,
-    "fps": 18,
-    "min_fps": 5,
-    "fov_degrees": 100,
+    "fps": 30,
+    "min_fps": 30,
+    "fov_degrees": 90,
     "compress": true,
     "resolution": [640, 360],
     "strict_timing": true,
@@ -82,7 +82,7 @@
       "vision": {
         "fps": 30,
         "min_fps": 30,
-        "fov_degrees": 100,
+        "fov_degrees": 90,
         "resolution": [640, 360],
         "strict_timing": true,
         "startup_autotune_enabled": false
