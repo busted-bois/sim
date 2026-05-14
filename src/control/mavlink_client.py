@@ -19,6 +19,8 @@ from src.control.flight_client import (
     SET_POSITION_FRAME_LOCAL_NED,
     SetAttitudeTargetCommand,
     SetPositionTargetLocalNedCommand,
+    build_attitude_only_type_mask,
+    build_body_rate_type_mask,
     build_position_type_mask,
     build_velocity_type_mask,
 )
@@ -894,8 +896,6 @@ class PymavlinkFlightClient:
         thrust: float,
         duration_s: float,
     ) -> None:
-        from src.control.flight_client import build_attitude_only_type_mask
-
         self._stream_set_attitude_target(
             SetAttitudeTargetCommand(
                 type_mask=build_attitude_only_type_mask(),
@@ -913,8 +913,6 @@ class PymavlinkFlightClient:
         thrust: float,
         duration_s: float,
     ) -> None:
-        from src.control.flight_client import build_body_rate_type_mask
-
         self._stream_set_attitude_target(
             SetAttitudeTargetCommand(
                 type_mask=build_body_rate_type_mask(),
