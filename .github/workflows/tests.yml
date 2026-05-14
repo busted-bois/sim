@@ -1,0 +1,19 @@
+name: Unit Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+
+      - name: Run unit tests
+        run: |
+          uv sync --frozen
+          uv run python -m unittest discover -s tests -v

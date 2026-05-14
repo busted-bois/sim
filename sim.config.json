@@ -234,6 +234,12 @@
           "require_stable_health": true
         }
       },
+      "attitude_target": {
+        "throttle_body_z": false,
+        "smoke_test": {
+          "duration_seconds": 0.35
+        }
+      },
       "airsim_profile": {
         "vehicle_name": "Drone1",
         "vehicle_type": "PX4Multirotor",

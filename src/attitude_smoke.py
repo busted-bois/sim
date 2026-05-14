@@ -21,13 +21,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--duration-seconds",
         type=float,
-        default=0.35,
-        help="How long to stream the attitude command (default: 0.35).",
+        default=None,
+        help=(
+            "Stream duration (default: "
+            "control.mavlink.attitude_target.smoke_test.duration_seconds)."
+        ),
     )
     return parser
 
 
-def _client(config, args: argparse.Namespace) -> tuple[PymavlinkFlightClient, str]:
+def _client(config, args: argparse.Namespace) -> tuple[PymavlinkFlightClient, str, dict]:
     transport = resolve_control_transport(config)
     if transport != "mavlink":
         raise SystemExit(
@@ -35,6 +38,8 @@ def _client(config, args: argparse.Namespace) -> tuple[PymavlinkFlightClient, st
         )
     control_cfg = config.get("control", {})
     mav_cfg = control_cfg.get("mavlink", {})
+    att_cfg = mav_cfg.get("attitude_target", {})
+    smoke_cfg = att_cfg.get("smoke_test", {})
     endpoint = (
         (args.endpoint or "").strip()
         or os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip()
@@ -55,16 +60,22 @@ def _client(config, args: argparse.Namespace) -> tuple[PymavlinkFlightClient, st
         prepare_for_flight_on_connect=False,
         request_state_messages_on_connect=True,
         highres_imu_enabled=False,
+        attitude_target_throttle_body_z=bool(att_cfg.get("throttle_body_z", False)),
     )
-    return client, endpoint
+    return client, endpoint, smoke_cfg
 
 
 def main() -> None:
     args = _build_parser().parse_args()
     config = load_config()
     apply_low_end_overrides(config)
-    client, endpoint = _client(config, args)
-    duration_s = max(0.05, float(args.duration_seconds))
+    client, endpoint, smoke_cfg = _client(config, args)
+    duration_s = max(
+        0.05,
+        float(args.duration_seconds)
+        if args.duration_seconds is not None
+        else float(smoke_cfg.get("duration_seconds", 0.35)),
+    )
     print(
         f"[attitude-smoke] endpoint={endpoint!r} duration_s={duration_s:.2f} "
         "(small roll setpoint, throttle ~0.55)"
