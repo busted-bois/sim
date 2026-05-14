@@ -6,9 +6,13 @@
 - **Linter:** Ruff (`uvx ruff check --fix`). Runs via lefthook pre-commit on staged `*.{py,toml}`.
 - **Ruff config:** line-length=100, rules `E F W I UP RUF`, `known-first-party = ["src"]`. See `pyproject.toml [tool.ruff]`.
 - **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
-- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` via `uv run python -m unittest discover -s tests -v`.
+- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` and `uv run verify-sim-physics-metadata` (checks `docs/simulator_specs.json` physics block). Optional: `.github/workflows/extract-simulator-specs.yml` (`workflow_dispatch`) runs `extract-simulator-specs` when repository secret `UE_PROJECT_PATH` is set on a Windows runner with Unreal + Colosseum.
 
-## Running
+## Simulator physics (120 Hz)
+
+- **Unreal:** fixed async physics step and substepping are set in Colosseum (`PROJECT_PATH`). Optional merge: `scripts/unreal_default_engine_physics_120hz_fragment.ini` → `Config/DefaultEngine.ini`.
+- **Snapshot:** `docs/simulator_specs.json` from `uv run extract-simulator-specs`. With `simulator.specification_required: true`, `uv run preflight` and `uv run sim` check it against config. AirSim RPC does not read live `PhysicsSettings` from Python.
+
 
 ```bash
 uv run sim                              # One command: .env.local, UE5 (if configured), main.py
@@ -17,6 +21,8 @@ uv run sim 3rd-person                   # FlyWithMe camera instead of FPV
 uv run sim-very-soft                    # Gentle landing profile
 uv run sim vjoy                         # Manual vJoy control + GUI
 uv run preflight                        # Safety check before launch
+uv run verify-sim-physics-metadata      # Assert docs/simulator_specs.json documents 120 Hz physics
+uv run extract-simulator-specs         # Regenerate snapshot from Unreal (needs PROJECT_PATH + UE)
 uv run calibrate                        # Depth calibration with manual GUI
 uv run main.py                          # Run drone client (needs simulator running)
 uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream (MAVLink transport)
