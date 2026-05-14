@@ -3,7 +3,6 @@ import unittest
 
 from pymavlink import mavutil
 
-from src.control.flight_client import build_attitude_only_type_mask, build_body_rate_type_mask
 from src.control.mavlink_client import PymavlinkFlightClient
 from tests.mavlink_fakes import FakeMavConnection, FakeMessage, fake_mavlink_monotonic_sleep
 
@@ -44,7 +43,12 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
         )
         self.assertTrue(connection.mav.attitude_target_calls)
         call = connection.mav.attitude_target_calls[0]
-        self.assertEqual(call[3], build_attitude_only_type_mask())
+        expected_mask = (
+            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE)
+            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
+            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
+        )
+        self.assertEqual(call[3], expected_mask)
         quat = call[4]
         self.assertEqual(len(quat), 4)
         for a, b in zip(quat, expected_quat, strict=True):
@@ -84,7 +88,10 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
 
         self.assertTrue(connection.mav.attitude_target_calls)
         call = connection.mav.attitude_target_calls[0]
-        self.assertEqual(call[3], build_body_rate_type_mask())
+        self.assertEqual(
+            call[3],
+            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE),
+        )
         self.assertEqual(list(call[4]), [1.0, 0.0, 0.0, 0.0])
         self.assertAlmostEqual(call[5], 0.5, places=6)
         self.assertAlmostEqual(call[6], -0.25, places=6)
@@ -109,41 +116,6 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
     def test_normalize_quaternion_zero_is_identity(self) -> None:
         q = PymavlinkFlightClient._normalize_quaternion((0.0, 0.0, 0.0, 0.0))
         self.assertEqual(q, (1.0, 0.0, 0.0, 0.0))
-
-    def test_attitude_target_throttle_body_z_sets_mask_bit(self) -> None:
-        heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=7, source_component=3)
-        connection = FakeMavConnection(heartbeat, [])
-        client = self._client(
-            connection,
-            attitude_target_throttle_body_z=True,
-        )
-        try:
-            client.confirmConnection()
-            with fake_mavlink_monotonic_sleep():
-                client.moveByRollPitchYawThrottleAsync(0.01, 0.0, 0.0, 0.5, 0.06).join()
-        finally:
-            client.close()
-
-        self.assertEqual(
-            connection.mav.attitude_target_calls[0][3],
-            build_attitude_only_type_mask(throttle_body_z=True),
-        )
-
-    def test_rate_target_throttle_body_z_sets_mask_bit(self) -> None:
-        heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=7, source_component=3)
-        connection = FakeMavConnection(heartbeat, [])
-        client = self._client(connection, attitude_target_throttle_body_z=True)
-        try:
-            client.confirmConnection()
-            with fake_mavlink_monotonic_sleep():
-                client.moveByAngleRateThrottleAsync(0.1, 0.0, 0.0, 0.5, 0.06).join()
-        finally:
-            client.close()
-
-        self.assertEqual(
-            connection.mav.attitude_target_calls[0][3],
-            build_body_rate_type_mask(throttle_body_z=True),
-        )
 
     def test_guided_mode_throttled_between_streams(self) -> None:
         heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=7, source_component=3)

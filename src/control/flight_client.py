@@ -1,8 +1,7 @@
 """FlightClient protocol and AirSim adapter.
 
-Motion units match AirSim Python: NED m/s for velocity; radians for roll/pitch/yaw;
-throttle in ``[0, 1]``. ``rotateByYawRateAsync`` uses deg/s; MAVLink body yaw rate
-is rad/s (converted in ``PymavlinkFlightClient``).
+Units match the AirSim Python client: NED m/s, rpy and angle rates in rad and
+rad/s, rotateByYawRateAsync in deg/s, throttle 0..1.
 """
 
 from __future__ import annotations
