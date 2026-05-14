@@ -25,11 +25,12 @@ def set_front_camera_pose(client: FlightClient, config: Config | dict) -> None:
     pitch_up_degrees = float(cam_cfg.get("pitch_up_degrees", 20.0))
     roll_degrees = float(cam_cfg.get("roll_degrees", 0.0))
     yaw_degrees = float(cam_cfg.get("yaw_degrees", 0.0))
+    pitch_rad = math.radians(-pitch_up_degrees)
     front_pose = airsim.Pose(
         airsim.Vector3r(pose_offset[0], pose_offset[1], pose_offset[2]),
         _airsim_quaternion_from_euler(
             math.radians(roll_degrees),
-            math.radians(pitch_up_degrees),
+            pitch_rad,
             math.radians(yaw_degrees),
         ),
     )

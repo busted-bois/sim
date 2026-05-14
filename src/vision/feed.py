@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 import airsim
+from src.vision.intrinsics import horizontal_fov_degrees
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +43,7 @@ class VisionFeed:
         self._camera_name = str(config.get("camera_name", "0"))
         self._fps = max(1.0, float(config.get("fps", 30.0)))
         self._configured_fps = self._fps
-        self._fov_degrees = float(config.get("fov_degrees", 100.0))
+        self._fov_degrees = float(config.get("fov_degrees", horizontal_fov_degrees()))
         self._compress = bool(config.get("compress", True))
         self._save_debug_frames = bool(config.get("save_debug_frames", False))
         self._debug_output_dir = Path(str(config.get("debug_output_dir", "logs/vision_frames")))
@@ -79,6 +80,7 @@ class VisionFeed:
         self._scheduler_dropped_ticks = 0
         self._consumer_dropped_frames = 0
         self._last_consumed_seq = 0
+        self._native_size_warned = False
 
     @property
     def enabled(self) -> bool:
@@ -90,10 +92,18 @@ class VisionFeed:
         if self._thread is not None and self._thread.is_alive():
             return
         self._start_monotonic_s = time.monotonic()
+        need_set = True
         try:
-            self._client.simSetCameraFov(self._camera_name, self._fov_degrees)
-        except Exception as exc:
-            print(f"[vision] warning: failed to set camera FOV: {exc}")
+            info = self._client.simGetCameraInfo(self._camera_name)
+            current = float(getattr(info, "fov", -1.0))
+            need_set = current < 0.0 or abs(current - self._fov_degrees) > 0.25
+        except Exception:
+            need_set = True
+        if need_set:
+            try:
+                self._client.simSetCameraFov(self._camera_name, self._fov_degrees)
+            except Exception as exc:
+                print(f"[vision] warning: failed to set camera FOV: {exc}")
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._capture_loop, name="vision_feed", daemon=True)
         self._thread.start()
@@ -233,6 +243,7 @@ class VisionFeed:
             bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
             if bgr is None:
                 raise RuntimeError("vision: failed to decode compressed image")
+            self._maybe_warn_native_resolution_mismatch(int(bgr.shape[1]), int(bgr.shape[0]))
             if self._target_width is not None and self._target_height is not None:
                 bgr = cv2.resize(
                     bgr,
@@ -253,14 +264,13 @@ class VisionFeed:
                 f"unexpected uncompressed image size={actual_size}, expected={expected_size}"
             )
         image_rgb = data_array.reshape(height, width, 3).copy()
+        self._maybe_warn_native_resolution_mismatch(width, height)
         if self._target_width is not None and self._target_height is not None:
-            bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
-            bgr = cv2.resize(
-                bgr,
+            image_rgb = cv2.resize(
+                image_rgb,
                 (self._target_width, self._target_height),
                 interpolation=cv2.INTER_LINEAR,
             )
-            image_rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             return np.ascontiguousarray(image_rgb, dtype=np.uint8)
         return image_rgb
 
@@ -280,6 +290,18 @@ class VisionFeed:
             print("[vision] invalid width/height in config; using source resolution")
             return None, None
         return target_width, target_height
+
+    def _maybe_warn_native_resolution_mismatch(self, native_w: int, native_h: int) -> None:
+        if not self._strict_timing or self._native_size_warned:
+            return
+        tw, th = self._target_width, self._target_height
+        if tw is None or th is None or (native_w, native_h) == (tw, th):
+            return
+        self._native_size_warned = True
+        print(
+            "[vision] warning: native capture size "
+            f"{native_w}x{native_h} != vision.resolution {tw}x{th}; output is resized"
+        )
 
     def _write_debug_frame(self, frame: VisionFrame) -> None:
         self._debug_output_dir.mkdir(parents=True, exist_ok=True)
