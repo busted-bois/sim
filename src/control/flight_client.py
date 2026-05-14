@@ -50,7 +50,8 @@ def build_attitude_target_type_mask(
 
     By default, only attitude + thrust are used (body rates are ignored).
     Set ``ignore_attitude=True`` and ``ignore_*_rate=False`` to switch to
-    body-rate-only control.
+    body-rate-only control. With ``throttle_body_z=True``, OR in the
+    ``ATTITUDE_TARGET_TYPEMASK_THROTTLE_BODY_SET`` bit when supported by pymavlink.
     """
     from pymavlink import mavutil
 

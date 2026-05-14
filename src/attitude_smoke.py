@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Mapping
+from typing import Any
 
 from src.config import apply_low_end_overrides, load_config
 from src.control.mavlink_client import PymavlinkFlightClient
@@ -26,8 +28,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _client(
-    config: dict, args: argparse.Namespace
-) -> tuple[PymavlinkFlightClient, str, dict]:
+    config: Mapping[str, Any], args: argparse.Namespace
+) -> tuple[PymavlinkFlightClient, str, dict[str, Any]]:
     transport = resolve_control_transport(config)
     if transport != "mavlink":
         raise SystemExit(
