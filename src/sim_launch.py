@@ -1007,5 +1007,9 @@ def main_timesync_smoke() -> None:
     launch(script_path="src/timesync_smoke.py")
 
 
+def main_attitude_smoke() -> None:
+    launch(script_path="src/attitude_smoke.py")
+
+
 if __name__ == "__main__":
     launch()
