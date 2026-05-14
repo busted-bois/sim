@@ -17,6 +17,7 @@ from src.control.command_rate import (
 from src.control.flight_client import (
     SET_POSITION_FRAME_BODY_NED,
     SET_POSITION_FRAME_LOCAL_NED,
+    SetAttitudeTargetCommand,
     SetPositionTargetLocalNedCommand,
     build_position_type_mask,
     build_velocity_type_mask,
@@ -353,6 +354,16 @@ class PymavlinkFlightClient:
         self, command: SetPositionTargetLocalNedCommand, duration: float
     ) -> _Joinable:
         return _Joinable(lambda: self._stream_set_position_target_local_ned(command, duration))
+
+    def submitSetAttitudeTarget(self, command: SetAttitudeTargetCommand) -> None:
+        assert self._mav is not None and self._target_system is not None
+        self._set_guided_mode(force=False)
+        self._send_set_attitude_target(command)
+
+    def streamSetAttitudeTargetAsync(
+        self, command: SetAttitudeTargetCommand, duration: float
+    ) -> _Joinable:
+        return _Joinable(lambda: self._stream_set_attitude_target(command, duration))
 
     def moveByAngleThrottleAsync(
         self, roll: float, pitch: float, yaw: float, throttle: float, duration: float
@@ -843,43 +854,56 @@ class PymavlinkFlightClient:
             float(command.yaw_rate),
         )
 
-    def _stream_attitude_target(
-        self,
-        quaternion: tuple[float, float, float, float],
-        thrust: float,
-        duration_s: float,
+    def _send_set_attitude_target(self, command: SetAttitudeTargetCommand) -> None:
+        assert self._mav is not None and self._target_system is not None
+        t_ms = int((time.time() * 1000) % 2**32)
+        self._mav.mav.set_attitude_target_send(
+            t_ms,
+            self._target_system,
+            self._target_component or 1,
+            command.type_mask,
+            list(command.quaternion),
+            float(command.body_roll_rate),
+            float(command.body_pitch_rate),
+            float(command.body_yaw_rate),
+            float(max(0.0, min(1.0, command.thrust))),
+        )
+
+    def _stream_set_attitude_target(
+        self, command: SetAttitudeTargetCommand, duration_s: float
     ) -> None:
         assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode()
+        self._set_guided_mode(force=False)
         period_s = self._command_rate_gate.period_s
-        type_mask = (
-            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE)
-            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
-            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
-        )
         deadline = time.monotonic() + max(0.0, float(duration_s))
         next_tick = time.monotonic()
         while time.monotonic() < deadline:
             now_s = time.monotonic()
             if self._command_rate_gate.allow(now_s):
-                t_ms = int((time.time() * 1000) % 2**32)
-                self._mav.mav.set_attitude_target_send(
-                    t_ms,
-                    self._target_system,
-                    self._target_component or 1,
-                    type_mask,
-                    quaternion,
-                    0.0,
-                    0.0,
-                    0.0,
-                    float(max(0.0, min(1.0, thrust))),
-                )
+                self._send_set_attitude_target(command)
             next_tick += period_s
             sleep_s = next_tick - time.monotonic()
             if sleep_s > 0:
                 time.sleep(sleep_s)
             else:
                 next_tick = time.monotonic()
+
+    def _stream_attitude_target(
+        self,
+        quaternion: tuple[float, float, float, float],
+        thrust: float,
+        duration_s: float,
+    ) -> None:
+        from src.control.flight_client import build_attitude_only_type_mask
+
+        self._stream_set_attitude_target(
+            SetAttitudeTargetCommand(
+                type_mask=build_attitude_only_type_mask(),
+                quaternion=quaternion,
+                thrust=thrust,
+            ),
+            duration_s,
+        )
 
     def _stream_attitude_rate_target(
         self,
@@ -889,33 +913,18 @@ class PymavlinkFlightClient:
         thrust: float,
         duration_s: float,
     ) -> None:
-        assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode()
-        period_s = self._command_rate_gate.period_s
-        type_mask = int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE)
-        deadline = time.monotonic() + max(0.0, float(duration_s))
-        next_tick = time.monotonic()
-        while time.monotonic() < deadline:
-            now_s = time.monotonic()
-            if self._command_rate_gate.allow(now_s):
-                t_ms = int((time.time() * 1000) % 2**32)
-                self._mav.mav.set_attitude_target_send(
-                    t_ms,
-                    self._target_system,
-                    self._target_component or 1,
-                    type_mask,
-                    [1.0, 0.0, 0.0, 0.0],
-                    float(roll_rate),
-                    float(pitch_rate),
-                    float(yaw_rate),
-                    float(max(0.0, min(1.0, thrust))),
-                )
-            next_tick += period_s
-            sleep_s = next_tick - time.monotonic()
-            if sleep_s > 0:
-                time.sleep(sleep_s)
-            else:
-                next_tick = time.monotonic()
+        from src.control.flight_client import build_body_rate_type_mask
+
+        self._stream_set_attitude_target(
+            SetAttitudeTargetCommand(
+                type_mask=build_body_rate_type_mask(),
+                body_roll_rate=roll_rate,
+                body_pitch_rate=pitch_rate,
+                body_yaw_rate=yaw_rate,
+                thrust=thrust,
+            ),
+            duration_s,
+        )
 
     @staticmethod
     def _quaternion_from_euler(
