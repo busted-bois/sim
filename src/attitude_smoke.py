@@ -1,5 +1,3 @@
-"""Connect over MAVLink, stream a short attitude command, print command-rate stats."""
-
 from __future__ import annotations
 
 import argparse
@@ -12,7 +10,7 @@ from src.mavlink_endpoints import resolve_control_transport
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Connect over MAVLink, send a brief SET_ATTITUDE_TARGET stream, report stats.",
+        description="MAVLink attitude smoke: short SET_ATTITUDE_TARGET stream.",
     )
     parser.add_argument(
         "--endpoint",
@@ -22,10 +20,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--duration-seconds",
         type=float,
         default=None,
-        help=(
-            "Stream duration (default: "
-            "control.mavlink.attitude_target.smoke_test.duration_seconds)."
-        ),
+        help="Default: control.mavlink.attitude_target.smoke_test.duration_seconds.",
     )
     return parser
 

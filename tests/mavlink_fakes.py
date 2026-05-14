@@ -66,7 +66,6 @@ class FakeMavConnection:
 
     def recv_match(self, *args: Any, **kwargs: Any) -> FakeMessage | None:
         want = kwargs.get("type", args[0] if args else None)
-        _ = kwargs.get("blocking", True)
         timeout = kwargs.get("timeout")
         deadline = time.time() + (timeout or 0.0)
         while True:
