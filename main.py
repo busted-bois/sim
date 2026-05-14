@@ -17,6 +17,7 @@ from src.control.primitives import (
     wait_until_stationary,
 )
 from src.mavlink_endpoints import resolve_control_transport
+from src.simulator_specs import assert_specification_snapshot_if_required
 from src.vision import VisionFeed
 
 ROOT = Path(__file__).resolve().parent
@@ -77,6 +78,7 @@ def _log_highres_imu_status(client, label: str) -> None:
 def main() -> None:
     config = load_config()
     apply_low_end_overrides(config)
+    assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
     transport = resolve_control_transport(config)
     host, port = simulator_endpoint(config)

@@ -98,6 +98,8 @@ def _ensure_camera_settings(
     transport: str,
     use_vjoy: bool = False,
 ) -> None:
+    from src.vision.intrinsics import horizontal_fov_degrees
+
     settings_path = _airsim_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -142,7 +144,7 @@ def _ensure_camera_settings(
     vision_cfg = config.get("vision", {})
     camera_cfg = config.get("camera", {})
     pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
-    camera_pitch = float(camera_cfg.get("pitch_up_degrees", 20.0))
+    camera_pitch = -float(camera_cfg.get("pitch_up_degrees", 20.0))
     camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
     camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
     camera_name = str(vision_cfg.get("camera_name", "0"))
@@ -165,7 +167,7 @@ def _ensure_camera_settings(
                 "ImageType": 0,
                 "Width": capture_width,
                 "Height": capture_height,
-                "FOV_Degrees": float(vision_cfg.get("fov_degrees", 100.0)),
+                "FOV_Degrees": float(vision_cfg.get("fov_degrees", horizontal_fov_degrees())),
             }
         ],
     }

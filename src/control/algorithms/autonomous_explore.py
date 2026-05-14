@@ -37,6 +37,7 @@ from src.control.flight_client import FlightClient
 from src.control.highres_imu import format_highres_imu_health
 from src.control.primitives import rotate_yaw, takeoff_with_settle
 from src.control.utils import _clamp, _yaw_from_orientation, make_vz_trim
+from src.vision.intrinsics import yaw_mapping_half_fov_degrees
 from src.vision.processing import (
     blue_ring_info_normalized,
     get_depth_info,
@@ -224,9 +225,7 @@ class AutonomousExplore(Algorithm):
 
         # Half of the configured camera FOV in degrees, used to map yaw delta
         # back into image-normalized horizontal offset (nx).
-        cam_half_fov_deg = max(
-            10.0, float(self._config.get("vision", {}).get("fov_degrees", 100.0)) / 2.0
-        )
+        cam_half_fov_deg = yaw_mapping_half_fov_degrees(self._config.get("vision", {}))
 
         while time.monotonic() - t0 < duration_s:
             tick_start = time.monotonic()
