@@ -39,6 +39,15 @@ class SimulatorConformityTests(unittest.TestCase):
         self.assertEqual(official_conformant_vision_errors(sim, [640, 360], fov), [])
         self.assertGreater(len(official_conformant_vision_errors(sim, [640, 360], 60.0)), 0)
 
+    def test_official_conformant_vision_errors_skip_other_profiles(self) -> None:
+        sim = {"specification_profile": "low_end_nonconformant"}
+        self.assertEqual(official_conformant_vision_errors(sim, [1280, 720], 100.0), [])
+
+    def test_official_conformant_vision_errors_require_resolution(self) -> None:
+        sim = {"specification_profile": "official_conformant"}
+        fov = horizontal_fov_degrees()
+        self.assertGreater(len(official_conformant_vision_errors(sim, [1280, 720], fov)), 0)
+
     def test_normalize_command_rate_clamps_under_100_hz(self) -> None:
         self.assertEqual(normalize_command_rate_hz(120.0), 99.0)
         self.assertEqual(normalize_command_rate_hz(50.0), 50.0)
