@@ -22,6 +22,10 @@ from src.control.highres_imu import (
 )
 from src.control.mavlink_timesync import TimesyncOutboundRequest, TimesyncSnapshot, TimesyncStore
 
+_THROTTLE_BODY_Z_FORCE_MASK: Final[int] = int(
+    getattr(mavutil.mavlink, "ATTITUDE_TARGET_TYPEMASK_THROTTLE_BODY_SET", 32)
+)
+
 
 def _parse_udp_endpoint(endpoint: str) -> tuple[str, int]:
     text = endpoint.strip()
@@ -120,6 +124,7 @@ class PymavlinkFlightClient:
         timesync_min_stable_samples: int = 3,
         timesync_max_stable_rtt_ns: int = 250_000_000,
         timesync_max_offset_jitter_ns: int = 50_000_000,
+        attitude_target_throttle_body_z: bool = False,
         connection_factory: Callable[..., Any] | None = None,
     ) -> None:
         self._endpoint = endpoint.strip() if endpoint else self._DEFAULT_ENDPOINT
@@ -156,6 +161,7 @@ class PymavlinkFlightClient:
         self._highres_imu_log_messages = bool(highres_imu_log_messages)
         self._highres_imu_max_staleness_ms = max(1.0, float(highres_imu_max_staleness_ms))
         self._connection_factory = connection_factory or mavutil.mavlink_connection
+        self._attitude_target_throttle_body_z = bool(attitude_target_throttle_body_z)
 
         self._mav: Any | None = None
         self._target_system: int | None = None
@@ -248,8 +254,8 @@ class PymavlinkFlightClient:
             0,
             0,
         )
-        deadline = time.time() + 8.0
-        while time.time() < deadline:
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
             telemetry = self._get_latest_telemetry()
             if telemetry is not None and telemetry.armed == arm:
                 return
@@ -798,6 +804,8 @@ class PymavlinkFlightClient:
             | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
             | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
         )
+        if self._attitude_target_throttle_body_z:
+            type_mask |= _THROTTLE_BODY_Z_FORCE_MASK
         thrust_clamped = float(max(0.0, min(1.0, thrust)))
         ts = self._target_system
         tc = self._target_component or 1
@@ -828,6 +836,8 @@ class PymavlinkFlightClient:
         assert self._mav is not None and self._target_system is not None
         self._set_guided_mode()
         type_mask = int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE)
+        if self._attitude_target_throttle_body_z:
+            type_mask |= _THROTTLE_BODY_Z_FORCE_MASK
         thrust_clamped = float(max(0.0, min(1.0, thrust)))
         rr, pr, yr = float(roll_rate), float(pitch_rate), float(yaw_rate)
         ts = self._target_system

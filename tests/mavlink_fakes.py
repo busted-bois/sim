@@ -64,8 +64,10 @@ class FakeMavConnection:
         _ = timeout
         return self._heartbeat
 
-    def recv_match(self, type: Any = None, blocking: bool = True, timeout: Any = None) -> Any:
-        _ = blocking
+    def recv_match(self, *args: Any, **kwargs: Any) -> FakeMessage | None:
+        want = kwargs.get("type", args[0] if args else None)
+        _ = kwargs.get("blocking", True)
+        timeout = kwargs.get("timeout")
         deadline = time.time() + (timeout or 0.0)
         while True:
             remaining = max(0.0, deadline - time.time()) if timeout is not None else None
@@ -73,7 +75,7 @@ class FakeMavConnection:
                 message = self._queue.get(timeout=remaining)
             except queue.Empty:
                 return None
-            if type is None or message.get_type() in type:
+            if want is None or message.get_type() in want:
                 return message
 
     def close(self) -> None:

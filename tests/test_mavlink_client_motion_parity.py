@@ -6,23 +6,19 @@ from src.control.mavlink_client import PymavlinkFlightClient
 from tests.mavlink_fakes import FakeMavConnection, FakeMessage, fake_mavlink_monotonic_sleep
 
 
-def _client(connection: FakeMavConnection) -> PymavlinkFlightClient:
-    return PymavlinkFlightClient(
-        endpoint="udpin:0.0.0.0:14550",
-        send_timesync_requests=False,
-        prepare_for_flight_on_connect=False,
-        request_state_messages_on_connect=False,
-        highres_imu_enabled=False,
-        command_rate_hz=50.0,
-        connection_factory=lambda *a, **k: connection,
-    )
-
-
 class PymavlinkFlightClientMotionParityTests(unittest.TestCase):
     def test_velocity_stream_sends_ned_velocity_components(self) -> None:
         heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=3, source_component=1)
         connection = FakeMavConnection(heartbeat, [])
-        client = _client(connection)
+        client = PymavlinkFlightClient(
+            endpoint="udpin:0.0.0.0:14550",
+            send_timesync_requests=False,
+            prepare_for_flight_on_connect=False,
+            request_state_messages_on_connect=False,
+            highres_imu_enabled=False,
+            command_rate_hz=50.0,
+            connection_factory=lambda *a, **k: connection,
+        )
         try:
             client.confirmConnection()
             with fake_mavlink_monotonic_sleep():
@@ -40,7 +36,15 @@ class PymavlinkFlightClientMotionParityTests(unittest.TestCase):
     def test_attitude_roll_matches_airsim_mapped_euler(self) -> None:
         heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=3, source_component=1)
         connection = FakeMavConnection(heartbeat, [])
-        client = _client(connection)
+        client = PymavlinkFlightClient(
+            endpoint="udpin:0.0.0.0:14550",
+            send_timesync_requests=False,
+            prepare_for_flight_on_connect=False,
+            request_state_messages_on_connect=False,
+            highres_imu_enabled=False,
+            command_rate_hz=50.0,
+            connection_factory=lambda *a, **k: connection,
+        )
         try:
             client.confirmConnection()
             with fake_mavlink_monotonic_sleep():
