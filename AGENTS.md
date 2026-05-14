@@ -29,7 +29,7 @@ uv run python scripts/smoke_attitude_integration.py  # Smoke (decode + UDP injec
 uv run --group dev pytest tests/ -q     # Unit tests (MAVLink ATTITUDE, etc.)
 uv run main.py                          # Run drone client (needs simulator running)
 uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream (MAVLink transport)
-uv run sim-attitude-smoke               # Same, launched via sim_launch (no UE unless you pass sim args)
+uv run sim-attitude-smoke               # Same script via sim_launch (AirSim settings + UE if configured and link not ready)
 ```
 
 **MAVLink commands are probe-only.** `sim-mavlink`, `sim-mavlink probe`, and `mavlink-all` switch AirSim to PX4Multirotor mode and verify the MAVLink bridge works — they do **not** run `main.py`, so the drone will not fly autonomously. To fly with PX4 in the loop, send commands from a separate MAVLink client (e.g. QGroundControl, MAVSDK, pymavlink) or arm via PX4's offboard mode. Bare `uv run sim` (SimpleFlight + RPC) remains the path for autonomous flight via this codebase's algorithms.
@@ -62,7 +62,8 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `sim.config.json` — Runtime config (algorithm name, sim ports, waypoints, control limits, vision, landing profiles).
 - `.env.local` — `PROJECT_PATH` to UE5 project. Loaded by `uv run sim` / `launch.sh` / `launch.ps1`. Not committed.
 - `src/config.py` — Reads `sim.config.json` from project root.
-- `src/sim_launch.py` — Launcher script. Entry point for `uv run sim`, `uv run sim-very-soft`, `uv run sim-low-end`, `uv run calibrate`.
+- `src/sim_launch.py` — Launcher script. Entry point for `uv run sim`, `uv run sim-very-soft`, `uv run sim-low-end`, `uv run calibrate`, `uv run sim-attitude-smoke`.
+- `src/attitude_smoke.py` — Short MAVLink SET_ATTITUDE_TARGET smoke (`uv run attitude-smoke`).
 - `src/preflight.py` — Preflight safety check. Entry point for `uv run preflight`.
 - `src/landing_telemetry.py` — Optional CSV samples during landing.
 - `src/control/algorithms/` — Pluggable flight algorithms via `@register("name")` decorator.
