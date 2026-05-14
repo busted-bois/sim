@@ -6,7 +6,12 @@
 - **Linter:** Ruff (`uvx ruff check --fix`). Runs via lefthook pre-commit on staged `*.{py,toml}`.
 - **Ruff config:** line-length=100, rules `E F W I UP RUF`, `known-first-party = ["src"]`. See `pyproject.toml [tool.ruff]`.
 - **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
-- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` via `uv run python -m unittest discover -s tests -v`.
+- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` and `uv run verify-sim-physics-metadata` (checks `docs/simulator_specs.json` physics block). Optional: `.github/workflows/extract-simulator-specs.yml` (`workflow_dispatch`) runs `extract-simulator-specs` when repository secret `UE_PROJECT_PATH` is set on a Windows runner with Unreal + Colosseum.
+
+## Simulator physics (120 Hz)
+
+- **Unreal:** fixed async physics step and substepping are set in Colosseum (`PROJECT_PATH`). Optional merge: `scripts/unreal_default_engine_physics_120hz_fragment.ini` → `Config/DefaultEngine.ini`.
+- **Snapshot:** `docs/simulator_specs.json` from `uv run extract-simulator-specs`. With `simulator.specification_required: true`, `uv run preflight` and `uv run sim` check it against config. AirSim RPC does not read live `PhysicsSettings` from Python.
 
 ## Running 
 =======
