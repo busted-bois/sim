@@ -20,7 +20,7 @@ uv run preflight                        # Safety check before launch
 uv run calibrate                        # Depth calibration with manual GUI
 uv run main.py                          # Run drone client (needs simulator running)
 uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream (MAVLink transport)
-uv run sim-attitude-smoke               # Same, launched via sim_launch (no UE unless you pass sim args)
+uv run sim-attitude-smoke               # Same script via sim_launch (AirSim settings + UE if configured and link not ready)
 ```
 
 After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once AirSim RPC accepts connections on the configured host/port, up to `simulator.rpc_ready_timeout_seconds`.
@@ -49,7 +49,8 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `sim.config.json` — Runtime config (algorithm name, sim ports, waypoints, control limits, vision, landing profiles).
 - `.env.local` — `PROJECT_PATH` to UE5 project. Loaded by `uv run sim` / `launch.sh` / `launch.ps1`. Not committed.
 - `src/config.py` — Reads `sim.config.json` from project root.
-- `src/sim_launch.py` — Launcher script. Entry point for `uv run sim`, `uv run sim-very-soft`, `uv run sim-low-end`, `uv run calibrate`.
+- `src/sim_launch.py` — Launcher script. Entry point for `uv run sim`, `uv run sim-very-soft`, `uv run sim-low-end`, `uv run calibrate`, `uv run sim-attitude-smoke`.
+- `src/attitude_smoke.py` — Short MAVLink SET_ATTITUDE_TARGET smoke (`uv run attitude-smoke`).
 - `src/preflight.py` — Preflight safety check. Entry point for `uv run preflight`.
 - `src/landing_telemetry.py` — Optional CSV samples during landing.
 - `src/control/algorithms/` — Pluggable flight algorithms via `@register("name")` decorator.
