@@ -6,12 +6,7 @@
 - **Linter:** Ruff (`uvx ruff check --fix`). Runs via lefthook pre-commit on staged `*.{py,toml}`.
 - **Ruff config:** line-length=100, rules `E F W I UP RUF`, `known-first-party = ["src"]`. See `pyproject.toml [tool.ruff]`.
 - **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
-- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` and `uv run verify-sim-physics-metadata` (checks `docs/simulator_specs.json` physics block). Optional: `.github/workflows/extract-simulator-specs.yml` (`workflow_dispatch`) runs `extract-simulator-specs` when repository secret `UE_PROJECT_PATH` is set on a Windows runner with Unreal + Colosseum.
-
-## Simulator physics (120 Hz)
-
-- **Unreal:** fixed async physics step and substepping are set in Colosseum (`PROJECT_PATH`). Optional merge: `scripts/unreal_default_engine_physics_120hz_fragment.ini` → `Config/DefaultEngine.ini`.
-- **Snapshot:** `docs/simulator_specs.json` from `uv run extract-simulator-specs`. With `simulator.specification_required: true`, `uv run preflight` and `uv run sim` check it against config. AirSim RPC does not read live `PhysicsSettings` from Python.
+- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `uv run python -m unittest discover -s tests -v`.
 
 ## Running 
 =======
@@ -38,8 +33,10 @@ uv run attitude-listen                  # ATTITUDE-only UDP listener (Layer 1, n
 uv run python scripts/smoke_attitude_integration.py  # Smoke (decode + UDP inject)
 uv run --group dev pytest tests/ -q     # Unit tests (MAVLink ATTITUDE, etc.)
 uv run main.py                          # Run drone client (needs simulator running)
-uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream (MAVLink transport)
-uv run sim-attitude-smoke               # Same script via sim_launch (AirSim settings + UE if configured and link not ready)
+uv run attitude-smoke                   # MAVLink SET_ATTITUDE_TARGET smoke (needs control.transport=mavlink + link)
+uv run sim-attitude-smoke               # Same, launched via sim_launch (UE env if configured)
+uv run highres-imu-smoke                # MAVLink HIGHRES_IMU probe
+uv run timesync-smoke                   # MAVLink TIMESYNC probe
 ```
 
 **MAVLink commands are probe-only.** `sim-mavlink`, `sim-mavlink probe`, and `mavlink-all` switch AirSim to PX4Multirotor mode and verify the MAVLink bridge works — they do **not** run `main.py`, so the drone will not fly autonomously. To fly with PX4 in the loop, send commands from a separate MAVLink client (e.g. QGroundControl, MAVSDK, pymavlink) or arm via PX4's offboard mode. Bare `uv run sim` (SimpleFlight + RPC) remains the path for autonomous flight via this codebase's algorithms.
@@ -129,7 +126,7 @@ Helpers live on `PymavlinkFlightClient` and on the `FlightClient` protocol (`sub
 Each algorithm has its own top-level config key matching its name (e.g. `"autonomous_explore"`, `"attitude_four_motion"`, `"vision_guided_control"`). These are read by the algorithm constructor via `self._config`.
 
 Key top-level config keys:
-- `"control"` — `command_rate_hz`, `latency_tuning`, `max_speed_ms`, `max_altitude_m`
+- `"control"` — `command_rate_hz`, `latency_tuning`, `max_speed_ms`, `max_altitude_m`; **`control.mavlink`**: `guided_custom_mode` (PX4 custom mode index, default `4` for offboard-style streams in this repo), `attitude_target.throttle_body_z` (optional `SET_ATTITUDE_TARGET` thrust-as-body-z bit for stacks that expect it; default `false`)
 - `"vision"` — FPV feed: `enabled`, `fps`, `fov_degrees`, `resolution`, `depth` (ONNX model)
 - `"landing"` — `profile`, `descent_speed_ms`, safety caps, telemetry toggle
 - `"safety"` — `algorithm_timeout_seconds`

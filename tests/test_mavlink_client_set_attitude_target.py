@@ -3,7 +3,10 @@ import unittest
 
 from pymavlink import mavutil
 
-from src.control.mavlink_client import PymavlinkFlightClient
+from src.control.mavlink_client import (
+    _THROTTLE_BODY_Z_FORCE_MASK,
+    PymavlinkFlightClient,
+)
 from tests.mavlink_fakes import FakeMavConnection, FakeMessage, fake_mavlink_monotonic_sleep
 
 
@@ -116,6 +119,47 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
     def test_normalize_quaternion_zero_is_identity(self) -> None:
         q = PymavlinkFlightClient._normalize_quaternion((0.0, 0.0, 0.0, 0.0))
         self.assertEqual(q, (1.0, 0.0, 0.0, 0.0))
+
+    def test_attitude_target_throttle_body_z_sets_mask_bit(self) -> None:
+        heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=7, source_component=3)
+        connection = FakeMavConnection(heartbeat, [])
+        client = self._client(
+            connection,
+            attitude_target_throttle_body_z=True,
+        )
+        try:
+            client.confirmConnection()
+            with fake_mavlink_monotonic_sleep():
+                client.moveByRollPitchYawThrottleAsync(0.01, 0.0, 0.0, 0.5, 0.06).join()
+        finally:
+            client.close()
+
+        base_mask = (
+            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE)
+            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
+            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
+        )
+        self.assertEqual(
+            connection.mav.attitude_target_calls[0][3],
+            base_mask | _THROTTLE_BODY_Z_FORCE_MASK,
+        )
+
+    def test_rate_target_throttle_body_z_sets_mask_bit(self) -> None:
+        heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=7, source_component=3)
+        connection = FakeMavConnection(heartbeat, [])
+        client = self._client(connection, attitude_target_throttle_body_z=True)
+        try:
+            client.confirmConnection()
+            with fake_mavlink_monotonic_sleep():
+                client.moveByAngleRateThrottleAsync(0.1, 0.0, 0.0, 0.5, 0.06).join()
+        finally:
+            client.close()
+
+        self.assertEqual(
+            connection.mav.attitude_target_calls[0][3],
+            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE)
+            | _THROTTLE_BODY_Z_FORCE_MASK,
+        )
 
     def test_guided_mode_throttled_between_streams(self) -> None:
         heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=7, source_component=3)
