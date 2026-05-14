@@ -94,7 +94,11 @@ class _Joinable:
 
 
 class PymavlinkFlightClient:
-    """AirSim-like MAVLink runtime client with TIMESYNC observability."""
+    """AirSim-like MAVLink runtime client with TIMESYNC observability.
+
+    Motion setpoints map AirSim Euler/sign conventions before SET_POSITION /
+    SET_ATTITUDE_TARGET sends.
+    """
 
     _DEFAULT_ENDPOINT: Final[str] = "udpin:0.0.0.0:14550"
     _GUIDED_MODE_MIN_RESEND_INTERVAL_S: Final[float] = 1.0
