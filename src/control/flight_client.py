@@ -1,4 +1,8 @@
-"""FlightClient protocol and AirSim adapter."""
+"""FlightClient protocol and AirSim adapter.
+
+Units match the AirSim Python client: NED m/s, rpy and angle rates in rad and
+rad/s, rotateByYawRateAsync in deg/s, throttle 0..1.
+"""
 
 from __future__ import annotations
 
