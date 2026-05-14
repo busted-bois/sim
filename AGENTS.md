@@ -6,7 +6,7 @@
 - **Linter:** Ruff (`uvx ruff check --fix`). Runs via lefthook pre-commit on staged `*.{py,toml}`.
 - **Ruff config:** line-length=100, rules `E F W I UP RUF`, `known-first-party = ["src"]`. See `pyproject.toml [tool.ruff]`.
 - **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
-- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main.
+- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` via `uv run python -m unittest discover -s tests -v`.
 
 ## Running
 
@@ -19,6 +19,8 @@ uv run sim vjoy                         # Manual vJoy control + GUI
 uv run preflight                        # Safety check before launch
 uv run calibrate                        # Depth calibration with manual GUI
 uv run main.py                          # Run drone client (needs simulator running)
+uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream (MAVLink transport)
+uv run sim-attitude-smoke               # Same, launched via sim_launch (no UE unless you pass sim args)
 ```
 
 After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once AirSim RPC accepts connections on the configured host/port, up to `simulator.rpc_ready_timeout_seconds`.
