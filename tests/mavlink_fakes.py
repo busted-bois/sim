@@ -1,5 +1,3 @@
-"""Shared MAVLink test doubles for unit tests (fake connection + mav sender)."""
-
 from __future__ import annotations
 
 import queue
@@ -66,29 +64,8 @@ class FakeMavConnection:
         _ = timeout
         return self._heartbeat
 
-    def recv_match(
-        self,
-        type: str | list[str] | None = None,
-        condition: str | None = None,
-        blocking: bool = True,
-        timeout: float | None = None,
-    ) -> FakeMessage | None:
-        _ = condition
-        if type is None:
-            types_filter: list[str] | None = None
-        elif isinstance(type, str):
-            types_filter = [type]
-        else:
-            types_filter = list(type)
-        if not blocking:
-            while True:
-                try:
-                    message = self._queue.get_nowait()
-                except queue.Empty:
-                    return None
-                if types_filter is None or message.get_type() in types_filter:
-                    return message
-
+    def recv_match(self, type: Any = None, blocking: bool = True, timeout: Any = None) -> Any:
+        _ = blocking
         deadline = time.time() + (timeout or 0.0)
         while True:
             remaining = max(0.0, deadline - time.time()) if timeout is not None else None
@@ -96,7 +73,7 @@ class FakeMavConnection:
                 message = self._queue.get(timeout=remaining)
             except queue.Empty:
                 return None
-            if types_filter is None or message.get_type() in types_filter:
+            if type is None or message.get_type() in type:
                 return message
 
     def close(self) -> None:

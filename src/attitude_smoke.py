@@ -1,9 +1,9 @@
+"""Connect over MAVLink, stream a short attitude command, print command-rate stats."""
+
 from __future__ import annotations
 
 import argparse
 import os
-from collections.abc import Mapping
-from typing import Any
 
 from src.config import apply_low_end_overrides, load_config
 from src.control.mavlink_client import PymavlinkFlightClient
@@ -12,7 +12,7 @@ from src.mavlink_endpoints import resolve_control_transport
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="MAVLink attitude smoke: short SET_ATTITUDE_TARGET stream.",
+        description="Connect over MAVLink, send a brief SET_ATTITUDE_TARGET stream, report stats.",
     )
     parser.add_argument(
         "--endpoint",
@@ -21,15 +21,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--duration-seconds",
         type=float,
-        default=None,
-        help="Default: control.mavlink.attitude_target.smoke_test.duration_seconds.",
+        default=0.35,
+        help="How long to stream the attitude command (default: 0.35).",
     )
     return parser
 
 
-def _client(
-    config: Mapping[str, Any], args: argparse.Namespace
-) -> tuple[PymavlinkFlightClient, str, dict[str, Any]]:
+def _client(config, args: argparse.Namespace) -> tuple[PymavlinkFlightClient, str]:
     transport = resolve_control_transport(config)
     if transport != "mavlink":
         raise SystemExit(
@@ -37,8 +35,6 @@ def _client(
         )
     control_cfg = config.get("control", {})
     mav_cfg = control_cfg.get("mavlink", {})
-    att_cfg = mav_cfg.get("attitude_target", {})
-    smoke_cfg = att_cfg.get("smoke_test", {})
     endpoint = (
         (args.endpoint or "").strip()
         or os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip()
@@ -59,22 +55,16 @@ def _client(
         prepare_for_flight_on_connect=False,
         request_state_messages_on_connect=True,
         highres_imu_enabled=False,
-        attitude_target_throttle_body_z=bool(att_cfg.get("throttle_body_z", False)),
     )
-    return client, endpoint, smoke_cfg
+    return client, endpoint
 
 
 def main() -> None:
     args = _build_parser().parse_args()
     config = load_config()
     apply_low_end_overrides(config)
-    client, endpoint, smoke_cfg = _client(config, args)
-    duration_s = max(
-        0.05,
-        float(args.duration_seconds)
-        if args.duration_seconds is not None
-        else float(smoke_cfg.get("duration_seconds", 0.35)),
-    )
+    client, endpoint = _client(config, args)
+    duration_s = max(0.05, float(args.duration_seconds))
     print(
         f"[attitude-smoke] endpoint={endpoint!r} duration_s={duration_s:.2f} "
         "(small roll setpoint, throttle ~0.55)"
