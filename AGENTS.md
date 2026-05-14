@@ -126,7 +126,8 @@ Helpers live on `PymavlinkFlightClient` and on the `FlightClient` protocol (`sub
 Each algorithm has its own top-level config key matching its name (e.g. `"autonomous_explore"`, `"attitude_four_motion"`, `"vision_guided_control"`). These are read by the algorithm constructor via `self._config`.
 
 Key top-level config keys:
-- `"control"` — `command_rate_hz`, `latency_tuning`, `max_speed_ms`, `max_altitude_m`; **`control.mavlink`**: `guided_custom_mode` (PX4 custom mode index, default `4` for offboard-style streams in this repo), `attitude_target.throttle_body_z` (optional `SET_ATTITUDE_TARGET` thrust-as-body-z bit for stacks that expect it; default `false`)
+- `"control"` — `command_rate_hz`, `latency_tuning`, `max_speed_ms`, `max_altitude_m`
+- **`control.mavlink`** — `guided_custom_mode` (default `4`), `attitude_target.throttle_body_z` (optional; default `false`)
 - `"vision"` — FPV feed: `enabled`, `fps`, `fov_degrees`, `resolution`, `depth` (ONNX model)
 - `"landing"` — `profile`, `descent_speed_ms`, safety caps, telemetry toggle
 - `"safety"` — `algorithm_timeout_seconds`
