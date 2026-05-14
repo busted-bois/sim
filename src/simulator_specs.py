@@ -371,9 +371,8 @@ def main_verify_physics_metadata() -> None:
             f"(expected async/substep ~{PHYSICS_120_HZ_STEP_S:.9f}s)."
         )
     print(
-        f"OK: {path} documents 120 Hz physics. "
-        "AirSim RPC does not expose the live UE physics timestep; "
-        "run extract-simulator-specs after Unreal physics edits."
+        f"OK: {path} documents 120 Hz physics (UE step not exposed on RPC). "
+        "Run: uv run extract-simulator-specs after Unreal edits."
     )
 
 
