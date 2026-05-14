@@ -34,7 +34,7 @@ uv run python scripts/smoke_attitude_integration.py  # Smoke (decode + UDP injec
 uv run --group dev pytest tests/ -q     # Unit tests (MAVLink ATTITUDE, etc.)
 uv run main.py                          # Run drone client (needs simulator running)
 uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream (MAVLink transport)
-uv run sim-attitude-smoke               # Same, launched via sim_launch (no UE unless you pass sim args)
+uv run sim-attitude-smoke               # Same script via sim_launch (AirSim settings + UE if configured and link not ready)
 ```
 
 **MAVLink commands are probe-only.** `sim-mavlink`, `sim-mavlink probe`, and `mavlink-all` switch AirSim to PX4Multirotor mode and verify the MAVLink bridge works — they do **not** run `main.py`, so the drone will not fly autonomously. To fly with PX4 in the loop, send commands from a separate MAVLink client (e.g. QGroundControl, MAVSDK, pymavlink) or arm via PX4's offboard mode. Bare `uv run sim` (SimpleFlight + RPC) remains the path for autonomous flight via this codebase's algorithms.
