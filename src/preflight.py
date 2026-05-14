@@ -13,7 +13,7 @@ from typing import Any
 from src.config import load_config, resolve_config_path, simulator_endpoint
 from src.control.algorithms import list_algorithms
 from src.mavlink_endpoints import candidate_mavlink_endpoints, resolve_control_transport
-from src.simulator_specs import conformity_fingerprint, resolve_specification_path
+from src.simulator_specs import resolve_specification_path, specification_snapshot_validation
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -258,89 +258,17 @@ def run_preflight() -> int:
         except json.JSONDecodeError as exc:
             errors.append(f"Simulator specification snapshot is invalid JSON: {spec_path} ({exc})")
         else:
-            metadata = spec_snapshot.get("metadata", {})
-            expected_fingerprint = conformity_fingerprint(config)
-            snapshot_fingerprint = str(metadata.get("config_sha256", "")).strip()
-            if snapshot_fingerprint:
-                if snapshot_fingerprint == expected_fingerprint:
-                    passes.append(
-                        "Simulator specification snapshot matches the active conformity config"
-                    )
-                else:
-                    errors.append(
-                        "Simulator specification snapshot is stale for the current conformity "
-                        "config. Run: uv run extract-simulator-specs"
-                    )
-            else:
-                warnings.append(
-                    "Simulator specification snapshot has no config fingerprint; "
-                    "re-run uv run extract-simulator-specs to record freshness metadata"
-                )
-            drone_dims = spec_snapshot.get("drone", {}).get("dimensions_m")
-            gate_dims = spec_snapshot.get("gate_reference", {}).get("dimensions_m")
-            if drone_dims and gate_dims:
-                passes.append(f"Simulator specification snapshot present: {spec_path}")
-            else:
-                errors.append(
-                    "Simulator specification snapshot is missing drone/gate dimensions: "
-                    f"{spec_path}"
-                )
-            physics_snapshot = spec_snapshot.get("physics", {})
-            async_fixed_timestep_s = float(physics_snapshot.get("async_fixed_timestep_s", 0.0))
-            max_substep_delta_s = float(physics_snapshot.get("max_substep_delta_time_s", 0.0))
-            target_step_s = 1.0 / 120.0
-            if min(
-                abs(async_fixed_timestep_s - target_step_s),
-                abs(max_substep_delta_s - target_step_s),
-            ) <= 1e-4:
-                passes.append("Simulator specification snapshot confirms 120 Hz physics timing")
-            else:
-                errors.append(
-                    "Simulator specification snapshot does not show 120 Hz physics timing. "
-                    "Run: uv run extract-simulator-specs after updating the Unreal physics settings"
-                )
-            runtime_camera_spec = metadata.get("runtime_camera_spec")
-            if isinstance(runtime_camera_spec, dict):
-                snapshot_resolution = list(runtime_camera_spec.get("resolution", []))
-                if snapshot_resolution != camera_resolution:
-                    errors.append(
-                        "Simulator specification snapshot camera resolution does not match the "
-                        "active config. Run: uv run extract-simulator-specs"
-                    )
-                else:
-                    passes.append(
-                        "Simulator specification snapshot camera resolution matches config"
-                    )
-
-                snapshot_fov = float(runtime_camera_spec.get("fov_degrees", 0.0))
-                if abs(snapshot_fov - camera_fov) > 1e-6:
-                    errors.append(
-                        "Simulator specification snapshot camera FOV does not match the active "
-                        "config. Run: uv run extract-simulator-specs"
-                    )
-                else:
-                    passes.append("Simulator specification snapshot camera FOV matches config")
-
-                snapshot_pose = list(runtime_camera_spec.get("pose_offset_m", []))
-                if normalized_pose_offset is None:
-                    errors.append(
-                        "camera.pose_offset is invalid, so simulator snapshot camera offset "
-                        "could not be validated"
-                    )
-                elif normalized_pose_offset != snapshot_pose:
-                    errors.append(
-                        "Simulator specification snapshot camera pose offset does not match the "
-                        "active config. Run: uv run extract-simulator-specs"
-                    )
-                else:
-                    passes.append(
-                        "Simulator specification snapshot camera pose offset matches config"
-                    )
-            else:
-                warnings.append(
-                    "Simulator specification snapshot has no runtime camera metadata; "
-                    "re-run uv run extract-simulator-specs to record it"
-                )
+            snap_errs, snap_passes, snap_warns = specification_snapshot_validation(
+                config,
+                spec_snapshot,
+                spec_path=spec_path,
+                camera_resolution=camera_resolution,
+                camera_fov=camera_fov,
+                normalized_pose_offset=normalized_pose_offset,
+            )
+            errors.extend(snap_errs)
+            passes.extend(snap_passes)
+            warnings.extend(snap_warns)
     elif spec_required:
         errors.append(
             "Simulator specification snapshot is required but missing. "
