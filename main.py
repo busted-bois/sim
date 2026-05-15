@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from src.control.primitives import (
     suppress_api_cleanup_warning,
     wait_until_stationary,
 )
+from src.internal_mapping import InternalMappingLogger
 from src.vision import VisionFeed
 
 ROOT = Path(__file__).resolve().parent
@@ -36,6 +38,7 @@ def main() -> None:
     airsim_client = airsim.MultirotorClient(ip=host, port=port)
     client = AirSimAdapter(airsim_client)
     vision_feed = VisionFeed(airsim_client, config.get("vision", {}))
+    internal_map_log = InternalMappingLogger(client, config.get("internal_mapping", {}))
 
     try:
         client.confirmConnection()
@@ -51,6 +54,7 @@ def main() -> None:
 
         try:
             vision_feed.start()
+            internal_map_log.start()
             algo_name = config.algorithm_name
             algo = get_algorithm(algo_name, config)
             algo.set_vision_feed(vision_feed if vision_feed.enabled else None)
@@ -70,6 +74,7 @@ def main() -> None:
             print("Attempting hover and landing for safe recovery...")
             land_with_telemetry(client, config, label="main")
     finally:
+        internal_map_log.stop()
         vision_feed.stop()
         try:
             client.armDisarm(False)
@@ -81,6 +86,17 @@ def main() -> None:
                     f"closed): {cleanup_exc}",
                     file=sys.stderr,
                 )
+
+    im_cfg = config.get("internal_mapping", {})
+    if im_cfg.get("enabled"):
+        csv_path = Path(str(im_cfg.get("path", "logs/internal_mapping.csv")).strip())
+        if csv_path.is_file():
+            if sys.platform == "win32":
+                os.startfile(csv_path)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(csv_path)], check=False)
+            else:
+                subprocess.run(["xdg-open", str(csv_path)], check=False)
 
     if os.environ.get("AIGP_PAUSE_BEFORE_EXIT", "").strip() == "1":
         input("AIGP_PAUSE_BEFORE_EXIT=1 — press Enter to exit the flight client...")

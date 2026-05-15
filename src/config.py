@@ -211,6 +211,8 @@ def apply_low_end_overrides(config: Config | dict[str, Any]) -> None:
     landing_cfg.setdefault("telemetry_log", {})["enabled"] = False
     landing_cfg["min_hover_seconds"] = min(0.6, float(landing_cfg.get("min_hover_seconds", 1.0)))
 
+    raw.setdefault("internal_mapping", {})["enabled"] = False
+
     log_cfg = raw.setdefault("logging", {})
     log_cfg["basic_flight_logs"] = True
     raw["algorithm"] = str(low_end_cfg.get("algorithm", "attitude_four_motion"))

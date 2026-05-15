@@ -169,6 +169,11 @@
     "level": "INFO",
     "telemetry_log_enabled": false
   },
+  "internal_mapping": {
+    "enabled": true,
+    "path": "logs/internal_mapping.csv",
+    "sample_hz": 20.0
+  },
   "startup_rotation": {
     "rate_dps": 60,
     "duration_s": 3.0
