@@ -405,10 +405,10 @@ def probe_airsim_rpc_heartbeat(
     label: str = "primitives",
     require_zero_tick_overruns: bool = True,
 ) -> bool:
-    """Send heartbeats at ~``min_rate_hz`` for ``duration_s``; each tick capped by ``tick_timeout_s``.
+    """Send heartbeats at ~``min_rate_hz`` for ``duration_s``.
 
-    When ``require_zero_tick_overruns`` is True, any tick whose wall time exceeds ``period_s``
-    fails the probe (strict scheduling vs slow RPC).
+    Each tick is capped by ``tick_timeout_s``. When ``require_zero_tick_overruns`` is True,
+    any tick whose wall time exceeds ``period_s`` fails the probe (strict vs slow RPC).
     """
     period_s = 1.0 / max(min_rate_hz, 0.1)
     min_duration = 2.0 * period_s
