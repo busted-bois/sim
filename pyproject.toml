@@ -31,6 +31,7 @@ calibrate = "src.sim_launch:main_calibrate"
 preflight = "src.preflight:main"
 check-mavlink = "src.check_mavlink:main"
 sim-mavlink = "src.sim_launch:main_mavlink"
+mavlink-all = "src.sim_launch:main_mavlink_all"
 
 [dependency-groups]
 dev = [

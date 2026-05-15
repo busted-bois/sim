@@ -420,6 +420,82 @@ def _print_px4_bringup_instructions(wsl_host_ip: str) -> None:
     )
 
 
+def _build_mavlink_launch_plan() -> dict:
+    """Resolve UE launch invocation for MAVLink mode without spawning anything.
+
+    Used by the PowerShell orchestrator (scripts/dev-mavlink.ps1) which owns
+    process lifecycle. Writes PX4Multirotor settings.json as a side effect.
+    """
+    _load_env_local()
+    from src.config import load_config
+
+    config = load_config()
+    sim_cfg = config["simulator"]
+    airsim_port = int(sim_cfg.get("airsim_port", 41451))
+    settings_path = _ensure_px4_mavlink_settings(airsim_port)
+
+    colosseum = sim_cfg.get("colosseum_path", "")
+    project = _resolve_project_path(sim_cfg)
+    if not colosseum or not Path(colosseum).exists():
+        return {"error": f"colosseum_path not found: {colosseum!r}"}
+    if not project:
+        return {"error": "PROJECT_PATH not set or .uproject missing"}
+
+    args = [project, "-game", f"-settings={settings_path}"]
+    windowed = sim_cfg.get("windowed", True)
+    res_x = sim_cfg.get("res_x", 1280)
+    res_y = sim_cfg.get("res_y", 720)
+    if windowed:
+        args.extend(["-windowed", f"-resx={res_x}", f"-resy={res_y}"])
+    extra = sim_cfg.get("extra_ue_args") or []
+    if isinstance(extra, list):
+        args.extend(str(a) for a in extra if str(a).strip())
+
+    return {
+        "colosseum": str(colosseum),
+        "args": args,
+        "settings_path": str(settings_path),
+        "airsim_port": airsim_port,
+        "hil_tcp_port": PX4_HIL_TCP_PORT,
+    }
+
+
+def print_mavlink_launch_plan() -> None:
+    """CLI: emit JSON launch plan for the orchestrator. Exit 1 on error."""
+    plan = _build_mavlink_launch_plan()
+    print(json.dumps(plan))
+    if "error" in plan:
+        raise SystemExit(1)
+
+
+def restore_simpleflight_settings() -> bool:
+    """Restore SimpleFlight settings.json from backup if present. Returns True if restored."""
+    settings_path = _airsim_settings_path()
+    backup_path = settings_path.with_name("settings.simpleflight.bak.json")
+    if backup_path.is_file():
+        settings_path.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
+        return True
+    return False
+
+
+def main_restore_simpleflight() -> None:
+    print("restored" if restore_simpleflight_settings() else "no-backup")
+
+
+def main_mavlink_all() -> None:
+    """CLI: invoke the PowerShell orchestrator (dev-mavlink.ps1)."""
+    if sys.platform != "win32":
+        raise SystemExit("mavlink-all is Windows-only (uses PowerShell + WSL).")
+    script = ROOT / "scripts" / "dev-mavlink.ps1"
+    if not script.is_file():
+        raise SystemExit(f"orchestrator script not found: {script}")
+    cmd = [
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", str(script), *sys.argv[1:],
+    ]
+    raise SystemExit(subprocess.call(cmd))
+
+
 def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> None:
     _register_signal_handlers_once()
     _handles.ue = None
