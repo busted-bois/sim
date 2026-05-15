@@ -8,7 +8,7 @@
 - **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
 - **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main.
 
-## Running
+## Running 
 
 ```bash
 uv run sim                              # One command: .env.local, UE5 (if configured), main.py
