@@ -174,7 +174,10 @@ function Invoke-Cleanup {
 
     foreach ($p in $Script:Procs) {
         if ($null -ne $p -and -not $p.HasExited) {
-            try { $p.Kill($true) } catch {}
+            # Kill($true) (kill-tree) needs .NET 5+; PS 5.1 silently ignores the
+            # bool. Use taskkill /T to walk the tree on legacy frameworks.
+            try { & taskkill /F /T /PID $p.Id 2>$null | Out-Null } catch {}
+            try { $p.Kill() } catch {}
         }
     }
 
