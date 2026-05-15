@@ -18,7 +18,8 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-    "fps": 18,
+    "pitch_up_degrees": -20,
+    "fps": 30,
     "min_fps": 5,
     "fov_degrees": 100,
     "compress": true,

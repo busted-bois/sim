@@ -167,7 +167,7 @@ class MyAlgo(Algorithm):
 | `algorithm` | Name of registered algorithm to run                                |
 | `simulator` | UE5/AirSim paths and ports                                         |
 | `control`   | `command_rate_hz`, optional `latency_tuning` (`commands_per_frame`, `max_command_rate_hz`), `max_speed_ms`, `max_altitude_m` |
-| `vision`    | FPV feed config (`enabled`, `camera_name`, `fps`, `min_fps`, `fov_degrees`, `compress`, optional `resolution` or `width/height`, startup auto-tune knobs, optional debug frame dumps) |
+| `vision`    | FPV feed config (`enabled`, `camera_name`, `pitch_up_degrees`, `fps`, `min_fps`, `fov_degrees`, `compress`, optional `resolution` or `width/height`, startup auto-tune knobs, optional debug frame dumps) |
 | `waypoints` | NED coordinate waypoints                                           |
 | `logging`   | Log level, telemetry logging toggle                                |
 | `landing`   | Landing profile, safety caps, optional CSV telemetry during landing |
