@@ -46,6 +46,7 @@ exclude = [
     "airsim/",
     "msgpackrpc/",
     "opensrc/",
+    "simple_airsim/",
     ".claude/",
     ".sisyphus/",
     ".ruff_cache/",

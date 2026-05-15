@@ -105,4 +105,4 @@ Key top-level config keys:
 
 ## Ruff Exclusions
 
-Ruff excludes: `.venv/`, `airsim/`, `msgpackrpc/`, `opensrc/`, `.claude/`, `.sisyphus/`, `.ruff_cache/`. Do not lint vendored code.
+Ruff excludes: `.venv/`, `airsim/`, `msgpackrpc/`, `opensrc/`, `simple_airsim/`, `.claude/`, `.sisyphus/`, `.ruff_cache/`. Do not lint vendored code.
