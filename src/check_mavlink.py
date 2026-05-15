@@ -130,13 +130,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--duration", type=float, default=DEFAULT_DURATION_S,
-        help=f"Listen seconds (default {DEFAULT_DURATION_S}).",
+        help=f"Listen seconds (default {DEFAULT_DURATION_S}). Pass 0 to run forever.",
     )
     p.add_argument("--quiet", action="store_true", help="Suppress per-packet log.")
     args = p.parse_args(argv)
 
+    forever = args.duration <= 0
     ports = list(dict.fromkeys([*DEFAULT_PORTS, *args.port]))
-    print(f"[check-mavlink] probing UDP ports {ports} for {args.duration:.1f}s")
+    if forever:
+        print(f"[check-mavlink] probing UDP ports {ports} forever (Ctrl+C to stop)")
+    else:
+        print(f"[check-mavlink] probing UDP ports {ports} for {args.duration:.1f}s")
     print("[check-mavlink] passive listener -- start the simulator first; sends nothing")
 
     stats: list[PortStats] = []
@@ -151,15 +155,15 @@ def main(argv: list[str] | None = None) -> int:
 
     socks = [st.sock for st in stats]
     by_fd = {st.sock.fileno(): st for st in stats}
-    deadline = time.monotonic() + args.duration
+    deadline = None if forever else time.monotonic() + args.duration
     last_tick = time.monotonic()
 
     interrupted = False
     while True:
         now = time.monotonic()
-        if now >= deadline:
+        if deadline is not None and now >= deadline:
             break
-        timeout = min(0.5, deadline - now)
+        timeout = 0.5 if deadline is None else min(0.5, deadline - now)
         try:
             ready, _, _ = select.select(socks, [], [], timeout)
         except KeyboardInterrupt:
@@ -205,8 +209,11 @@ def main(argv: list[str] | None = None) -> int:
             last_tick = now
             tot = sum(st.pkts_total for st in stats)
             mav = sum(st.pkts_v1 + st.pkts_v2 for st in stats)
-            remaining = max(0.0, deadline - now)
-            print(f"[check-mavlink] tick: {tot} pkts, {mav} mavlink, {remaining:.1f}s left")
+            if deadline is None:
+                print(f"[check-mavlink] tick: {tot} pkts, {mav} mavlink")
+            else:
+                remaining = max(0.0, deadline - now)
+                print(f"[check-mavlink] tick: {tot} pkts, {mav} mavlink, {remaining:.1f}s left")
 
     print("\n[check-mavlink] === summary ===")
     saw_mavlink = False
