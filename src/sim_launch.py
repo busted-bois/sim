@@ -393,26 +393,18 @@ def _print_px4_bringup_instructions(wsl_host_ip: str) -> None:
     make_cmd = (
         f"cd ~/PX4-Autopilot && PX4_SIM_HOST_ADDR={wsl_host_ip} make px4_sitl none_iris"
     )
-    raw_cmd = (
-        f"cd ~/PX4-Autopilot && PX4_SIM_MODEL=iris PX4_SIM_HOST_ADDR={wsl_host_ip} "
-        "./build/px4_sitl_default/bin/px4 -i 0 ROMFS/px4fmu_common "
-        "-s etc/init.d-posix/rcS -t test_data"
-    )
     print("\n[mavlink] === Start PX4-SITL in a SECOND terminal ===")
-    print("  RECOMMENDED (canonical AirSim+PX4 target):")
-    print("    From Windows PowerShell:")
-    print(f"      wsl -d Ubuntu -e bash -c '{make_cmd}'")
-    print("    From inside WSL Ubuntu:")
-    print(f"      {make_cmd}")
-    print("  Or run the prebuilt binary directly (must set PX4_SIM_MODEL=iris):")
-    print(f"      {raw_cmd}")
+    print("  From Windows PowerShell:")
+    print(f"    wsl -d Ubuntu -e bash -c '{make_cmd}'")
+    print("  From inside WSL Ubuntu:")
+    print(f"    {make_cmd}")
     print(
         "\nLook for 'INFO  [simulator_mavlink] Simulator connected on TCP port 4560.' "
         "in the PX4 log."
     )
     print(
-        "If you see 'INFO  [init] SIH simulator' instead, PX4_SIM_MODEL=iris was not set "
-        "and PX4 used its built-in simulator -- it will never connect to AirSim."
+        "If you see 'INFO  [init] SIH simulator' instead, PX4 is using its built-in "
+        "simulator and will never connect to AirSim -- rebuild with `make px4_sitl none_iris`."
     )
     print(
         "Once connected, AirSim will push PX4's MAVLink to 127.0.0.1:14550 (the probe). "
@@ -476,6 +468,34 @@ def restore_simpleflight_settings() -> bool:
         settings_path.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
         return True
     return False
+
+
+def _maybe_restore_simpleflight_from_backup() -> bool:
+    # Self-heal for users who ran sim-mavlink/mavlink-all and skipped Ctrl+C
+    # cleanup (Task Manager kill, BSOD). Only restores when the current file
+    # still looks like PX4Multirotor, so a freshly-edited SimpleFlight config
+    # is never clobbered.
+    settings_path = _airsim_settings_path()
+    backup_path = settings_path.with_name("settings.simpleflight.bak.json")
+    if not (settings_path.is_file() and backup_path.is_file()):
+        return False
+    try:
+        current = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    vehicles = current.get("Vehicles")
+    is_px4 = isinstance(vehicles, dict) and any(
+        isinstance(v, dict) and v.get("VehicleType") == "PX4Multirotor"
+        for v in vehicles.values()
+    )
+    if not is_px4:
+        return False
+    settings_path.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
+    print(
+        f"[launcher] Restored SimpleFlight from {backup_path.name} "
+        "(prior MAVLink session left PX4Multirotor settings)."
+    )
+    return True
 
 
 def main_restore_simpleflight() -> None:
@@ -640,6 +660,7 @@ def launch(
     airsim_port = int(sim_cfg.get("airsim_port", 41451))
     rpc_ready_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
     rpc_tout_label = f"{rpc_ready_timeout_s:.0f}"
+    _maybe_restore_simpleflight_from_backup()
     _ensure_camera_settings(
         airsim_port,
         view_mode,
