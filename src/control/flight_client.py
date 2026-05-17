@@ -254,5 +254,65 @@ class AirSimAdapter:
     def confirmConnection(self) -> None:
         return self._client.confirmConnection()
 
-    def ping(self) -> bool:
-        return bool(self._client.ping())
+    def getCommandRateStats(self) -> CommandRateGateStats | None:
+        if self._command_rate_gate is None:
+            return None
+        return self._command_rate_gate.stats()
+
+    def getHighresImu(self) -> HighresImuSample | None:
+        imu = self._client.getImuData()
+        mag = self._client.getMagnetometerData()
+        baro = self._client.getBarometerData()
+        received_ns = time.monotonic_ns()
+        return HighresImuSample(
+            time_usec=int(getattr(imu, "time_stamp", 0)),
+            xacc=float(imu.linear_acceleration.x_val),
+            yacc=float(imu.linear_acceleration.y_val),
+            zacc=float(imu.linear_acceleration.z_val),
+            xgyro=float(imu.angular_velocity.x_val),
+            ygyro=float(imu.angular_velocity.y_val),
+            zgyro=float(imu.angular_velocity.z_val),
+            xmag=float(mag.magnetic_field_body.x_val),
+            ymag=float(mag.magnetic_field_body.y_val),
+            zmag=float(mag.magnetic_field_body.z_val),
+            abs_pressure=float(getattr(baro, "pressure", 0.0)),
+            diff_pressure=None,
+            pressure_alt=float(getattr(baro, "altitude", 0.0)),
+            temperature=None,
+            fields_updated=0,
+            sensor_id=0,
+            source_system=None,
+            source_component=None,
+            local_received_monotonic_ns=received_ns,
+            transport="airsim",
+        )
+
+    def getHighresImuHealth(self) -> HighresImuHealth | None:
+        _airsim_defaults = dict(
+            enabled=True, stream_rate_hz=None, max_staleness_ms=1000.0
+        )
+        try:
+            sample = self.getHighresImu()
+        except Exception as exc:
+            return HighresImuHealth(
+                status="error",
+                reason=f"AirSim IMU fetch failed: {exc}",
+                sample_count=0,
+                update_age_ms=None,
+                **_airsim_defaults,
+            )
+        if sample is None:
+            return HighresImuHealth(
+                status="missing",
+                reason="AirSim IMU fetch returned no sample",
+                sample_count=0,
+                update_age_ms=None,
+                **_airsim_defaults,
+            )
+        return HighresImuHealth(
+            status="ok",
+            reason="AirSim IMU RPC fetch available",
+            sample_count=1,
+            update_age_ms=0.0,
+            **_airsim_defaults,
+        )
