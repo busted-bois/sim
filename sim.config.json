@@ -26,8 +26,8 @@
     "enabled": true,
     "camera_name": "0",
     "pitch_up_degrees": -20,
-    "fps": 18,
-    "min_fps": 5,
+    "fps": 30,
+    "min_fps": 30,
     "fov_degrees": 100,
     "compress": true,
     "resolution": [640, 360],
@@ -76,6 +76,7 @@
   "profiles": {
     "official_conformant": {
       "simulator": {
+        "physics_update_hz": 120,
         "specification_required": true
       },
       "vision": {
