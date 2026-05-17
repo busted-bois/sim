@@ -377,34 +377,31 @@ class AirSimAdapter:
         )
 
     def getHighresImuHealth(self) -> HighresImuHealth | None:
+        _airsim_defaults = dict(
+            enabled=True, stream_rate_hz=None, max_staleness_ms=1000.0
+        )
         try:
             sample = self.getHighresImu()
         except Exception as exc:
             return HighresImuHealth(
                 status="error",
                 reason=f"AirSim IMU fetch failed: {exc}",
-                enabled=True,
                 sample_count=0,
-                stream_rate_hz=None,
                 update_age_ms=None,
-                max_staleness_ms=1000.0,
+                **_airsim_defaults,
             )
         if sample is None:
             return HighresImuHealth(
                 status="missing",
                 reason="AirSim IMU fetch returned no sample",
-                enabled=True,
                 sample_count=0,
-                stream_rate_hz=None,
                 update_age_ms=None,
-                max_staleness_ms=1000.0,
+                **_airsim_defaults,
             )
         return HighresImuHealth(
             status="ok",
             reason="AirSim IMU RPC fetch available",
-            enabled=True,
             sample_count=1,
-            stream_rate_hz=None,
             update_age_ms=0.0,
-            max_staleness_ms=1000.0,
+            **_airsim_defaults,
         )

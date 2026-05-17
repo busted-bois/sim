@@ -149,31 +149,29 @@ class PymavlinkFlightClient:
             self._command_rate_hz,
             label="MAVLink outbound motion commands",
         )
-        self._state_request_hz = float(state_request_hz)
-        self._guided_custom_mode = int(guided_custom_mode)
-        self._takeoff_altitude_m = float(takeoff_altitude_m)
-        self._takeoff_climb_speed_ms = float(takeoff_climb_speed_ms)
-        self._land_descent_speed_ms = float(land_descent_speed_ms)
-        self._takeoff_timeout_s = float(takeoff_timeout_s)
-        self._land_timeout_s = float(land_timeout_s)
-        self._heartbeat_timeout_s = float(heartbeat_timeout_s)
-        self._source_system = int(source_system)
-        self._source_component = int(source_component)
-        self._respond_to_timesync_requests = bool(respond_to_timesync_requests)
-        self._timesync_log_messages = bool(timesync_log_messages)
-        self._send_timesync_requests = bool(send_timesync_requests)
-        self._timesync_request_interval_s = max(0.1, float(timesync_request_interval_s))
-        self._prepare_for_flight_on_connect = bool(prepare_for_flight_on_connect)
-        self._request_state_messages_on_connect = bool(request_state_messages_on_connect)
-        self._highres_imu_enabled = bool(highres_imu_enabled)
+        self._state_request_hz = state_request_hz
+        self._guided_custom_mode = guided_custom_mode
+        self._takeoff_altitude_m = takeoff_altitude_m
+        self._takeoff_climb_speed_ms = takeoff_climb_speed_ms
+        self._land_descent_speed_ms = land_descent_speed_ms
+        self._takeoff_timeout_s = takeoff_timeout_s
+        self._land_timeout_s = land_timeout_s
+        self._heartbeat_timeout_s = heartbeat_timeout_s
+        self._source_system = source_system
+        self._source_component = source_component
+        self._respond_to_timesync_requests = respond_to_timesync_requests
+        self._timesync_log_messages = timesync_log_messages
+        self._send_timesync_requests = send_timesync_requests
+        self._timesync_request_interval_s = max(0.1, timesync_request_interval_s)
+        self._prepare_for_flight_on_connect = prepare_for_flight_on_connect
+        self._request_state_messages_on_connect = request_state_messages_on_connect
+        self._highres_imu_enabled = highres_imu_enabled
         imu_request_hz = (
-            float(highres_imu_request_hz)
-            if highres_imu_request_hz is not None
-            else float(state_request_hz)
+            highres_imu_request_hz if highres_imu_request_hz is not None else state_request_hz
         )
         self._highres_imu_request_hz = max(1.0, imu_request_hz)
-        self._highres_imu_log_messages = bool(highres_imu_log_messages)
-        self._highres_imu_max_staleness_ms = max(1.0, float(highres_imu_max_staleness_ms))
+        self._highres_imu_log_messages = highres_imu_log_messages
+        self._highres_imu_max_staleness_ms = max(1.0, highres_imu_max_staleness_ms)
         self._connection_factory = connection_factory or mavutil.mavlink_connection
 
         self._mav: Any | None = None

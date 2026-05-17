@@ -44,16 +44,10 @@ class Algorithm:
         return self._vision_feed.get_stats()
 
     def latest_highres_imu(self, client: FlightClient) -> HighresImuSample | None:
-        getter = getattr(client, "getHighresImu", None)
-        if not callable(getter):
-            return None
-        return getter()
+        return client.getHighresImu()
 
     def highres_imu_health(self, client: FlightClient) -> HighresImuHealth | None:
-        getter = getattr(client, "getHighresImuHealth", None)
-        if not callable(getter):
-            return None
-        return getter()
+        return client.getHighresImuHealth()
 
 
 def register(name: str):
