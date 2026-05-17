@@ -1,5 +1,5 @@
 {
-  "algorithm": "autonomous_explore",
+  "algorithm": "mavlink_jitter",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -194,8 +194,17 @@
     "direction_labels": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"],
     "mavlink_setpoint_demo_enabled": false
   },
+  "mavlink_jitter": {
+    "duration_s": 60,
+    "move_duration_s": 2.0,
+    "yaw_rate_dps": 30.0,
+    "altitude_jitter_m": 0.5,
+    "hover_between_moves": true,
+    "hover_duration_s": 0.5,
+    "random_seed": 42
+  },
   "control": {
-    "transport": "auto",
+    "transport": "mavlink",
     "mavlink": {
       "endpoint": "udpin:0.0.0.0:14550",
       "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],
