@@ -44,6 +44,7 @@ def build_attitude_target_type_mask(
     ignore_pitch_rate: bool = True,
     ignore_yaw_rate: bool = True,
     ignore_thrust: bool = False,
+    throttle_body_z: bool = False,
 ) -> int:
     """Build a bitmask for SET_ATTITUDE_TARGET.
 
@@ -64,21 +65,24 @@ def build_attitude_target_type_mask(
         mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
     if ignore_thrust:
         mask |= int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_THROTTLE_IGNORE)
+    if throttle_body_z:
+        mask |= int(getattr(mavutil.mavlink, "ATTITUDE_TARGET_TYPEMASK_THROTTLE_BODY_SET", 32))
     return int(mask)
 
 
-def build_attitude_only_type_mask() -> int:
+def build_attitude_only_type_mask(*, throttle_body_z: bool = False) -> int:
     """Attitude + thrust; all body rates ignored."""
-    return build_attitude_target_type_mask()
+    return build_attitude_target_type_mask(throttle_body_z=throttle_body_z)
 
 
-def build_body_rate_type_mask() -> int:
+def build_body_rate_type_mask(*, throttle_body_z: bool = False) -> int:
     """Body rates + thrust; attitude ignored."""
     return build_attitude_target_type_mask(
         ignore_attitude=True,
         ignore_roll_rate=False,
         ignore_pitch_rate=False,
         ignore_yaw_rate=False,
+        throttle_body_z=throttle_body_z,
     )
 
 
