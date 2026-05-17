@@ -6,6 +6,7 @@ import airsim
 from src.config import apply_low_end_overrides, load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm, list_algorithms
 from src.control.flight_client import AirSimAdapter
+from src.control.highres_imu import format_highres_imu_health
 from src.control.mavlink_client import PymavlinkFlightClient
 from src.control.primitives import (
     apply_trace_style,
@@ -56,6 +57,23 @@ def _log_timesync_status(client, label: str) -> None:
     )
 
 
+def _log_highres_imu_status(client, label: str) -> None:
+    health_getter = getattr(client, "getHighresImuHealth", None)
+    sample_getter = getattr(client, "getHighresImu", None)
+    if not callable(health_getter) or not callable(sample_getter):
+        return
+    health = health_getter()
+    sample = sample_getter()
+    sample_log = "sample=none"
+    if sample is not None:
+        sample_log = (
+            f"sample(id={sample.sensor_id},time_usec={sample.time_usec},"
+            f"xacc={sample.xacc},yacc={sample.yacc},zacc={sample.zacc},"
+            f"xgyro={sample.xgyro},ygyro={sample.ygyro},zgyro={sample.zgyro})"
+        )
+    print(f"[{label}] HIGHRES_IMU {format_highres_imu_health(health)} {sample_log}")
+
+
 def main() -> None:
     config = load_config()
     apply_low_end_overrides(config)
@@ -79,6 +97,7 @@ def main() -> None:
     if transport == "mavlink":
         mav_cfg = config.get("control", {}).get("mavlink", {})
         timesync_cfg = mav_cfg.get("timesync", {})
+        highres_imu_cfg = mav_cfg.get("highres_imu", {})
         endpoint = os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip() or str(
             mav_cfg.get("endpoint", "udpin:0.0.0.0:14550")
         ).strip()
@@ -95,6 +114,14 @@ def main() -> None:
             timesync_log_messages=bool(timesync_cfg.get("log_messages", True)),
             send_timesync_requests=bool(timesync_cfg.get("send_requests", True)),
             timesync_request_interval_s=float(timesync_cfg.get("request_interval_seconds", 1.0)),
+            highres_imu_enabled=bool(highres_imu_cfg.get("enabled", True)),
+            highres_imu_request_hz=float(
+                highres_imu_cfg.get("request_hz", mav_cfg.get("state_request_hz", 20.0))
+            ),
+            highres_imu_log_messages=bool(highres_imu_cfg.get("log_messages", False)),
+            highres_imu_max_staleness_ms=float(
+                highres_imu_cfg.get("max_staleness_ms", 1000.0)
+            ),
             timesync_pending_request_limit=int(timesync_cfg.get("pending_request_limit", 64)),
             timesync_stable_window_size=int(timesync_cfg.get("stable_window_size", 9)),
             timesync_stable_best_subset_size=int(timesync_cfg.get("stable_best_subset_size", 5)),
@@ -117,7 +144,10 @@ def main() -> None:
             config.setdefault("vision", {})["enabled"] = False
     else:
         airsim_client = airsim.MultirotorClient(ip=host, port=port)
-        client = AirSimAdapter(airsim_client)
+        client = AirSimAdapter(
+            airsim_client,
+            command_rate_hz=float(config.get("control", {}).get("command_rate_hz", 50.0)),
+        )
         vision_feed = VisionFeed(airsim_client, config.get("vision", {}))
 
     try:
@@ -138,6 +168,7 @@ def main() -> None:
             set_front_camera_pose(airsim_client, config)
             apply_trace_style(airsim_client, config)
         _log_timesync_status(client, "startup")
+        _log_highres_imu_status(client, "startup")
 
         try:
             if vision_feed is not None:
@@ -166,6 +197,7 @@ def main() -> None:
         if vision_feed is not None:
             vision_feed.stop()
         _log_timesync_status(client, "shutdown")
+        _log_highres_imu_status(client, "shutdown")
         try:
             client.armDisarm(False)
             client.enableApiControl(False)

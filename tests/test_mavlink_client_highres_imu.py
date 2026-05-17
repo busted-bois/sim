@@ -1,3 +1,4 @@
+import queue
 import time
 import unittest
 from types import SimpleNamespace
@@ -10,13 +11,88 @@ from src.control.highres_imu import (
     HighresImuSample,
 )
 from src.control.mavlink_client import PymavlinkFlightClient
-from tests.mavlink_fakes import FakeMavConnection, FakeMessage
+
+
+class _FakeMessage:
+    def __init__(self, message_type: str, **fields) -> None:
+        self._message_type = message_type
+        self._source_system = int(fields.pop("source_system", 1))
+        self._source_component = int(fields.pop("source_component", 1))
+        for key, value in fields.items():
+            setattr(self, key, value)
+
+    def get_type(self) -> str:
+        return self._message_type
+
+    def get_srcSystem(self) -> int:
+        return self._source_system
+
+    def get_srcComponent(self) -> int:
+        return self._source_component
+
+
+class _FakeMavSender:
+    def __init__(self) -> None:
+        self.command_long_calls: list[tuple] = []
+        self.message_interval_calls: list[tuple] = []
+        self.position_target_calls: list[tuple] = []
+        self.attitude_target_calls: list[tuple] = []
+        self.timesync_calls: list[tuple[int, int]] = []
+
+    def command_long_send(self, *args) -> None:
+        self.command_long_calls.append(args)
+
+    def message_interval_send(self, *args) -> None:
+        self.message_interval_calls.append(args)
+
+    def set_position_target_local_ned_send(self, *args) -> None:
+        self.position_target_calls.append(args)
+
+    def set_attitude_target_send(self, *args) -> None:
+        self.attitude_target_calls.append(args)
+
+    def timesync_send(self, tc1: int, ts1: int) -> None:
+        self.timesync_calls.append((tc1, ts1))
+
+
+class _FakeMavConnection:
+    def __init__(self, heartbeat: _FakeMessage, queued_messages: list[_FakeMessage]) -> None:
+        self._heartbeat = heartbeat
+        self._queue: queue.Queue[_FakeMessage] = queue.Queue()
+        for message in queued_messages:
+            self.push_message(message)
+        self.target_system = heartbeat.get_srcSystem()
+        self.target_component = heartbeat.get_srcComponent()
+        self.mav = _FakeMavSender()
+        self.closed = False
+
+    def wait_heartbeat(self, timeout: float | None = None):
+        _ = timeout
+        return self._heartbeat
+
+    def recv_match(self, type=None, blocking=True, timeout=None):
+        _ = blocking
+        deadline = time.time() + (timeout or 0.0)
+        while True:
+            remaining = max(0.0, deadline - time.time()) if timeout is not None else None
+            try:
+                message = self._queue.get(timeout=remaining)
+            except queue.Empty:
+                return None
+            if type is None or message.get_type() in type:
+                return message
+
+    def close(self) -> None:
+        self.closed = True
+
+    def push_message(self, message: _FakeMessage) -> None:
+        self._queue.put(message)
 
 
 class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
     def test_confirm_connection_requests_highres_imu_interval(self) -> None:
-        heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
-        connection = FakeMavConnection(heartbeat, [])
+        heartbeat = _FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
+        connection = _FakeMavConnection(heartbeat, [])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             send_timesync_requests=False,
@@ -43,8 +119,8 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
         self.assertEqual(int(highres_call[1]), 25_000)
 
     def test_highres_imu_message_is_stored_and_health_updated(self) -> None:
-        heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
-        highres = FakeMessage(
+        heartbeat = _FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
+        highres = _FakeMessage(
             "HIGHRES_IMU",
             time_usec=123456,
             xacc=1.1,
@@ -65,7 +141,7 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
             source_system=42,
             source_component=24,
         )
-        connection = FakeMavConnection(heartbeat, [highres])
+        connection = _FakeMavConnection(heartbeat, [highres])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             send_timesync_requests=False,
@@ -92,8 +168,8 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
         self.assertEqual(health.status, "ok")
 
     def test_partial_fields_updated_merge_preserves_prior_values(self) -> None:
-        heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
-        full = FakeMessage(
+        heartbeat = _FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
+        full = _FakeMessage(
             "HIGHRES_IMU",
             time_usec=100,
             xacc=1.0,
@@ -114,7 +190,7 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
             source_system=42,
             source_component=24,
         )
-        partial = FakeMessage(
+        partial = _FakeMessage(
             "HIGHRES_IMU",
             time_usec=101,
             xacc=99.0,
@@ -135,7 +211,7 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
             source_system=42,
             source_component=24,
         )
-        connection = FakeMavConnection(heartbeat, [full, partial])
+        connection = _FakeMavConnection(heartbeat, [full, partial])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             send_timesync_requests=False,
@@ -157,8 +233,8 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
         self.assertEqual(sample.temperature, 13.0)
 
     def test_highres_imu_health_turns_stale_when_updates_stop(self) -> None:
-        heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
-        highres = FakeMessage(
+        heartbeat = _FakeMessage("HEARTBEAT", base_mode=0, source_system=42, source_component=24)
+        highres = _FakeMessage(
             "HIGHRES_IMU",
             time_usec=123456,
             xacc=1.0,
@@ -179,7 +255,7 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
             source_system=42,
             source_component=24,
         )
-        connection = FakeMavConnection(heartbeat, [highres])
+        connection = _FakeMavConnection(heartbeat, [highres])
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             send_timesync_requests=False,
