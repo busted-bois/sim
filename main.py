@@ -1,18 +1,21 @@
+import logging
 import os
 import sys
 from pathlib import Path
 
-from src.config import apply_low_end_overrides, load_config, simulator_endpoint
-from src.control.algorithms import get_algorithm, list_algorithms
-from src.control.highres_imu import format_highres_imu_health
-from src.control.mavlink_client import PymavlinkFlightClient
-from src.control.primitives import (
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+from src.config import apply_low_end_overrides, load_config, simulator_endpoint  # noqa: E402
+from src.control.algorithms import get_algorithm, list_algorithms  # noqa: E402
+from src.control.highres_imu import format_highres_imu_health  # noqa: E402
+from src.control.mavlink_client import PymavlinkFlightClient  # noqa: E402
+from src.control.primitives import (  # noqa: E402
     apply_trace_style,
     land_with_telemetry,
     run_algorithm_with_timeout,
     suppress_api_cleanup_warning,
 )
-from src.simulator_specs import assert_specification_snapshot_if_required
+from src.simulator_specs import assert_specification_snapshot_if_required  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 
