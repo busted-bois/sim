@@ -775,6 +775,7 @@ def launch(
 
     from src.config import load_config
     from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint, resolve_control_transport
+    from src.simulator_specs import assert_specification_snapshot_if_required
 
     config = load_config()
     assert_specification_snapshot_if_required(config)
@@ -852,6 +853,11 @@ def launch(
         _handles.ue = subprocess.Popen(
             cmd,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+        )
+        physics_hz = float(sim_cfg.get("physics_update_hz", 0.0) or 0.0)
+        print(
+            f"[launcher] UE physics timestep is project-defined ({physics_hz:.0f} Hz in config); "
+            "not set via AirSim settings.json. Run: uv run preflight"
         )
         wait_label = "MAVLink/AirSim control link" if transport == "mavlink" else "AirSim RPC"
         print(f"Waiting for {wait_label} on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
