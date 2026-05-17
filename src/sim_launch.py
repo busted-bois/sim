@@ -1011,5 +1011,18 @@ def main_timesync_smoke() -> None:
     launch(script_path="src/timesync_smoke.py")
 
 
+def main_attitude_smoke() -> None:
+    launch(script_path="src/attitude_smoke.py")
+
+
+def main_highres_imu_smoke() -> None:
+    os.environ["AIGP_CONTROL_TRANSPORT"] = "mavlink"
+    os.environ.setdefault("AIGP_ALLOW_MAVLINK_SIMPLEFLIGHT", "1")
+    launch(
+        script_path="src/highres_imu_smoke.py",
+        require_requested_transport=True,
+    )
+
+
 if __name__ == "__main__":
     launch()
