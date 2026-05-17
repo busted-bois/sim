@@ -80,9 +80,14 @@ def _mavlink_heartbeat(config: dict) -> tuple[bool, str, list[str]]:
     return False, last_err, endpoints
 
 
-def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
+def _mavlink_highres_imu(
+    config: dict,
+    *,
+    connection_factory=None,
+) -> tuple[bool, str, list[str]]:
     from pymavlink import mavutil as _mavutil
 
+    factory = connection_factory or _mavutil.mavlink_connection
     endpoints = candidate_mavlink_endpoints(config)
     mav_cfg = config.get("control", {}).get("mavlink", {})
     imu_cfg = mav_cfg.get("highres_imu", {})
@@ -91,7 +96,7 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
     for endpoint in endpoints:
         connection = None
         try:
-            connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
+            connection = factory(endpoint, autoreconnect=False)
             heartbeat = connection.wait_heartbeat(timeout=2.0)
             if heartbeat is None:
                 continue
@@ -99,6 +104,7 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
             if message_id is not None:
                 connection.mav.message_interval_send(int(message_id), interval_us)
             deadline = time.monotonic() + 2.5
+            samples = 0
             while time.monotonic() < deadline:
                 message = connection.recv_match(
                     type=["HIGHRES_IMU"],
@@ -106,7 +112,9 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
                     timeout=0.5,
                 )
                 if message is not None:
-                    return True, endpoint, endpoints
+                    samples += 1
+                    sensor_id = int(getattr(message, "id", 0))
+                    return True, f"{endpoint} sensor_id={sensor_id} samples={samples}", endpoints
             last_err = "timed out waiting for HIGHRES_IMU after requesting stream"
         except Exception as exc:
             last_err = str(exc)
@@ -114,7 +122,7 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
             if connection is not None:
                 try:
                     connection.close()
-                except Exception:
+                except OSError:
                     pass
     return False, last_err, endpoints
 
