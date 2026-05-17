@@ -1,5 +1,14 @@
 # AGENTS.md
 
+This repo uses multiple AI coding tools (OpenCode, Claude, Cursor, Copilot). Instruction files are symlinked from this single source of truth:
+
+- `AGENTS.md` ← canonical
+- `CLAUDE.md` → symlink to `AGENTS.md`
+- `.claude/CLAUDE.md` → symlink to `AGENTS.md`
+- `.cursor/rules/AGENTS.md` → symlink to `AGENTS.md`
+
+**When updating instructions, edit `AGENTS.md` only. Never edit the symlinks directly.** If adding/removing tools, update the symlinks accordingly.
+
 ## Tooling
 
 - **Python:** `uv` for all operations (`uv run`, `uv sync`). No bare `python3`.
