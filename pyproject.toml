@@ -32,6 +32,7 @@ preflight = "src.preflight:main"
 check-mavlink = "src.check_mavlink:main"
 sim-mavlink = "src.sim_launch:main_mavlink"
 mavlink-all = "src.sim_launch:main_mavlink_all"
+sim-restore-simpleflight = "src.sim_launch:main_restore_simpleflight"
 
 [dependency-groups]
 dev = [
