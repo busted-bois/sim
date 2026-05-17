@@ -208,6 +208,7 @@ class FlightClient(Protocol):
     def getCommandRateStats(self) -> CommandRateGateStats | None: ...
     def getHighresImu(self) -> HighresImuSample | None: ...
     def getHighresImuHealth(self) -> HighresImuHealth | None: ...
+    def ping(self) -> bool: ...
 
 
 class AirSimAdapter:
@@ -408,3 +409,6 @@ class AirSimAdapter:
             update_age_ms=0.0,
             max_staleness_ms=1000.0,
         )
+
+    def ping(self) -> bool:
+        return bool(self._client.ping())
