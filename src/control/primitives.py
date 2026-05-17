@@ -2,61 +2,17 @@
 
 from __future__ import annotations
 
-import math
+import errno
 import os
 import sys
 import threading
 import time
 from typing import TYPE_CHECKING
 
-import airsim
-from msgpackrpc.error import RPCError
-
 if TYPE_CHECKING:
     from src.config import Config
     from src.control.flight_client import FlightClient
     from src.landing_telemetry import LandingTelemetrySampler
-
-
-def set_front_camera_pose(client: FlightClient, config: Config | dict) -> None:
-    vision_cfg = config.get("vision", {})
-    camera_name = str(vision_cfg.get("camera_name", "0"))
-    cam_cfg = config.get("camera", {})
-    pose_offset = tuple(cam_cfg.get("pose_offset", [0.35, 0.0, -0.05]))
-    pitch_up_degrees = float(cam_cfg.get("pitch_up_degrees", 20.0))
-    roll_degrees = float(cam_cfg.get("roll_degrees", 0.0))
-    yaw_degrees = float(cam_cfg.get("yaw_degrees", 0.0))
-    front_pose = airsim.Pose(
-        airsim.Vector3r(pose_offset[0], pose_offset[1], pose_offset[2]),
-        _airsim_quaternion_from_euler(
-            math.radians(roll_degrees),
-            math.radians(pitch_up_degrees),
-            math.radians(yaw_degrees),
-        ),
-    )
-    try:
-        client.simSetCameraPose(camera_name, front_pose)
-    except Exception as exc:
-        print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
-
-
-def _airsim_quaternion_from_euler(
-    roll_rad: float,
-    pitch_rad: float,
-    yaw_rad: float,
-) -> airsim.Quaternionr:
-    cr = math.cos(roll_rad / 2.0)
-    sr = math.sin(roll_rad / 2.0)
-    cp = math.cos(pitch_rad / 2.0)
-    sp = math.sin(pitch_rad / 2.0)
-    cy = math.cos(yaw_rad / 2.0)
-    sy = math.sin(yaw_rad / 2.0)
-    return airsim.Quaternionr(
-        cr * sp * cy + sr * cp * sy,
-        sr * cp * cy - cr * sp * sy,
-        cr * cp * sy - sr * sp * cy,
-        cr * cp * cy + sr * sp * sy,
-    )
 
 
 def apply_trace_style(client: FlightClient, config: Config | dict) -> None:
@@ -83,27 +39,9 @@ def apply_trace_style(client: FlightClient, config: Config | dict) -> None:
 
 
 def suppress_api_cleanup_warning(exc: BaseException) -> bool:
-    """True when disarm/API cleanup failed because the sim or socket is already gone."""
-    import errno
-
+    """True when disarm/API cleanup failed because the connection is already gone."""
     if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
         return True
-    from msgpackrpc.error import RPCError, TransportError
-
-    if isinstance(exc, (RPCError, TransportError)):
-        msg = str(exc).lower()
-        return any(
-            token in msg
-            for token in (
-                "connection reset",
-                "connection aborted",
-                "broken pipe",
-                "forcibly closed",
-                "transport endpoint is not connected",
-                "not connected",
-                "failed to send request",
-            )
-        )
     if isinstance(exc, OSError):
         if getattr(exc, "winerror", None) in (10053, 10054):
             return True
@@ -127,15 +65,12 @@ def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
     worker.start()
     started = time.perf_counter()
     deadline = started + timeout_seconds
-    # Join in short slices so the main thread can run an RPC heartbeat (>= 2 Hz).
     join_slice_s = 0.25
     while worker.is_alive():
         remaining = deadline - time.perf_counter()
         if remaining <= 0:
             break
         worker.join(timeout=min(join_slice_s, remaining))
-        if worker.is_alive():
-            airsim_rpc_heartbeat_tick(client, label="algorithm_runner")
     elapsed_s = time.perf_counter() - started
 
     if worker.is_alive():
@@ -155,9 +90,9 @@ def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
 
     if elapsed_s < 8.0:
         print(
-            f"Warning: algorithm reported completion in {elapsed_s:.1f}s — much shorter than "
-            "a full attitude routine. If the drone barely moved, check Unreal is unpaused, "
-            "simulation is real-time, and watch for errors above.",
+            f"Warning: algorithm reported completion in {elapsed_s:.1f}s -- much shorter than "
+            "a full attitude routine. If the drone barely moved, check that the simulation "
+            "is real-time, and watch for errors above.",
             file=sys.stderr,
         )
 
@@ -170,33 +105,6 @@ def takeoff_with_settle(
         try:
             client.takeoffAsync().join()
             return
-        except RPCError as exc:
-            msg = str(exc).lower()
-            if "already moving" in msg:
-                last_exc = exc
-                print(
-                    f"[{label}] Takeoff attempt {attempt}/{max_attempts} rejected: {exc}; "
-                    "re-settling...",
-                    file=sys.stderr,
-                )
-                try:
-                    client.cancelLastTask()
-                    client.armDisarm(False)
-                    time.sleep(0.3)
-                    client.armDisarm(True)
-                except Exception:
-                    pass
-                wait_until_stationary(client, timeout_s=6.0, velocity_eps_ms=0.03, label=label)
-                continue
-            last_exc = exc
-            if attempt == max_attempts:
-                raise
-            print(
-                f"[{label}] takeoff attempt {attempt}/{max_attempts} "
-                f"failed ({type(exc).__name__}: {exc}); retrying...",
-                file=sys.stderr,
-            )
-            time.sleep(1.5 * attempt)
         except Exception as exc:
             last_exc = exc
             if attempt == max_attempts:
@@ -251,14 +159,14 @@ def land_with_telemetry(
         _wait_for_imu_stability(client, landing_cfg, sampler=sampler, label=label)
 
         if profile == "very_soft":
-            print(f"[{label}] Hover settle complete — starting final land.")
+            print(f"[{label}] Hover settle complete -- starting final land.")
             if sampler:
                 sampler.set_command("land_async")
             client.landAsync().join()
             return
 
         print(
-            f"[{label}] Hover settle complete — next: controlled descent if above final altitude, "
+            f"[{label}] Hover settle complete -- next: controlled descent if above final altitude, "
             "then final land."
         )
         descent_speed_ms = max(0.5, float(landing_cfg.get("descent_speed_ms", 2.0)))
@@ -297,12 +205,7 @@ def wait_until_stationary(
     velocity_eps_ms: float = 0.05,
     label: str = "primitives",
 ) -> None:
-    """Block until drone velocity drops below velocity_eps_ms.
-
-    AirSim's takeoff RPC refuses if |velocity| is non-trivial — observed
-    rejection at 0.19 m/s. After client.reset() the drone usually settles
-    within ~0.5s, but residual motion from a prior run can take longer.
-    """
+    """Block until drone velocity drops below velocity_eps_ms."""
     deadline = time.monotonic() + timeout_s
     last_speed = float("inf")
     consecutive_quiet = 0
@@ -351,103 +254,3 @@ def _landing_telemetry_if_enabled(
     sampler.set_command("start")
     sampler.start()
     return sampler
-
-
-def airsim_rpc_heartbeat_tick(
-    client: FlightClient,
-    *,
-    label: str = "primitives",
-) -> bool:
-    """One lightweight AirSim RPC round-trip via ``ping()``."""
-    try:
-        if client.ping():
-            return True
-        print(f"[{label}] RPC heartbeat: ping returned falsy", file=sys.stderr)
-        return False
-    except Exception as exc:
-        print(f"[{label}] RPC heartbeat (ping) failed: {exc}", file=sys.stderr)
-        return False
-
-
-def airsim_rpc_heartbeat_tick_with_timeout(
-    client: FlightClient,
-    *,
-    label: str,
-    timeout_s: float,
-) -> bool:
-    """Run a single heartbeat tick with a hard wall-clock timeout (RPC runs in a daemon thread)."""
-    result: list[bool | None] = [None]
-
-    def _tick() -> None:
-        try:
-            result[0] = airsim_rpc_heartbeat_tick(client, label=label)
-        except BaseException:
-            result[0] = False
-
-    t = threading.Thread(target=_tick, name="airsim_heartbeat_tick", daemon=True)
-    t.start()
-    t.join(timeout=max(0.01, timeout_s))
-    if t.is_alive():
-        print(
-            f"[{label}] RPC heartbeat tick timed out after {timeout_s:.2f}s",
-            file=sys.stderr,
-        )
-        return False
-    return bool(result[0])
-
-
-def probe_airsim_rpc_heartbeat(
-    client: FlightClient,
-    *,
-    duration_s: float = 2.0,
-    min_rate_hz: float = 2.0,
-    tick_timeout_s: float = 0.3,
-    label: str = "primitives",
-    require_zero_tick_overruns: bool = True,
-) -> bool:
-    """Send heartbeats at ~``min_rate_hz`` for ``duration_s``.
-
-    Each tick is capped by ``tick_timeout_s``. When ``require_zero_tick_overruns`` is True,
-    any tick whose wall time exceeds ``period_s`` fails the probe (strict vs slow RPC).
-    """
-    period_s = 1.0 / max(min_rate_hz, 0.1)
-    min_duration = 2.0 * period_s
-    if duration_s < min_duration:
-        raise ValueError(
-            f"duration_s={duration_s} too short to verify {min_rate_hz}Hz "
-            f"(need >= {min_duration}s)"
-        )
-    if tick_timeout_s >= period_s:
-        raise ValueError(
-            f"tick_timeout_s={tick_timeout_s} must be < period_s={period_s:.4f} "
-            f"(from min_rate_hz={min_rate_hz})"
-        )
-
-    end = time.monotonic() + duration_s
-    next_t = time.monotonic()
-    ticks_late = 0
-
-    while time.monotonic() < end:
-        tick_start = time.monotonic()
-        if not airsim_rpc_heartbeat_tick_with_timeout(
-            client, label=label, timeout_s=tick_timeout_s
-        ):
-            return False
-
-        elapsed = time.monotonic() - tick_start
-        if elapsed > period_s:
-            ticks_late += 1
-
-        next_t += period_s
-        sleep_s = next_t - time.monotonic()
-        if sleep_s > 0:
-            time.sleep(sleep_s)
-
-    if require_zero_tick_overruns and ticks_late > 0:
-        print(
-            f"[{label}] probe_airsim_rpc_heartbeat: {ticks_late} tick(s) exceeded "
-            f"period_s={period_s:.4f}s",
-            file=sys.stderr,
-        )
-        return False
-    return True
