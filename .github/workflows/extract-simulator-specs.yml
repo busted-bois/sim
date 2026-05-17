@@ -1,0 +1,27 @@
+name: Extract simulator specs (UE required)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+
+      - name: Sync
+        run: uv sync --frozen
+
+      - name: Extract
+        shell: pwsh
+        env:
+          PROJECT_PATH: ${{ secrets.UE_PROJECT_PATH }}
+        run: |
+          if (-not $env:PROJECT_PATH) {
+            Write-Host "Skipping: set repository secret UE_PROJECT_PATH to BlocksV2.uproject on a Windows runner with Unreal + Colosseum."
+            exit 0
+          }
+          uv run extract-simulator-specs
