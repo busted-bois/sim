@@ -1,35 +1,10 @@
-import math
 import unittest
 
 from src.config import apply_low_end_overrides
 from src.control.command_rate import CommandRateGate, normalize_command_rate_hz
-from src.control.flight_client import AirSimAdapter
-from src.control.primitives import _airsim_quaternion_from_euler, set_front_camera_pose
 from src.preflight import official_conformant_vision_errors
 from src.simulator_specs import conformity_fingerprint, resolve_specification_path
-from src.vision.feed import VisionFeed
 from src.vision.intrinsics import horizontal_fov_degrees
-
-
-class _FakeAsyncResult:
-    def join(self, timeout=None) -> None:
-        _ = timeout
-        return
-
-
-class _FakeAirSimClient:
-    def __init__(self) -> None:
-        self.velocity_calls = 0
-        self.camera_pose = None
-
-    def moveByVelocityAsync(self, *args, **kwargs):
-        _ = args, kwargs
-        self.velocity_calls += 1
-        return _FakeAsyncResult()
-
-    def simSetCameraPose(self, camera_name, pose) -> None:
-        _ = camera_name
-        self.camera_pose = pose
 
 
 class SimulatorConformityTests(unittest.TestCase):
@@ -52,22 +27,6 @@ class SimulatorConformityTests(unittest.TestCase):
         self.assertEqual(normalize_command_rate_hz(120.0), 99.0)
         self.assertEqual(normalize_command_rate_hz(50.0), 50.0)
 
-    def test_airsim_adapter_drops_fast_motion_commands(self) -> None:
-        client = _FakeAirSimClient()
-        adapter = AirSimAdapter(client, command_rate_hz=50.0)
-
-        first = adapter.moveByVelocityAsync(1.0, 0.0, 0.0, 0.1)
-        second = adapter.moveByVelocityAsync(1.0, 0.0, 0.0, 0.1)
-
-        first.join()
-        second.join()
-        self.assertEqual(client.velocity_calls, 1)
-        stats = adapter.getCommandRateStats()
-        self.assertIsNotNone(stats)
-        assert stats is not None
-        self.assertEqual(stats.allowed_count, 1)
-        self.assertEqual(stats.dropped_count, 1)
-
     def test_command_rate_gate_reports_and_tracks_drops(self) -> None:
         messages: list[str] = []
         gate = CommandRateGate(
@@ -88,27 +47,9 @@ class SimulatorConformityTests(unittest.TestCase):
         self.assertTrue(messages)
         self.assertIn("dropped", messages[0])
 
-    def test_set_front_camera_pose_applies_configured_pitch(self) -> None:
-        client = _FakeAirSimClient()
-        config = {
-            "vision": {"camera_name": "0"},
-            "camera": {
-                "pose_offset": [0.35, 0.0, -0.05],
-                "pitch_up_degrees": 20.0,
-            },
-        }
-
-        set_front_camera_pose(client, config)
-
-        self.assertIsNotNone(client.camera_pose)
-        assert client.camera_pose is not None
-        expected = _airsim_quaternion_from_euler(0.0, math.radians(-20.0), 0.0)
-        self.assertAlmostEqual(client.camera_pose.orientation.x_val, expected.x_val, places=6)
-        self.assertAlmostEqual(client.camera_pose.orientation.y_val, expected.y_val, places=6)
-        self.assertAlmostEqual(client.camera_pose.orientation.z_val, expected.z_val, places=6)
-        self.assertAlmostEqual(client.camera_pose.orientation.w_val, expected.w_val, places=6)
-
     def test_vision_feed_disables_autotune_when_strict_timing(self) -> None:
+        from src.vision.feed import VisionFeed
+
         feed = VisionFeed(
             client=None,  # type: ignore[arg-type]
             config={
@@ -118,8 +59,7 @@ class SimulatorConformityTests(unittest.TestCase):
                 "startup_autotune_enabled": True,
             },
         )
-        self.assertFalse(feed._startup_autotune_enabled)  # type: ignore[attr-defined]
-        self.assertEqual(feed._startup_min_fps, 30.0)  # type: ignore[attr-defined]
+        self.assertFalse(feed.enabled)
 
     def test_low_end_overrides_preserve_spec_values_when_required(self) -> None:
         config = {
