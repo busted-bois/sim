@@ -14,9 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.config import load_config  # noqa: E402
 from src.mavlink.attitude import decode_attitude_payload, roll_pitch_yaw_deg  # noqa: E402
 from src.mavlink.attitude_bridge import AttitudeTelemetryBridge  # noqa: E402
 from src.mavlink.attitude_store import AttitudeStore  # noqa: E402
+from src.mavlink.config import load_attitude_mavlink_config  # noqa: E402
 from src.mavlink.frame import MAVLINK_V2_STX, frame_payload, parse_mavlink  # noqa: E402
 from src.mavlink.messages import MAVLINK_MSG_ID_ATTITUDE  # noqa: E402
 from tests.mavlink_fakes import FakeMav, FakeMessage  # noqa: E402
@@ -135,6 +137,8 @@ def main() -> int:
     probe = ROOT / "src" / "check_mavlink.py"
     if b"\x00" in probe.read_bytes():
         raise SystemExit(f"{probe} must be UTF-8 (found UTF-16 null bytes)")
+    att_cfg = load_attitude_mavlink_config(load_config())
+    print(f"[smoke-attitude] config control.mavlink.attitude: {att_cfg}")
     print("[smoke-attitude] Layer 1 + 2 (in-process)...")
     _layer1_smoke()
     _layer2_smoke()

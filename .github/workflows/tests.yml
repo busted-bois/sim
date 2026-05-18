@@ -15,4 +15,6 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --group dev --extra mavlink
+      - run: uv run check-mavlink --help
       - run: uv run pytest tests/ -q
+      - run: uv run python scripts/smoke_attitude_integration.py

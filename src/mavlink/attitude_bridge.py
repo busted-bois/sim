@@ -7,6 +7,7 @@ from typing import Any
 
 from src.mavlink.attitude import AttitudeSample
 from src.mavlink.attitude_store import AttitudeStore, message_source_id
+from src.mavlink.config import load_attitude_mavlink_config
 from src.mavlink.messages import MAVLINK_MSG_ID_ATTITUDE
 
 
@@ -27,6 +28,22 @@ class AttitudeTelemetryBridge:
         self.max_staleness_ms = max(1.0, float(max_staleness_ms))
         self.log_messages = bool(log_messages)
         self._transport = transport
+
+    @classmethod
+    def from_sim_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        store: AttitudeStore | None = None,
+    ) -> AttitudeTelemetryBridge:
+        cfg = load_attitude_mavlink_config(config)
+        return cls(
+            store or AttitudeStore(),
+            enabled=bool(cfg["enabled"]),
+            request_hz=float(cfg["request_hz"]),
+            max_staleness_ms=float(cfg["max_staleness_ms"]),
+            log_messages=bool(cfg["log_messages"]),
+        )
 
     def on_message(self, message: Any) -> None:
         if not self.enabled:
