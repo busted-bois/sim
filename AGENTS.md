@@ -25,6 +25,7 @@ uv run mavlink-all                      # All-in-one: UE + PX4-SITL (WSL) + prob
 uv run sim-restore-simpleflight         # Manually restore SimpleFlight settings.json from backup (uv run sim does this automatically)
 uv run check-mavlink --decode-attitude    # Also decode ATTITUDE roll/pitch/yaw
 uv run attitude-listen                  # ATTITUDE-only UDP listener (Layer 1, no pymavlink)
+uv run python scripts/smoke_attitude_integration.py  # Smoke (decode + UDP inject)
 uv run --group dev pytest tests/ -q     # Unit tests (MAVLink ATTITUDE, etc.)
 uv run main.py                          # Run drone client (needs simulator running)
 ```
