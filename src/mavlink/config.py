@@ -13,7 +13,6 @@ _DEFAULT_ATTITUDE: dict[str, Any] = {
 
 
 def load_attitude_mavlink_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Return ``control.mavlink.attitude`` merged with defaults."""
     control = config.get("control")
     if not isinstance(control, dict):
         return dict(_DEFAULT_ATTITUDE)

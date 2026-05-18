@@ -103,10 +103,7 @@ class AttitudeStore:
 
 def message_source_id(message: Any, method_name: str) -> int | None:
     getter = getattr(message, method_name, None)
-    if getter is None:
+    if not callable(getter):
         return None
-    try:
-        value = getter()
-    except Exception:
-        return None
+    value = getter()
     return int(value) if value is not None else None

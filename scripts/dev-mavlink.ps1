@@ -413,13 +413,6 @@ try {
                 $att = [int]$Matches[1]
                 if ($att -gt $maxAttitudeDecoded) { $maxAttitudeDecoded = $att }
             }
-            elseif ($line -match "^\[check-mavlink\] tick:") {
-                $now = [DateTime]::Now
-                if (($now - $lastProbeMirror).TotalSeconds -ge 5) {
-                    $lastProbeMirror = $now
-                    Write-Host "[PROBE] $line"
-                }
-            }
             elseif ($line -match "^\[check-mavlink\] (PASS|FAIL|=== summary|interrupted|WARN|probing|passive)") {
                 Write-Host "[PROBE] $line"
             }

@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from src.mavlink.attitude import AttitudeSample
+from src.mavlink.attitude import AttitudeHealth, AttitudeSample
 from src.mavlink.attitude_store import AttitudeStore, message_source_id
 from src.mavlink.config import load_attitude_mavlink_config
 from src.mavlink.messages import MAVLINK_MSG_ID_ATTITUDE
@@ -79,7 +79,7 @@ class AttitudeTelemetryBridge:
         interval_us = int(1e6 / self.request_hz)
         message_interval_send(int(MAVLINK_MSG_ID_ATTITUDE), interval_us)
 
-    def get_health(self):
+    def get_health(self) -> AttitudeHealth:
         return self._store.get_health(
             enabled=self.enabled,
             max_staleness_ms=self.max_staleness_ms,
