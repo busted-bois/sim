@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mavlink = ["pymavlink>=2.4.49"]
 manual = [
     "pyvjoy",
     "pynput",
@@ -30,6 +31,7 @@ sim-low-end = "src.sim_launch:main_low_end"
 calibrate = "src.sim_launch:main_calibrate"
 preflight = "src.preflight:main"
 check-mavlink = "src.check_mavlink:main"
+attitude-listen = "src.mavlink.attitude_listen:main"
 sim-mavlink = "src.sim_launch:main_mavlink"
 mavlink-all = "src.sim_launch:main_mavlink_all"
 sim-restore-simpleflight = "src.sim_launch:main_restore_simpleflight"
@@ -37,6 +39,7 @@ sim-restore-simpleflight = "src.sim_launch:main_restore_simpleflight"
 [dependency-groups]
 dev = [
     "lefthook",
+    "pytest>=8.0",
 ]
 
 [tool.ruff]
@@ -47,6 +50,7 @@ exclude = [
     "airsim/",
     "msgpackrpc/",
     "opensrc/",
+    ".codex_worktrees/",
     "simple_airsim/",
     ".claude/",
     ".sisyphus/",

@@ -364,7 +364,9 @@ try {
     $ProbeState = @{}
     Push-Location $RepoRoot
     try {
-        $ProbeProc = Start-LoggedProcess -Exe "uv" -ArgList @("run", "check-mavlink", "--duration", "0", "--quiet") -LogPath $ProbeLog -State $ProbeState
+        $ProbeProc = Start-LoggedProcess -Exe "uv" -ArgList @(
+            "run", "check-mavlink", "--duration", "0", "--quiet", "--decode-attitude"
+        ) -LogPath $ProbeLog -State $ProbeState
     } finally {
         Pop-Location
     }
