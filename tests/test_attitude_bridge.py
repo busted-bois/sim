@@ -2,6 +2,7 @@ import unittest
 
 from src.mavlink.attitude_bridge import AttitudeTelemetryBridge
 from src.mavlink.attitude_store import AttitudeStore
+from src.mavlink.integration import attach_attitude_bridge, get_attitude_sample
 from src.mavlink.messages import MAVLINK_MSG_ID_ATTITUDE
 from tests.mavlink_fakes import FakeMav, FakeMessage
 
@@ -52,6 +53,18 @@ class AttitudeBridgeTests(unittest.TestCase):
         bridge = AttitudeTelemetryBridge(store)
         bridge.on_message(FakeMessage("HEARTBEAT", base_mode=0))
         self.assertIsNone(store.get())
+
+    def test_from_sim_config(self) -> None:
+        self.assertTrue(AttitudeTelemetryBridge.from_sim_config({}).enabled)
+
+    def test_attach_on_client(self) -> None:
+        class _Client:
+            pass
+
+        client = _Client()
+        bridge = AttitudeTelemetryBridge(AttitudeStore())
+        attach_attitude_bridge(client, bridge)
+        self.assertIs(get_attitude_sample(client), None)
 
 
 if __name__ == "__main__":

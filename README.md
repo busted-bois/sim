@@ -124,34 +124,17 @@ From a fresh Cursor session, use this exact sequence.
 | Connection / RPC errors | Simulator not up or wrong port | Start Unreal; check `simulator.airsim_port` matches AirSim. |
 | Preflight warns “AirSim RPC not reachable” | Normal if UE is not running yet | Start the sim, or set `preflight.require_airsim_reachable` to `false` (default) to only warn. |
 
-## MAVLink ATTITUDE verification (DRO-12)
+## MAVLink ATTITUDE (DRO-12)
 
-Passive decode of MAVLink **ATTITUDE** (msg id 30) on UDP **:14550** (GCS path). **Flying is not required**—only a stable MAVLink link while UE + PX4-SITL are up.
-
-**Automated (no simulator):**
+Decode MAVLink **ATTITUDE** (#30) on UDP **:14550**. No flight required—only a stable MAVLink link with UE + PX4-SITL up.
 
 ```bash
 uv run --group dev pytest tests/ -q
 uv run python scripts/smoke_attitude_integration.py
-uv run check-mavlink --help
+uv run mavlink-all   # live; needs WSL mirrored networking
 ```
 
-**Live (UE + PX4-SITL, Windows + WSL mirrored networking):**
-
-```bash
-uv run mavlink-all
-```
-
-Keep Unreal **open and unpaused** until the console shows `[PROBE] tick: … ATTITUDE decoded` with a count **> 0**, or `[ORCH] ATTITUDE gate PASS`. The orchestrator fails after 90s if MAVLink packets arrive but ATTITUDE decode stays 0 (`-SkipAttitudeGate` to disable).
-
-Manual probes (stop `mavlink-all` probe first, or use port **14550** only):
-
-```bash
-uv run check-mavlink --port 14550 --decode-attitude --duration 20
-uv run attitude-listen --port 14550 --duration 10
-```
-
-Settings: `sim.config.json` → `control.mavlink.attitude` (see `src/mavlink/config.py`). Integration with `PymavlinkFlightClient`: `src/mavlink/integration.py`.
+`mavlink-all` exits with code 2 if MAVLink packets arrive but ATTITUDE decode stays 0 for 90s (`-SkipAttitudeGate` to disable). Config: `control.mavlink.attitude` in `sim.config.json`. Wire into `PymavlinkFlightClient` via `src/mavlink/integration.py`.
 
 ## Project Structure
 
