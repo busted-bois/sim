@@ -157,7 +157,15 @@
       }
     },
     "max_speed_ms": 10.0,
-    "max_altitude_m": 50.0
+    "max_altitude_m": 50.0,
+    "mavlink": {
+      "attitude": {
+        "enabled": true,
+        "request_hz": 50,
+        "max_staleness_ms": 500,
+        "log_messages": false
+      }
+    }
   },
   "waypoints": [
     { "x": 10.0, "y": 0.0, "z": -8.0 },
