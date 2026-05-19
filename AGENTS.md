@@ -39,8 +39,12 @@ uv run calibrate                        # Depth calibration with manual GUI
 uv run check-mavlink                    # Sniff UDP 14540/14550 for MAVLink frames (--duration 0 = forever)
 uv run sim-mavlink                      # Launch UE with PX4Multirotor settings (needs PX4-SITL in WSL); Ctrl+C to stop
 uv run sim-mavlink probe                # Same, but auto-run check-mavlink for 60s after launch
-uv run mavlink-all                      # All-in-one: UE + PX4-SITL (WSL) + probe; logs to logs/mavlink/<ts>/
-uv run sim-restore-simpleflight         # Manually restore SimpleFlight settings.json from backup
+uv run mavlink-all                      # All-in-one: UE + PX4-SITL (WSL) + probe; logs to logs/mavlink/<ts>/. Requires WSL mirrored networking.
+uv run sim-restore-simpleflight         # Manually restore SimpleFlight settings.json from backup (uv run sim does this automatically)
+uv run check-mavlink --decode-attitude    # Also decode ATTITUDE roll/pitch/yaw
+uv run attitude-listen                  # ATTITUDE-only UDP listener (Layer 1, no pymavlink)
+uv run python scripts/smoke_attitude_integration.py  # Smoke (decode + UDP inject)
+uv run --group dev pytest tests/ -q     # Unit tests (MAVLink ATTITUDE, etc.)
 uv run main.py                          # Run drone client (needs simulator running)
 uv run highres-imu-smoke                # Probe HIGHRES_IMU against running MAVLink endpoint
 uv run sim-highres-imu-smoke            # Launch sim first, then probe HIGHRES_IMU
@@ -135,7 +139,6 @@ Each algorithm has its own top-level config key matching its name (e.g. `"autono
 
 Key top-level config keys:
 - `"control"` — `command_rate_hz`, `latency_tuning`, `max_speed_ms`, `max_altitude_m`
-- **`control.mavlink`** — `guided_custom_mode` (default `4`), `attitude_target.throttle_body_z` (optional; default `false`)
 - `"vision"` — FPV feed: `enabled`, `fps`, `fov_degrees`, `resolution`, `depth` (ONNX model)
 - `"landing"` — `profile`, `descent_speed_ms`, safety caps, telemetry toggle
 - `"safety"` — `algorithm_timeout_seconds`

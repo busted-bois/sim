@@ -3,10 +3,8 @@ import unittest
 
 from pymavlink import mavutil
 
-from src.control.mavlink_client import (
-    _THROTTLE_BODY_Z_FORCE_MASK,
-    PymavlinkFlightClient,
-)
+from src.control.flight_client import build_attitude_only_type_mask, build_body_rate_type_mask
+from src.control.mavlink_client import PymavlinkFlightClient
 from tests.mavlink_fakes import FakeMavConnection, FakeMessage, fake_mavlink_monotonic_sleep
 
 
@@ -46,12 +44,7 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
         )
         self.assertTrue(connection.mav.attitude_target_calls)
         call = connection.mav.attitude_target_calls[0]
-        expected_mask = (
-            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE)
-            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
-            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
-        )
-        self.assertEqual(call[3], expected_mask)
+        self.assertEqual(call[3], build_attitude_only_type_mask())
         quat = call[4]
         self.assertEqual(len(quat), 4)
         for a, b in zip(quat, expected_quat, strict=True):
@@ -91,10 +84,7 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
 
         self.assertTrue(connection.mav.attitude_target_calls)
         call = connection.mav.attitude_target_calls[0]
-        self.assertEqual(
-            call[3],
-            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE),
-        )
+        self.assertEqual(call[3], build_body_rate_type_mask())
         self.assertEqual(list(call[4]), [1.0, 0.0, 0.0, 0.0])
         self.assertAlmostEqual(call[5], 0.5, places=6)
         self.assertAlmostEqual(call[6], -0.25, places=6)
@@ -134,14 +124,9 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
         finally:
             client.close()
 
-        base_mask = (
-            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_ROLL_RATE_IGNORE)
-            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_PITCH_RATE_IGNORE)
-            | int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_BODY_YAW_RATE_IGNORE)
-        )
         self.assertEqual(
             connection.mav.attitude_target_calls[0][3],
-            base_mask | _THROTTLE_BODY_Z_FORCE_MASK,
+            build_attitude_only_type_mask(throttle_body_z=True),
         )
 
     def test_rate_target_throttle_body_z_sets_mask_bit(self) -> None:
@@ -157,8 +142,7 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
 
         self.assertEqual(
             connection.mav.attitude_target_calls[0][3],
-            int(mavutil.mavlink.ATTITUDE_TARGET_TYPEMASK_ATTITUDE_IGNORE)
-            | _THROTTLE_BODY_Z_FORCE_MASK,
+            build_body_rate_type_mask(throttle_body_z=True),
         )
 
     def test_guided_mode_throttled_between_streams(self) -> None:

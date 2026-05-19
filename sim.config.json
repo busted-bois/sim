@@ -25,10 +25,10 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-    "pitch_up_degrees": -20,
-    "fps": 18,
-    "min_fps": 5,
-    "fov_degrees": 100,
+"pitch_up_degrees": -20,
+    "fps": 30,
+    "min_fps": 30,
+    "fov_degrees": 90,
     "compress": true,
     "resolution": [640, 360],
     "strict_timing": true,
@@ -76,12 +76,13 @@
   "profiles": {
     "official_conformant": {
       "simulator": {
+        "physics_update_hz": 120,
         "specification_required": true
       },
       "vision": {
         "fps": 30,
         "min_fps": 30,
-        "fov_degrees": 100,
+        "fov_degrees": 90,
         "resolution": [640, 360],
         "strict_timing": true,
         "startup_autotune_enabled": false
@@ -243,6 +244,12 @@
           "poll_interval_seconds": 1.0,
           "min_matched_responses": 3,
           "require_stable_health": true
+        }
+      },
+      "attitude_target": {
+        "throttle_body_z": false,
+        "smoke_test": {
+          "duration_seconds": 0.35
         }
       },
       "airsim_profile": {

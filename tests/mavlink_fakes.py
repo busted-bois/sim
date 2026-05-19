@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import queue
 import time
+from contextlib import contextmanager
 from typing import Any
+from unittest.mock import patch
 
 
 class FakeMessage:
@@ -102,3 +104,29 @@ class FakeMavConnection:
 
     def push_message(self, message: FakeMessage) -> None:
         self._queue.put(message)
+
+
+@contextmanager
+def fake_mavlink_monotonic_sleep():
+    clock = {"t": 1000.0}
+
+    def monotonic() -> float:
+        return clock["t"]
+
+    def sleep(dt: float) -> None:
+        clock["t"] += max(float(dt), 0.0)
+
+    with patch("src.control.mavlink_client.time.monotonic", monotonic), patch(
+        "src.control.mavlink_client.time.sleep", sleep
+    ):
+        yield clock
+
+
+class FakeMav:
+    """Simple fake for MAVLink sender (used by attitude bridge tests)."""
+
+    def __init__(self) -> None:
+        self.message_interval_calls: list[tuple[int, int]] = []
+
+    def message_interval_send(self, message_id: int, interval_us: int) -> None:
+        self.message_interval_calls.append((int(message_id), int(interval_us)))

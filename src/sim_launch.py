@@ -144,7 +144,7 @@ def _ensure_camera_settings(
     vision_cfg = config.get("vision", {})
     camera_cfg = config.get("camera", {})
     pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
-    camera_pitch = float(camera_cfg.get("pitch_up_degrees", 20.0))
+    camera_pitch = -float(camera_cfg.get("pitch_up_degrees", 20.0))
     camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
     camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
     camera_name = str(vision_cfg.get("camera_name", "0"))
@@ -167,7 +167,7 @@ def _ensure_camera_settings(
                 "ImageType": 0,
                 "Width": capture_width,
                 "Height": capture_height,
-                "FOV_Degrees": float(vision_cfg.get("fov_degrees", 100.0)),
+                "FOV_Degrees": float(vision_cfg.get("fov_degrees", horizontal_fov_degrees())),
             }
         ],
     }
@@ -732,7 +732,6 @@ def launch(
     manual_debug: bool = False,
     use_vjoy: bool = False,
     script_path: str = "main.py",
-    require_requested_transport: bool = False,
 ) -> None:
     _register_signal_handlers_once()
     _handles.ue = None
@@ -743,6 +742,7 @@ def launch(
 
     from src.config import load_config
     from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint, resolve_control_transport
+    from src.simulator_specs import assert_specification_snapshot_if_required
 
     config = load_config()
     assert_specification_snapshot_if_required(config)
@@ -820,6 +820,11 @@ def launch(
         _handles.ue = subprocess.Popen(
             cmd,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+        )
+        physics_hz = float(sim_cfg.get("physics_update_hz", 0.0) or 0.0)
+        print(
+            f"[launcher] UE physics timestep is project-defined ({physics_hz:.0f} Hz in config); "
+            "not set via AirSim settings.json. Run: uv run preflight"
         )
         wait_label = "MAVLink/AirSim control link" if transport == "mavlink" else "AirSim RPC"
         print(f"Waiting for {wait_label} on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
