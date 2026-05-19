@@ -34,7 +34,7 @@ class SimulatorSpecsPhysicsTests(unittest.TestCase):
             snap,
             spec_path="docs/simulator_specs.json",
             camera_resolution=[640, 360],
-            camera_fov=100.0,
+            camera_fov=90.0,
             normalized_pose_offset=[0.35, 0.0, -0.05],
         )
         self.assertTrue(any("120 Hz physics timing" in e for e in errs))

@@ -156,7 +156,6 @@ def land_with_telemetry(
                 sampler.set_command("hover_settle")
             print(f"[{label}] Hover settle: {min_hover_seconds:.2f}s")
             time.sleep(min_hover_seconds)
-        _wait_for_imu_stability(client, landing_cfg, sampler=sampler, label=label)
 
         if profile == "very_soft":
             print(f"[{label}] Hover settle complete -- starting final land.")
@@ -188,7 +187,6 @@ def land_with_telemetry(
             if sampler:
                 sampler.set_command("hover_async")
             client.hoverAsync().join()
-            _wait_for_imu_stability(client, landing_cfg, sampler=sampler, label=label)
 
         if sampler:
             sampler.set_command("land_async")
