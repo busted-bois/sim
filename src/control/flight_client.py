@@ -1,8 +1,5 @@
-"""FlightClient protocol and AirSim adapter.
-
-Motion units: NED m/s for velocity; radians for roll/pitch/yaw;
-throttle in ``[0, 1]``. ``rotateByYawRateAsync`` uses deg/s.
-"""
+"""FlightClient protocol and AirSim adapter. Units match AirSim Python: NED m/s, rpy and angle
+rates in rad and rad/s, rotateByYawRateAsync in deg/s, throttle 0..1."""
 
 from __future__ import annotations
 
@@ -358,31 +355,24 @@ class AirSimAdapter:
         )
 
     def getHighresImuHealth(self) -> HighresImuHealth | None:
-        airsim_defaults = dict(
-            enabled=True, stream_rate_hz=None, max_staleness_ms=1000.0
-        )
         try:
-            sample = self.getHighresImu()
+            self.getHighresImu()
         except Exception as exc:
             return HighresImuHealth(
                 status="error",
                 reason=f"AirSim IMU fetch failed: {exc}",
                 sample_count=0,
                 update_age_ms=None,
-                **airsim_defaults,
-            )
-        if sample is None:
-            return HighresImuHealth(
-                status="missing",
-                reason="AirSim IMU fetch returned no sample",
-                sample_count=0,
-                update_age_ms=None,
-                **airsim_defaults,
+                enabled=True,
+                stream_rate_hz=None,
+                max_staleness_ms=1000.0,
             )
         return HighresImuHealth(
             status="ok",
             reason="AirSim IMU RPC fetch available",
             sample_count=1,
             update_age_ms=0.0,
-            **airsim_defaults,
+            enabled=True,
+            stream_rate_hz=None,
+            max_staleness_ms=1000.0,
         )

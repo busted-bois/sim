@@ -291,70 +291,56 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
         return False
 
 
-def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
-    """Wait until AirSim answers RPCs with a spawned multirotor.
-
-    The TCP port can open before the vehicle is ready; probe ping() and
-    getMultirotorState(). Use a throwaway client per attempt.
-    """
+def _probe_airsim_rpc(host: str, port: int, *, timeout_value: int = 3) -> bool:
     import airsim as _airsim
 
+    if not _is_port_open(host, port):
+        return False
+    probe_client = None
+    try:
+        probe_client = _airsim.MultirotorClient(ip=host, port=port, timeout_value=timeout_value)
+        if probe_client.ping():
+            probe_client.getMultirotorState()
+            return True
+    except Exception:
+        pass
+    finally:
+        if probe_client is not None:
+            try:
+                probe_client.client.close()
+            except Exception:
+                pass
+    return False
+
+
+def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
+    """Wait until AirSim answers ping() and getMultirotorState() on this RPC port."""
     deadline = time.time() + max(1.0, timeout_s)
-    port_seen_open = False
     while time.time() < deadline:
-        if not port_seen_open:
-            if not _is_port_open(host, port):
-                time.sleep(1.0)
-                continue
-            port_seen_open = True
-        probe_client = None
-        try:
-            probe_client = _airsim.MultirotorClient(ip=host, port=port, timeout_value=3)
-            if probe_client.ping() is True:
-                probe_client.getMultirotorState()
-                return True
-        except Exception:
-            pass
-        finally:
-            if probe_client is not None:
-                try:
-                    probe_client.client.close()
-                except Exception:
-                    pass
+        if _probe_airsim_rpc(host, port):
+            return True
         time.sleep(1.0)
     return False
 
 
-def _airsim_settings_vehicle_types() -> set[str]:
-    settings_path = _airsim_settings_path()
-    if not settings_path.is_file():
-        return set()
-    try:
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return set()
-    vehicles = settings.get("Vehicles")
-    if not isinstance(vehicles, dict):
-        return set()
-    types: set[str] = set()
-    for vehicle in vehicles.values():
-        if isinstance(vehicle, dict):
-            vehicle_type = str(vehicle.get("VehicleType", "")).strip()
-            if vehicle_type:
-                types.add(vehicle_type)
-    return types
-
-
 def _launch_transport_for_session(config: dict) -> str:
-    """Resolve control transport after AirSim settings reflect the active vehicle."""
     from src.mavlink_endpoints import resolve_control_transport
 
     transport = resolve_control_transport(config)
-    if transport == "mavlink" and "SimpleFlight" in _airsim_settings_vehicle_types():
-        print(
-            "[launcher] SimpleFlight detected in AirSim settings; "
-            "using AirSim RPC transport (no MAVLink HEARTBEAT)."
-        )
+    if transport != "mavlink":
+        return transport
+    settings_path = _airsim_settings_path()
+    if not settings_path.is_file():
+        return transport
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return transport
+    vehicles = settings.get("Vehicles")
+    if isinstance(vehicles, dict) and any(
+        isinstance(v, dict) and v.get("VehicleType") == "SimpleFlight" for v in vehicles.values()
+    ):
+        print("[launcher] SimpleFlight settings; using AirSim RPC.")
         return "airsim"
     return transport
 

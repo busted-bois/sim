@@ -42,7 +42,9 @@ def set_front_camera_pose(client: FlightClient, config: Config | dict) -> None:
     camera_name = str(vision_cfg.get("camera_name", "0"))
     cam_cfg = config.get("camera", {})
     pose_offset = tuple(cam_cfg.get("pose_offset", [0.35, 0.0, -0.05]))
-    pitch_up_degrees = float(cam_cfg.get("pitch_up_degrees", 20.0))
+    pitch_up_degrees = float(
+        cam_cfg.get("pitch_up_degrees", vision_cfg.get("pitch_up_degrees", 20.0))
+    )
     roll_degrees = float(cam_cfg.get("roll_degrees", 0.0))
     yaw_degrees = float(cam_cfg.get("yaw_degrees", 0.0))
     front_pose = airsim.Pose(
