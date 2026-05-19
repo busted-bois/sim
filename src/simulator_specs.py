@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.competition_specs import competition_validation_from_config
 from src.config import load_config
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -231,6 +232,10 @@ def specification_snapshot_validation(
             "Simulator specification snapshot has no runtime camera metadata; "
             "re-run uv run extract-simulator-specs to record it"
         )
+    comp_errs, comp_passes, comp_warns = competition_validation_from_config(config, spec_snapshot)
+    errors.extend(comp_errs)
+    passes.extend(comp_passes)
+    warnings.extend(comp_warns)
     return errors, passes, warnings
 
 

@@ -12,12 +12,10 @@
 
 - **Unreal:** fixed async physics step and substepping are set in Colosseum (`PROJECT_PATH`). Optional merge: `scripts/unreal_default_engine_physics_120hz_fragment.ini` → `Config/DefaultEngine.ini`.
 - **Snapshot:** `docs/simulator_specs.json` from `uv run extract-simulator-specs`. With `simulator.specification_required: true`, `uv run preflight` and `uv run sim` check it against config. AirSim RPC does not read live `PhysicsSettings` from Python.
-<<<<<<< HEAD
-
-## Running 
-=======
 - **Vision / conformant:** `vision.fov_degrees` is **horizontal** FOV (see `src/vision/intrinsics.py`, `horizontal_fov_degrees()`). With `simulator.specification_profile: official_conformant`, preflight pins that FOV and 640×360; keep defaults and `profiles.official_conformant` aligned. `camera.pitch_up_degrees` is pilot “up”; AirSim `Pitch` and `set_front_camera_pose` negate it for UE.
->>>>>>> 4b65ced (deslop: shorten AGENTS simulator vision / conformant notes)
+- **Competition physical (VADR-TS-002):** `docs/competition_specs.json` — drone chassis 280x280x160 mm, gate opening 1500x1500 mm (depth 260 mm). `src/competition_specs.py` exposes clearance helpers; `competition.validate_against_snapshot` checks `docs/simulator_specs.json` `gate_reference` against the official opening.
+
+## Running
 
 ```bash
 uv run sim                              # One command: .env.local, UE5 (if configured), main.py

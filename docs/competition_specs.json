@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "document_id": "VADR-TS-002",
+    "issue": "00.02",
+    "title": "AI Grand Prix — official physical reference",
+    "sections": {
+      "drone_chassis": "3.6",
+      "gate": "3.7"
+    }
+  },
+  "drone_chassis": {
+    "width_m": 0.28,
+    "length_m": 0.28,
+    "height_m": 0.16
+  },
+  "gate": {
+    "outer": {
+      "width_m": 2.7,
+      "height_m": 2.7,
+      "depth_m": 0.26
+    },
+    "opening": {
+      "width_m": 1.5,
+      "height_m": 1.5,
+      "depth_m": 0.26
+    },
+    "frame_margin_m": 0.6
+  }
+}
