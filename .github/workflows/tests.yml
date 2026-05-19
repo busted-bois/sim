@@ -18,6 +18,7 @@ jobs:
       - name: Run unit tests
         run: |
           uv sync --frozen
+          uv run check-merge-markers
           uv run python -m unittest discover -s tests -v
 
       - name: Verify simulator physics metadata in snapshot

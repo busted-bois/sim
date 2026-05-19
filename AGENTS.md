@@ -2,7 +2,7 @@
 
 ## Tooling
 
-- **Python:** `uv` for all operations (`uv run`, `uv sync`). No bare `python3`.
+- **Python:** `uv` for all operations (`uv run`, `uv sync`). No bare `python3`. After resolving a git merge, run `uv run check-merge-markers` before `unittest discover` (also runs in CI and lefthook pre-commit).
 - **Linter:** Ruff (`uvx ruff check --fix`). Runs via lefthook pre-commit on staged `*.{py,toml}`.
 - **Ruff config:** line-length=100, rules `E F W I UP RUF`, `known-first-party = ["src"]`. See `pyproject.toml [tool.ruff]`.
 - **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
@@ -26,6 +26,7 @@ uv run sim vjoy                         # Manual vJoy control + GUI
 uv run preflight                        # Safety check before launch
 uv run verify-sim-physics-metadata      # Assert docs/simulator_specs.json documents 120 Hz physics
 uv run verify-sim-gate-reference        # Assert gate_reference opening matches VADR-TS-002
+uv run check-merge-markers              # Fail if <<<<<<< / ======= / >>>>>>> remain in repo
 uv run extract-simulator-specs         # Regenerate snapshot from Unreal (needs PROJECT_PATH + UE)
 uv run calibrate                        # Depth calibration with manual GUI
 uv run check-mavlink                    # Sniff UDP 14540/14550 for MAVLink frames (--duration 0 = forever)

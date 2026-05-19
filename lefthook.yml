@@ -1,5 +1,7 @@
 pre-commit:
   jobs:
+    - name: check merge conflict markers
+      run: uv run check-merge-markers
     - name: ruff check
       glob: "*.{py,toml}"
       run: uvx ruff check --fix {staged_files}
