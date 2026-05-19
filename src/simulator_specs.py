@@ -261,7 +261,7 @@ def assert_specification_snapshot_if_required(config: dict[str, Any] | Any) -> N
     )
     if errs:
         raise SystemExit(
-            "sim_launch: specification snapshot check failed:\n"
+            "specification snapshot check failed:\n"
             + "\n".join(f"  - {item}" for item in errs)
         )
 

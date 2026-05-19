@@ -14,6 +14,7 @@ from src.config import load_config, resolve_config_path, simulator_endpoint
 from src.control.algorithms import list_algorithms
 from src.mavlink_endpoints import candidate_mavlink_endpoints, resolve_control_transport
 from src.simulator_specs import resolve_specification_path, specification_snapshot_validation
+from src.vision.intrinsics import horizontal_fov_degrees
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -80,9 +81,14 @@ def _mavlink_heartbeat(config: dict) -> tuple[bool, str, list[str]]:
     return False, last_err, endpoints
 
 
-def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
+def _mavlink_highres_imu(
+    config: dict,
+    *,
+    connection_factory=None,
+) -> tuple[bool, str, list[str]]:
     from pymavlink import mavutil as _mavutil
 
+    factory = connection_factory or _mavutil.mavlink_connection
     endpoints = candidate_mavlink_endpoints(config)
     mav_cfg = config.get("control", {}).get("mavlink", {})
     imu_cfg = mav_cfg.get("highres_imu", {})
@@ -91,7 +97,7 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
     for endpoint in endpoints:
         connection = None
         try:
-            connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
+            connection = factory(endpoint, autoreconnect=False)
             heartbeat = connection.wait_heartbeat(timeout=2.0)
             if heartbeat is None:
                 continue
@@ -99,6 +105,7 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
             if message_id is not None:
                 connection.mav.message_interval_send(int(message_id), interval_us)
             deadline = time.monotonic() + 2.5
+            samples = 0
             while time.monotonic() < deadline:
                 message = connection.recv_match(
                     type=["HIGHRES_IMU"],
@@ -106,7 +113,9 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
                     timeout=0.5,
                 )
                 if message is not None:
-                    return True, endpoint, endpoints
+                    samples += 1
+                    sensor_id = int(getattr(message, "id", 0))
+                    return True, f"{endpoint} sensor_id={sensor_id} samples={samples}", endpoints
             last_err = "timed out waiting for HIGHRES_IMU after requesting stream"
         except Exception as exc:
             last_err = str(exc)
@@ -114,7 +123,7 @@ def _mavlink_highres_imu(config: dict) -> tuple[bool, str, list[str]]:
             if connection is not None:
                 try:
                     connection.close()
-                except Exception:
+                except OSError:
                     pass
     return False, last_err, endpoints
 
@@ -124,6 +133,28 @@ def _normalized_resolution(vision_cfg: dict[str, Any]) -> list[int]:
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
         return [int(resolution[0]), int(resolution[1])]
     return [int(vision_cfg.get("width", 640)), int(vision_cfg.get("height", 360))]
+
+
+def official_conformant_vision_errors(
+    sim_cfg: Mapping[str, Any],
+    camera_resolution: list[int],
+    camera_fov: float,
+) -> list[str]:
+    if str(sim_cfg.get("specification_profile", "")).strip() != "official_conformant":
+        return []
+    errors: list[str] = []
+    if camera_resolution != [640, 360]:
+        errors.append(
+            "vision.resolution must be [640, 360] for official_conformant "
+            f"(got {camera_resolution})"
+        )
+    expected_fov = horizontal_fov_degrees()
+    if abs(camera_fov - expected_fov) > 1e-6:
+        errors.append(
+            f"vision.fov_degrees must be {expected_fov:.1f} for official_conformant "
+            f"(got {camera_fov})"
+        )
+    return errors
 
 
 def run_preflight() -> int:
@@ -211,6 +242,8 @@ def run_preflight() -> int:
         errors.append(f"vision.fov_degrees must be positive (got {camera_fov})")
     else:
         passes.append(f"Camera FOV is configured: {camera_fov:.1f} degrees")
+
+    errors.extend(official_conformant_vision_errors(sim_cfg, camera_resolution, camera_fov))
 
     if bool(vision_cfg.get("startup_autotune_enabled", False)):
         errors.append("vision.startup_autotune_enabled must be false for fixed 30 Hz compliance")

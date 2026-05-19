@@ -1,14 +1,17 @@
+import logging
 import os
 import sys
 from pathlib import Path
 
-import airsim
-from src.config import apply_low_end_overrides, load_config, simulator_endpoint
-from src.control.algorithms import get_algorithm, list_algorithms
-from src.control.flight_client import AirSimAdapter
-from src.control.highres_imu import format_highres_imu_health
-from src.control.mavlink_client import PymavlinkFlightClient
-from src.control.primitives import (
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+import airsim  # noqa: E402
+from src.config import apply_low_end_overrides, load_config, simulator_endpoint  # noqa: E402
+from src.control.algorithms import get_algorithm, list_algorithms  # noqa: E402
+from src.control.flight_client import AirSimAdapter  # noqa: E402
+from src.control.highres_imu import format_highres_imu_health  # noqa: E402
+from src.control.mavlink_client import PymavlinkFlightClient  # noqa: E402
+from src.control.primitives import (  # noqa: E402
     apply_trace_style,
     land_with_telemetry,
     run_algorithm_with_timeout,
@@ -16,8 +19,9 @@ from src.control.primitives import (
     suppress_api_cleanup_warning,
     wait_until_stationary,
 )
-from src.mavlink_endpoints import resolve_control_transport
-from src.vision import VisionFeed
+from src.mavlink_endpoints import resolve_control_transport  # noqa: E402
+from src.simulator_specs import assert_specification_snapshot_if_required  # noqa: E402
+from src.vision import VisionFeed  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 
@@ -77,6 +81,7 @@ def _log_highres_imu_status(client, label: str) -> None:
 def main() -> None:
     config = load_config()
     apply_low_end_overrides(config)
+    assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
     transport = resolve_control_transport(config)
     host, port = simulator_endpoint(config)
@@ -215,7 +220,7 @@ def main() -> None:
             closer()
 
     if os.environ.get("AIGP_PAUSE_BEFORE_EXIT", "").strip() == "1":
-        input("AIGP_PAUSE_BEFORE_EXIT=1 — press Enter to exit the flight client...")
+        input("AIGP_PAUSE_BEFORE_EXIT=1 -- press Enter to exit the flight client...")
 
 
 if __name__ == "__main__":

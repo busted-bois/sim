@@ -120,3 +120,13 @@ def fake_mavlink_monotonic_sleep():
         "src.control.mavlink_client.time.sleep", sleep
     ):
         yield clock
+
+
+class FakeMav:
+    """Simple fake for MAVLink sender (used by attitude bridge tests)."""
+
+    def __init__(self) -> None:
+        self.message_interval_calls: list[tuple[int, int]] = []
+
+    def message_interval_send(self, message_id: int, interval_us: int) -> None:
+        self.message_interval_calls.append((int(message_id), int(interval_us)))

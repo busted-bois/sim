@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 import airsim
+from src.vision.intrinsics import horizontal_fov_degrees
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,13 +37,13 @@ class VisionStats:
 
 
 class VisionFeed:
-    def __init__(self, client: airsim.MultirotorClient, config: dict) -> None:
+    def __init__(self, client: airsim.MultirotorClient | None, config: dict) -> None:
         self._client = client
-        self._enabled = bool(config.get("enabled", False))
+        self._enabled = bool(config.get("enabled", False)) and client is not None
         self._camera_name = str(config.get("camera_name", "0"))
         self._fps = max(1.0, float(config.get("fps", 30.0)))
         self._configured_fps = self._fps
-        self._fov_degrees = float(config.get("fov_degrees", 100.0))
+        self._fov_degrees = float(config.get("fov_degrees", horizontal_fov_degrees()))
         self._compress = bool(config.get("compress", True))
         self._save_debug_frames = bool(config.get("save_debug_frames", False))
         self._debug_output_dir = Path(str(config.get("debug_output_dir", "logs/vision_frames")))
@@ -85,7 +86,7 @@ class VisionFeed:
         return self._enabled
 
     def start(self) -> None:
-        if not self._enabled:
+        if not self._enabled or self._client is None:
             return
         if self._thread is not None and self._thread.is_alive():
             return

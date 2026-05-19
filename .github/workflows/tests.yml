@@ -4,19 +4,27 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
+  push:
+    branches: [main]
 
 jobs:
   unittest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
 
       - name: Run unit tests
-        run: |
-          uv sync --frozen
-          uv run python -m unittest discover -s tests -v
+        run: uv run python -m unittest discover -s tests -v
 
       - name: Verify simulator physics metadata in snapshot
         run: uv run verify-sim-physics-metadata
+
+      - name: MAVLink attitude smoke test
+        run: uv run python scripts/smoke_attitude_integration.py
