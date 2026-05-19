@@ -27,3 +27,5 @@ jobs:
             exit 0
           }
           uv run extract-simulator-specs
+          uv run verify-sim-physics-metadata
+          uv run verify-sim-gate-reference

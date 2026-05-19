@@ -4,3 +4,6 @@ pre-commit:
       glob: "*.{py,toml}"
       run: uvx ruff check --fix {staged_files}
       stage_fixed: true
+    - name: verify simulator gate snapshot
+      glob: "docs/simulator_specs.json"
+      run: uv run verify-sim-gate-reference

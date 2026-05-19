@@ -115,6 +115,7 @@ From a fresh Cursor session, use this exact sequence.
 | **Reset** | Restart the Unreal/AirSim session if the drone or API state acts stuck; run `uv run sim` again. |
 | **Softer landing** | `uv run sim-very-soft` uses the gentle landing profile. |
 | **Landing telemetry** | With `landing.telemetry_log.enabled` true in `sim.config.json`, each run writes `logs/landing_telemetry.csv` (`t_s`, `altitude_m`, `vz_ms`, `command`) during the landing phase for tuning. |
+| **Regenerate simulator snapshot** | `uv run extract-simulator-specs`, then `uv run verify-sim-physics-metadata` and `uv run verify-sim-gate-reference` (or `uv run preflight`) before committing `docs/simulator_specs.json`. See `docs/simulator_specs_pr_checklist.md`. |
 
 ### Common errors
 

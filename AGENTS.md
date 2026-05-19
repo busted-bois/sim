@@ -6,12 +6,12 @@
 - **Linter:** Ruff (`uvx ruff check --fix`). Runs via lefthook pre-commit on staged `*.{py,toml}`.
 - **Ruff config:** line-length=100, rules `E F W I UP RUF`, `known-first-party = ["src"]`. See `pyproject.toml [tool.ruff]`.
 - **Python version:** 3.12 (`.python-version`). `requires-python >= 3.10`.
-- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest` and `uv run verify-sim-physics-metadata` (checks `docs/simulator_specs.json` physics block). Both enable `setup-uv` dependency caching. Optional: `.github/workflows/extract-simulator-specs.yml` (`workflow_dispatch`) runs `extract-simulator-specs` when repository secret `UE_PROJECT_PATH` is set on a Windows runner with Unreal + Colosseum.
+- **CI:** `.github/workflows/ruff.yml` runs `uvx ruff check .` on PRs to main; `.github/workflows/tests.yml` runs `unittest`, `uv run verify-sim-physics-metadata`, and `uv run verify-sim-gate-reference` on `docs/simulator_specs.json`. Optional: `.github/workflows/extract-simulator-specs.yml` (`workflow_dispatch`) runs extract then both verify commands when `UE_PROJECT_PATH` is set.
 
 ## Simulator physics (120 Hz)
 
 - **Unreal:** fixed async physics step and substepping are set in Colosseum (`PROJECT_PATH`). Optional merge: `scripts/unreal_default_engine_physics_120hz_fragment.ini` → `Config/DefaultEngine.ini`.
-- **Snapshot:** `docs/simulator_specs.json` from `uv run extract-simulator-specs`. With `simulator.specification_required: true`, `uv run preflight` and `uv run sim` check it against config. AirSim RPC does not read live `PhysicsSettings` from Python. If `gate_reference` opening check fails at ~5.5 m, restore `docs/simulator_specs.json` from git or re-run extract (extraction picks gates near the official 1.5 m opening, not oversized level actors).
+- **Snapshot:** `docs/simulator_specs.json` from `uv run extract-simulator-specs` (then `uv run verify-sim-physics-metadata` and `uv run verify-sim-gate-reference` before commit). With `simulator.specification_required: true`, `uv run preflight` and `uv run sim` check it against config. AirSim RPC does not read live `PhysicsSettings` from Python. Extract fails if `gate_reference` is outside the official 1.5 m opening tolerance; lefthook runs gate verify when the snapshot is staged. PR checklist: `docs/simulator_specs_pr_checklist.md`.
 - **Vision / conformant:** `vision.fov_degrees` is **horizontal** FOV (see `src/vision/intrinsics.py`, `horizontal_fov_degrees()`). With `simulator.specification_profile: official_conformant`, preflight pins that FOV and 640×360; keep defaults and `profiles.official_conformant` aligned. `camera.pitch_up_degrees` is pilot “up”; AirSim `Pitch` and `set_front_camera_pose` negate it for UE.
 - **Competition physical (VADR-TS-002):** `docs/competition_specs.json` — drone chassis 280x280x160 mm, gate opening 1500x1500 mm (depth 260 mm). `src/competition_specs.py` exposes clearance helpers; `competition.validate_against_snapshot` checks `docs/simulator_specs.json` `gate_reference` against the official opening.
 
@@ -25,6 +25,7 @@ uv run sim-very-soft                    # Gentle landing profile
 uv run sim vjoy                         # Manual vJoy control + GUI
 uv run preflight                        # Safety check before launch
 uv run verify-sim-physics-metadata      # Assert docs/simulator_specs.json documents 120 Hz physics
+uv run verify-sim-gate-reference        # Assert gate_reference opening matches VADR-TS-002
 uv run extract-simulator-specs         # Regenerate snapshot from Unreal (needs PROJECT_PATH + UE)
 uv run calibrate                        # Depth calibration with manual GUI
 uv run check-mavlink                    # Sniff UDP 14540/14550 for MAVLink frames (--duration 0 = forever)

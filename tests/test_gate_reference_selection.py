@@ -1,6 +1,6 @@
 import unittest
 
-from src.simulator_gate_selection import select_gates_for_reference
+from src.simulator_gate_selection import gate_reference_opening_ok, select_gates_for_reference
 
 
 def _gate(width_m: float, height_m: float, label: str = "") -> dict:
@@ -26,6 +26,7 @@ class GateReferenceSelectionTests(unittest.TestCase):
         only_oversized = [_gate(5.5, 5.5, label="only")]
         chosen = select_gates_for_reference(only_oversized, [], (1.5, 1.5), 0.15)
         self.assertEqual(chosen[0]["label"], "only")
+        self.assertFalse(gate_reference_opening_ok([5.5, 5.5, 0.5], (1.5, 1.5), 0.15))
 
 
 if __name__ == "__main__":

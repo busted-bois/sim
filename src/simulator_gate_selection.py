@@ -6,6 +6,19 @@ def _horizontal_dims_m(gate: dict) -> tuple[float, float]:
     return float(dims[0]), float(dims[1])
 
 
+def gate_reference_opening_ok(
+    dimensions_m: list[float] | tuple[float, ...],
+    opening: tuple[float, float],
+    tolerance_m: float,
+) -> bool:
+    if len(dimensions_m) < 2:
+        return False
+    return (
+        abs(float(dimensions_m[0]) - opening[0]) <= tolerance_m
+        and abs(float(dimensions_m[1]) - opening[1]) <= tolerance_m
+    )
+
+
 def _opening_distance(gate: dict, opening: tuple[float, float]) -> float:
     width_m, height_m = _horizontal_dims_m(gate)
     return abs(width_m - opening[0]) + abs(height_m - opening[1])

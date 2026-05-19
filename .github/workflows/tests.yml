@@ -22,3 +22,6 @@ jobs:
 
       - name: Verify simulator physics metadata in snapshot
         run: uv run verify-sim-physics-metadata
+
+      - name: Verify simulator gate_reference in snapshot
+        run: uv run verify-sim-gate-reference
