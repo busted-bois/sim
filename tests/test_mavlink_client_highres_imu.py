@@ -240,7 +240,6 @@ class AirSimAdapterHighresImuTests(unittest.TestCase):
         health = adapter.getHighresImuHealth()
 
         self.assertIsNotNone(sample)
-        assert sample is not None
         self.assertEqual(sample.transport, "airsim")
         self.assertEqual(sample.time_usec, 123)
         self.assertAlmostEqual(sample.xacc or 0.0, 1.1)
@@ -248,7 +247,6 @@ class AirSimAdapterHighresImuTests(unittest.TestCase):
         self.assertAlmostEqual(sample.abs_pressure or 0.0, 1012.5)
         self.assertIsNone(sample.temperature)
         self.assertIsNotNone(health)
-        assert health is not None
         self.assertEqual(health.status, "ok")
 
 

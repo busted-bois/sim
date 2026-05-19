@@ -1,8 +1,7 @@
 """FlightClient protocol and AirSim adapter.
 
-Motion units match AirSim Python: NED m/s for velocity; radians for roll/pitch/yaw;
-throttle in ``[0, 1]``. ``rotateByYawRateAsync`` uses deg/s; MAVLink body yaw rate
-is rad/s (converted in ``PymavlinkFlightClient``).
+Motion units: NED m/s for velocity; radians for roll/pitch/yaw;
+throttle in ``[0, 1]``. ``rotateByYawRateAsync`` uses deg/s.
 """
 
 from __future__ import annotations
@@ -21,15 +20,6 @@ SET_POSITION_FRAME_BODY_NED: SetPositionTargetFrame = "body_ned"
 
 @dataclass(frozen=True, slots=True)
 class SetAttitudeTargetCommand:
-    """Parameters for a MAVLink SET_ATTITUDE_TARGET message.
-
-    ``quaternion`` is (w, x, y, z) — matching the pymavlink convention.
-    ``thrust`` is normalised [0.0, 1.0].
-    Set ``type_mask`` using :func:`build_attitude_target_type_mask` or the
-    convenience helpers :func:`build_attitude_only_type_mask` /
-    :func:`build_body_rate_type_mask`.
-    """
-
     type_mask: int
     quaternion: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     body_roll_rate: float = 0.0
@@ -47,13 +37,6 @@ def build_attitude_target_type_mask(
     ignore_thrust: bool = False,
     throttle_body_z: bool = False,
 ) -> int:
-    """Build a bitmask for SET_ATTITUDE_TARGET.
-
-    By default, only attitude + thrust are used (body rates are ignored).
-    Set ``ignore_attitude=True`` and ``ignore_*_rate=False`` to switch to
-    body-rate-only control. With ``throttle_body_z=True``, OR in the
-    ``ATTITUDE_TARGET_TYPEMASK_THROTTLE_BODY_SET`` bit when supported by pymavlink.
-    """
     from pymavlink import mavutil
 
     mask = 0
@@ -73,12 +56,10 @@ def build_attitude_target_type_mask(
 
 
 def build_attitude_only_type_mask(*, throttle_body_z: bool = False) -> int:
-    """Attitude + thrust; all body rates ignored."""
     return build_attitude_target_type_mask(throttle_body_z=throttle_body_z)
 
 
 def build_body_rate_type_mask(*, throttle_body_z: bool = False) -> int:
-    """Body rates + thrust; attitude ignored."""
     return build_attitude_target_type_mask(
         ignore_attitude=True,
         ignore_roll_rate=False,
@@ -378,21 +359,11 @@ class AirSimAdapter:
 
     def getHighresImuHealth(self) -> HighresImuHealth | None:
         try:
-            sample = self.getHighresImu()
+            self.getHighresImu()
         except Exception as exc:
             return HighresImuHealth(
                 status="error",
                 reason=f"AirSim IMU fetch failed: {exc}",
-                enabled=True,
-                sample_count=0,
-                stream_rate_hz=None,
-                update_age_ms=None,
-                max_staleness_ms=1000.0,
-            )
-        if sample is None:
-            return HighresImuHealth(
-                status="missing",
-                reason="AirSim IMU fetch returned no sample",
                 enabled=True,
                 sample_count=0,
                 stream_rate_hz=None,

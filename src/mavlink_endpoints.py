@@ -125,6 +125,51 @@ def first_mavlink_heartbeat_endpoint(config: dict, *, timeout_s: float) -> str |
     return None
 
 
+def pymavlink_flight_client_from_config(config: dict):
+    from src.control.mavlink_client import PymavlinkFlightClient
+
+    control_cfg = config.get("control", {})
+    mav_cfg = control_cfg.get("mavlink", {})
+    timesync_cfg = mav_cfg.get("timesync", {})
+    highres_imu_cfg = mav_cfg.get("highres_imu", {})
+    endpoint = os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip() or str(
+        mav_cfg.get("endpoint", "udpin:0.0.0.0:14550")
+    ).strip()
+    return PymavlinkFlightClient(
+        endpoint=endpoint,
+        command_rate_hz=float(control_cfg.get("command_rate_hz", 50.0)),
+        state_request_hz=float(mav_cfg.get("state_request_hz", 20.0)),
+        guided_custom_mode=int(mav_cfg.get("guided_custom_mode", 4)),
+        takeoff_altitude_m=float(mav_cfg.get("takeoff_altitude_m", 5.0)),
+        land_descent_speed_ms=float(config.get("landing", {}).get("descent_speed_ms", 2.0)),
+        source_system=int(mav_cfg.get("source_system", 255)),
+        source_component=int(mav_cfg.get("source_component", 1)),
+        respond_to_timesync_requests=bool(timesync_cfg.get("respond_to_requests", True)),
+        timesync_log_messages=bool(timesync_cfg.get("log_messages", True)),
+        send_timesync_requests=bool(timesync_cfg.get("send_requests", True)),
+        timesync_request_interval_s=float(timesync_cfg.get("request_interval_seconds", 1.0)),
+        highres_imu_enabled=bool(highres_imu_cfg.get("enabled", True)),
+        highres_imu_request_hz=float(
+            highres_imu_cfg.get("request_hz", mav_cfg.get("state_request_hz", 20.0))
+        ),
+        highres_imu_log_messages=bool(highres_imu_cfg.get("log_messages", False)),
+        highres_imu_max_staleness_ms=float(highres_imu_cfg.get("max_staleness_ms", 1000.0)),
+        timesync_pending_request_limit=int(timesync_cfg.get("pending_request_limit", 64)),
+        timesync_stable_window_size=int(timesync_cfg.get("stable_window_size", 9)),
+        timesync_stable_best_subset_size=int(timesync_cfg.get("stable_best_subset_size", 5)),
+        timesync_min_stable_samples=int(timesync_cfg.get("min_stable_samples", 3)),
+        timesync_max_stable_rtt_ns=int(
+            float(timesync_cfg.get("max_stable_rtt_ms", 250.0)) * 1_000_000
+        ),
+        timesync_max_offset_jitter_ns=int(
+            float(timesync_cfg.get("max_offset_jitter_ms", 50.0)) * 1_000_000
+        ),
+        attitude_target_throttle_body_z=bool(
+            mav_cfg.get("attitude_target", {}).get("throttle_body_z", False)
+        ),
+    )
+
+
 def resolve_control_transport(config: dict) -> str:
     """Resolve the effective control transport for this session."""
 

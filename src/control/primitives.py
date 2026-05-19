@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import errno
 import math
 import os
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING
 
 import airsim
-from msgpackrpc.error import RPCError
+from msgpackrpc.error import RPCError, TransportError
 
 if TYPE_CHECKING:
     from src.config import Config
@@ -83,13 +85,9 @@ def apply_trace_style(client: FlightClient, config: Config | dict) -> None:
 
 
 def suppress_api_cleanup_warning(exc: BaseException) -> bool:
-    """True when disarm/API cleanup failed because the sim or socket is already gone."""
-    import errno
-
+    """True when disarm/API cleanup failed because the connection is already gone."""
     if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
         return True
-    from msgpackrpc.error import RPCError, TransportError
-
     if isinstance(exc, (RPCError, TransportError)):
         msg = str(exc).lower()
         return any(
@@ -113,7 +111,6 @@ def suppress_api_cleanup_warning(exc: BaseException) -> bool:
 
 
 def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
-    import threading
     import traceback
 
     error_holder: dict[str, BaseException] = {}
@@ -153,9 +150,9 @@ def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
 
     if elapsed_s < 8.0:
         print(
-            f"Warning: algorithm reported completion in {elapsed_s:.1f}s — much shorter than "
-            "a full attitude routine. If the drone barely moved, check Unreal is unpaused, "
-            "simulation is real-time, and watch for errors above.",
+            f"Warning: algorithm reported completion in {elapsed_s:.1f}s -- much shorter than "
+            "a full attitude routine. If the drone barely moved, check that the simulation "
+            "is real-time, and watch for errors above.",
             file=sys.stderr,
         )
 
@@ -248,14 +245,14 @@ def land_with_telemetry(
             time.sleep(min_hover_seconds)
 
         if profile == "very_soft":
-            print(f"[{label}] Hover settle complete — starting final land.")
+            print(f"[{label}] Hover settle complete -- starting final land.")
             if sampler:
                 sampler.set_command("land_async")
             client.landAsync().join()
             return
 
         print(
-            f"[{label}] Hover settle complete — next: controlled descent if above final altitude, "
+            f"[{label}] Hover settle complete -- next: controlled descent if above final altitude, "
             "then final land."
         )
         descent_speed_ms = max(0.5, float(landing_cfg.get("descent_speed_ms", 2.0)))
@@ -293,12 +290,7 @@ def wait_until_stationary(
     velocity_eps_ms: float = 0.05,
     label: str = "primitives",
 ) -> None:
-    """Block until drone velocity drops below velocity_eps_ms.
-
-    AirSim's takeoff RPC refuses if |velocity| is non-trivial — observed
-    rejection at 0.19 m/s. After client.reset() the drone usually settles
-    within ~0.5s, but residual motion from a prior run can take longer.
-    """
+    """Block until drone velocity drops below velocity_eps_ms."""
     deadline = time.monotonic() + timeout_s
     last_speed = float("inf")
     consecutive_quiet = 0
