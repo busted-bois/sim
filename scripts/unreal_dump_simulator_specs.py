@@ -1,8 +1,14 @@
 import json
 import os
 import statistics
+import sys
+from pathlib import Path
 
 import unreal
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 
 def _round_list(values):
@@ -392,9 +398,14 @@ def main():
 
     unreal.EditorLoadingAndSavingUtils.load_map(map_asset)
     drone_spec = _collect_drone_spec(pawn_asset)
-    gates = _collect_gate_specs(gate_tokens)
-    if not gates:
-        gates = _collect_gate_asset_specs(gate_tokens)
+    from src.simulator_gate_selection import select_gates_for_reference
+
+    level_gates = _collect_gate_specs(gate_tokens)
+    asset_gates = _collect_gate_asset_specs(gate_tokens)
+    opening_raw = json.loads(os.environ.get("CODEX_SIM_SPEC_GATE_OPENING_M", "[1.5, 1.5]"))
+    opening = (float(opening_raw[0]), float(opening_raw[1]))
+    tolerance_m = float(os.environ.get("CODEX_SIM_SPEC_GATE_TOLERANCE_M", "0.15"))
+    gates = select_gates_for_reference(level_gates, asset_gates, opening, tolerance_m)
 
     payload = {
         "metadata": _metadata(),

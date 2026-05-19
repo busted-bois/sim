@@ -8,7 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.competition_specs import competition_validation_from_config
+from src.competition_specs import (
+    competition_validation_from_config,
+    load_competition_specs,
+    resolve_competition_spec_path,
+)
 from src.config import load_config
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -313,6 +317,15 @@ def extract_specification_snapshot(config: dict[str, Any]) -> Path:
     env["CODEX_SIM_SPEC_PROJECT_PATH"] = _as_unreal_path(project_path)
     env["CODEX_SIM_SPEC_EXTRACTED_AT_UTC"] = datetime.now(timezone.utc).isoformat()
     env["CODEX_SIM_SPEC_CONFIG_SHA256"] = conformity_fingerprint(config)
+    comp_cfg = config.get("competition", {})
+    comp_path = resolve_competition_spec_path(config)
+    if comp_path is not None and comp_path.is_file():
+        gate = load_competition_specs(comp_path).gate_opening
+        gate_opening = [gate.width_m, gate.length_m]
+    else:
+        gate_opening = [1.5, 1.5]
+    env["CODEX_SIM_SPEC_GATE_OPENING_M"] = json.dumps(gate_opening)
+    env["CODEX_SIM_SPEC_GATE_TOLERANCE_M"] = str(comp_cfg.get("dimension_tolerance_m", 0.15))
     fingerprint_payload = conformity_fingerprint_payload(config)
     env["CODEX_SIM_SPEC_CAMERA_RUNTIME"] = json.dumps(
         {
