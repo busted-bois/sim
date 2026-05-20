@@ -901,8 +901,6 @@ class PymavlinkFlightClient:
             self._send_set_position_target_local_ned(zero)
 
     def _prepare_px4_flight_mode(self) -> None:
-        if self._guided_custom_mode == self._PX4_MAIN_MODE_OFFBOARD:
-            self._prime_offboard_setpoints()
         self._set_guided_mode(force=True)
 
     def _set_guided_mode(self, *, force: bool = False) -> None:

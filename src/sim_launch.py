@@ -407,6 +407,25 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
         return False
 
 
+def _wait_for_mavlink_link(
+    transport: str,
+    config: dict,
+    host: str,
+    rpc_port: int,
+    timeout_s: float,
+) -> tuple[str, str]:
+    label = f"{max(15.0, float(timeout_s)):.0f}"
+    _print_control_link_wait(transport, config, host, rpc_port, label)
+    try:
+        resolved_transport, endpoint = _wait_for_control_link(
+            host, rpc_port, config, timeout_s, transport
+        )
+    except KeyboardInterrupt:
+        _cleanup_on_interrupt()
+        raise SystemExit(130) from None
+    if endpoint is None:
+        raise SystemExit("MAVLink HEARTBEAT wait returned no endpoint.")
+    return resolved_transport, endpoint
 
 
 def _launch_transport_for_session(config: dict) -> str:
@@ -608,13 +627,7 @@ def _ensure_px4_mavlink_settings(rpc_port: int) -> Path:
 
 
 def _is_tcp_listening_passive(port: int) -> bool:
-    """Check if any process is LISTENING on a TCP port WITHOUT opening a connection.
-
-    PX4Multirotor HIL accepts exactly one TCP connection then stops listening
-    (single-shot acceptTcp at MavLinkMultirotorApi.hpp:1317). An active probe like
-    socket.create_connection() would consume the slot, leaving the real PX4 unable to
-    connect. Use kernel state (netstat) instead.
-    """
+    """Passive LISTEN check (netstat/ss); do not connect — PX4 HIL accepts one TCP client."""
     try:
         if sys.platform == "win32":
             out = subprocess.run(
@@ -1059,7 +1072,6 @@ def launch(
     host = str(sim_cfg.get("host", "127.0.0.1")).strip() or "127.0.0.1"
     rpc_port = int(sim_cfg.get("rpc_port", 41451))
     rpc_ready_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
-    rpc_tout_label = f"{rpc_ready_timeout_s:.0f}"
     _ensure_simulator_settings_for_launch(
         rpc_port,
         view_mode,
@@ -1131,40 +1143,16 @@ def launch(
                     raise SystemExit(130) from None
             else:
                 _print_px4_bringup_instructions(_windows_host_ip_for_wsl())
-        _print_control_link_wait(transport, config, host, rpc_port, rpc_tout_label)
-        try:
-            resolved_transport, resolved_mavlink_endpoint = _wait_for_control_link(
-                host,
-                rpc_port,
-                config,
-                rpc_ready_timeout_s,
-                transport,
-            )
-        except KeyboardInterrupt:
-            _cleanup_on_interrupt()
-            raise SystemExit(130) from None
-        if resolved_transport == "mavlink" and resolved_mavlink_endpoint is not None:
-            print(f"MAVLink heartbeat detected on {resolved_mavlink_endpoint}")
-        else:
-            print(f"simulator RPC is ready on {host}:{rpc_port}")
+        resolved_transport, resolved_mavlink_endpoint = _wait_for_mavlink_link(
+            transport, config, host, rpc_port, rpc_ready_timeout_s
+        )
+        print(f"MAVLink heartbeat detected on {resolved_mavlink_endpoint}")
     else:
         print(f"Colosseum not found at '{colosseum}', skipping simulator launch.")
-        _print_control_link_wait(transport, config, host, rpc_port, rpc_tout_label)
-        try:
-            resolved_transport, resolved_mavlink_endpoint = _wait_for_control_link(
-                host,
-                rpc_port,
-                config,
-                rpc_ready_timeout_s,
-                transport,
-            )
-        except KeyboardInterrupt:
-            _cleanup_on_interrupt()
-            raise SystemExit(130) from None
-        if resolved_transport == "mavlink" and resolved_mavlink_endpoint is not None:
-            print(f"MAVLink heartbeat detected on {resolved_mavlink_endpoint}")
-        else:
-            print(f"simulator RPC is ready on {host}:{rpc_port}")
+        resolved_transport, resolved_mavlink_endpoint = _wait_for_mavlink_link(
+            transport, config, host, rpc_port, rpc_ready_timeout_s
+        )
+        print(f"MAVLink heartbeat detected on {resolved_mavlink_endpoint}")
 
     env = os.environ.copy()
     env["SIMULATOR_RPC_PORT"] = str(rpc_port)

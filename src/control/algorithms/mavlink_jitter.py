@@ -55,8 +55,8 @@ class MavlinkJitter(Algorithm):
         self._yaw_rate_cfg = 30.0
         self._period_s = 0.02
 
-    def run(self, client: FlightClient) -> None:
-        _ = client
+    def run(self, _client: FlightClient) -> None:
+        return
 
     def run_tick(
         self,
