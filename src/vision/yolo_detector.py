@@ -42,7 +42,12 @@ class YoloDetector:
         self._class_names: dict[int, str] = {}
 
     def _load(self) -> None:
-        from ultralytics import YOLO
+        try:
+            from ultralytics import YOLO
+        except ImportError as exc:
+            raise ImportError(
+                "ultralytics is required for YOLO vision; install with: uv sync --extra yolo"
+            ) from exc
 
         print(f"[yolo] Loading model from {self._model_path} ...")
         self._model = YOLO(self._model_path)

@@ -19,7 +19,6 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "pillow" },
     { name = "pymavlink" },
-    { name = "ultralytics" },
 ]
 
 [package.optional-dependencies]
@@ -30,6 +29,9 @@ manual = [
 ]
 mavlink = [
     { name = "pymavlink" },
+]
+yolo = [
+    { name = "ultralytics" },
 ]
 
 [package.dev-dependencies]
@@ -49,9 +51,9 @@ requires-dist = [
     { name = "pynput", marker = "extra == 'manual'" },
     { name = "pysimplegui", marker = "extra == 'manual'", specifier = "<5" },
     { name = "pyvjoy", marker = "extra == 'manual'" },
-    { name = "ultralytics", specifier = ">=8.0,<9" },
+    { name = "ultralytics", marker = "extra == 'yolo'", specifier = ">=8.0,<9" },
 ]
-provides-extras = ["mavlink", "manual"]
+provides-extras = ["yolo", "mavlink", "manual"]
 
 [package.metadata.requires-dev]
 dev = [
