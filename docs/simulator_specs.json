@@ -2,7 +2,7 @@
   "metadata": {
     "extracted_at_utc": "2026-05-20T01:31:38.559539+00:00",
     "project_path": "C:/Users/trung/source/repos/Colosseum/Unreal/Environments/BlocksV2/BlocksV2.uproject",
-    "config_sha256": "4e1f4d434a210fb12edd82e27c0776cd7d64387e089c6e17b3a7c8b100367aa5",
+    "config_sha256": "7957b0b62f879b969c3843703919cf1c525c47d31d1d920cc8198be6edd40bdc",
     "engine_version": "5.4.4-35576357+++UE5+Release-5.4",
     "runtime_camera_spec": {
       "camera_name": "0",
@@ -31,7 +31,7 @@
     "async_fixed_timestep_s": 0.008333333
   },
   "drone": {
-    "asset_path": "/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
+    "asset_path": "/Game/FlyingCPP/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
     "dimensions_m": [
       0.981694,
       0.981694,

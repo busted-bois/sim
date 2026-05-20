@@ -5,7 +5,7 @@
     "map_name": "BlocksV2",
     "map_asset": "/Game/FlyingCPP/Maps/FlyingExampleMapV2",
     "specification_profile": "official_conformant",
-    "pawn_asset": "/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
+    "pawn_asset": "/Game/FlyingCPP/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
     "gate_search_tokens": "gate,ring,torus,hoop",
     "extra_ue_args": ["-map=/Game/FlyingCPP/Maps/FlyingExampleMapV2"],
     "windowed": true,

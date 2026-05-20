@@ -277,10 +277,6 @@ def _ensure_camera_settings(
 
     vehicles = settings.get("Vehicles")
     if isinstance(vehicles, dict):
-        # Drop any vehicle that isn't "Drone1" — simulator spawns one drone per
-        # entry, so a stray "SimpleFlight" / "Drone2" / etc. causes duplicate
-        # drones to appear stacked at spawn. Drone1 is the only name the rest
-        # of this codebase uses.
         for stray in [name for name in vehicles.keys() if name != "Drone1"]:
             vehicles.pop(stray, None)
             print(
@@ -382,14 +378,10 @@ def _ensure_camera_settings(
         merged["SubWindows"] = required_settings["SubWindows"]
 
     if use_vjoy:
-        # Clear specific vehicles to prevent simulator from spawning a second drone
-        # when 'Usage: vJoy' is also set at the top level.
         merged.pop("Vehicles", None)
         print("[launcher] Cleared 'Vehicles' from settings for vJoy mode.")
 
     if enable_trace and not use_vjoy:
-        # Enable simulator trace for third-person mode (only if not in vJoy mode
-        # to keep settings clean and avoid double-spawn).
         merged_vehicles = merged.get("Vehicles")
         if not isinstance(merged_vehicles, dict):
             merged_vehicles = {}
