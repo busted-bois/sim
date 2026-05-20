@@ -5,17 +5,18 @@
     "map_name": "BlocksV2",
     "map_asset": "/Game/FlyingCPP/Maps/FlyingExampleMapV2",
     "specification_profile": "official_conformant",
-    "pawn_asset": "Class'/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C'",
+    "pawn_asset": "/Game/FlyingCPP/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
     "gate_search_tokens": "gate,ring,torus,hoop",
-    "extra_ue_args": [],
+    "extra_ue_args": ["-map=/Game/FlyingCPP/Maps/FlyingExampleMapV2"],
     "windowed": true,
     "res_x": 1280,
     "res_y": 720,
-    "airsim_port": 41451,
+    "rpc_port": 41451,
+    "settings_path": "",
     "physics_update_hz": 120,
     "specification_path": "docs/simulator_specs.json",
     "specification_required": true,
-    "rpc_ready_timeout_seconds": 120,
+    "rpc_ready_timeout_seconds": 180,
     "trace": {
       "enabled": true,
       "color_rgba": [1.0, 0.0, 1.0, 1.0],
@@ -23,7 +24,7 @@
     }
   },
   "vision": {
-    "enabled": true,
+    "enabled": false,
     "camera_name": "0",
 "pitch_up_degrees": -20,
     "fps": 30,
@@ -63,7 +64,7 @@
     "algorithm_timeout_seconds": 180
   },
   "preflight": {
-    "require_airsim_reachable": false,
+    "require_simulator_rpc": false,
     "require_mavlink_reachable": false
   },
   "test_profile": {
@@ -193,7 +194,7 @@
     "duration_s": 5.0,
     "speed_ms": 2.0,
     "direction_labels": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"],
-    "mavlink_setpoint_demo_enabled": false
+    "mavlink_setpoint_demo_enabled": true
   },
   "mavlink_jitter": {
     "duration_s": 60,
@@ -211,7 +212,7 @@
       "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],
       "auto_discover_endpoints": true,
       "state_request_hz": 20,
-      "guided_custom_mode": 4,
+      "guided_custom_mode": 6,
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,
@@ -252,7 +253,8 @@
           "duration_seconds": 0.35
         }
       },
-      "airsim_profile": {
+      "auto_start_px4": true,
+      "bridge_profile": {
         "vehicle_name": "Drone1",
         "vehicle_type": "PX4Multirotor",
         "udp_ip": "127.0.0.1",
@@ -262,6 +264,12 @@
         "qgc_host_ip": "127.0.0.1",
         "qgc_port": 14550,
         "lock_step": false
+      },
+      "attitude": {
+        "enabled": true,
+        "request_hz": 50,
+        "max_staleness_ms": 500,
+        "log_messages": false
       }
     },
     "command_rate_hz": 90,
@@ -281,15 +289,7 @@
       }
     },
     "max_speed_ms": 10.0,
-    "max_altitude_m": 50.0,
-    "mavlink": {
-      "attitude": {
-        "enabled": true,
-        "request_hz": 50,
-        "max_staleness_ms": 500,
-        "log_messages": false
-      }
-    }
+    "max_altitude_m": 50.0
   },
   "waypoints": [
     { "x": 10.0, "y": 0.0, "z": -8.0 },

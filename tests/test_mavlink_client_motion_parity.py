@@ -37,7 +37,7 @@ class PymavlinkFlightClientMotionParityTests(unittest.TestCase):
         self.assertAlmostEqual(call[9], -0.5, places=5)
         self.assertAlmostEqual(call[10], 0.25, places=5)
 
-    def test_attitude_roll_matches_airsim_mapped_euler(self) -> None:
+    def test_attitude_roll_matches_legacy_mapped_euler(self) -> None:
         heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=3, source_component=1)
         connection = FakeMavConnection(heartbeat, [])
         client = _client(connection)

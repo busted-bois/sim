@@ -49,7 +49,7 @@ def _has_nested_key(data: Any, key_path: str) -> bool:
     return isinstance(current, Mapping) and parts[-1] in current
 
 
-def _airsim_reachable(host: str, port: int) -> bool:
+def _simulator_rpc_port_open(host: str, port: int) -> bool:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1.5)
     try:
@@ -169,7 +169,7 @@ def run_preflight() -> int:
     required_keys = [
         "algorithm",
         "simulator.colosseum_path",
-        "simulator.airsim_port",
+        "simulator.rpc_port",
         "simulator.rpc_ready_timeout_seconds",
         "control.command_rate_hz",
         "control.max_speed_ms",
@@ -343,11 +343,11 @@ def run_preflight() -> int:
                     warnings.append(f"{message} (warning only before simulator launch)")
     else:
         host, port = simulator_endpoint(config)
-        require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))
-        if _airsim_reachable(host, port):
-            passes.append(f"AirSim RPC reachable at {host}:{port}")
+        require_reachable = bool(config.get("preflight", {}).get("require_simulator_rpc", False))
+        if _simulator_rpc_port_open(host, port):
+            passes.append(f"Simulator RPC port open at {host}:{port}")
         else:
-            message = f"AirSim RPC not reachable at {host}:{port}"
+            message = f"Simulator RPC port not open at {host}:{port}"
             if require_reachable:
                 errors.append(message)
             else:

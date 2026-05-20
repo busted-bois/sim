@@ -177,7 +177,9 @@ def _resolve_pawn_asset(pawn_asset_path):
     raw_name = raw_name.rsplit("/", 1)[-1]
     raw_name = raw_name.split(".", 1)[0]
     raw_name = raw_name.removesuffix("_C")
-    asset, resolved_path = _find_asset_by_name(raw_name, ["/AirSim/Blueprints", "/AirSim", "/Game"])
+    asset, resolved_path = _find_asset_by_name(
+        raw_name, ["/Game/FlyingCPP/Blueprints", "/Game"]
+    )
     if asset is not None:
         return asset, resolved_path
     return None, None
@@ -282,7 +284,7 @@ def _static_mesh_dimensions_m(mesh_asset):
 def _collect_gate_asset_specs(tokens):
     specs = []
     registry = _asset_registry()
-    for search_path in ("/Game/FlyingCPP/Maps/_GENERATED", "/Game", "/AirSim"):
+    for search_path in ("/Game/FlyingCPP/Maps/_GENERATED", "/Game"):
         for asset_data in registry.get_assets_by_path(search_path, recursive=True):
             asset_name = str(asset_data.asset_name)
             object_path = _asset_data_object_path(asset_data)
@@ -383,7 +385,10 @@ def _metadata():
 def main():
     output_path = os.environ["CODEX_SIM_SPEC_OUT"]
     map_asset = os.environ.get("CODEX_SIM_SPEC_MAP", "/Game/FlyingCPP/Maps/FlyingExampleMapV2")
-    pawn_asset = os.environ.get("CODEX_SIM_SPEC_PAWN_ASSET", "/AirSim/Blueprints/BP_FlyingPawn")
+    pawn_asset = os.environ.get(
+        "CODEX_SIM_SPEC_PAWN_ASSET",
+        "/Game/FlyingCPP/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
+    )
     gate_tokens = [
         token.strip().lower()
         for token in os.environ.get("CODEX_SIM_SPEC_GATE_TOKENS", "gate,ring,torus").split(",")

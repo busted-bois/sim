@@ -13,6 +13,11 @@ class OpenCvLanding(Algorithm):
         This algorithm flies forward until it detects a large grey wall,
         then it moves backward and lands.
         """
+        vision_cfg = self._config.get("vision", {})
+        if not bool(vision_cfg.get("enabled", False)) or self._vision_feed is None:
+            print("[opencv_landing] vision disabled or unavailable; exiting.")
+            return
+
         print("[opencv_landing] Algorithm started.")
 
         # Takeoff

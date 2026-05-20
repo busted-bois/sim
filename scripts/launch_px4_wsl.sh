@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch PX4-SITL configured to bridge to AirSim on the Windows host.
+# Launch PX4-SITL configured to bridge to the simulator on the Windows host.
 # Requires WSL mirrored networking mode (Windows loopback shared with WSL).
 # Called by scripts/dev-mavlink.ps1 — also runnable standalone from inside WSL.
 set -euo pipefail

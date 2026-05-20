@@ -172,7 +172,15 @@ def specification_snapshot_validation(
             "Simulator specification snapshot has no config fingerprint; "
             "re-run uv run extract-simulator-specs to record freshness metadata"
         )
-    drone_dims = spec_snapshot.get("drone", {}).get("dimensions_m")
+    drone = spec_snapshot.get("drone")
+    if not isinstance(drone, dict):
+        errors.append(
+            "Simulator specification snapshot is missing drone dimensions. "
+            "Run: uv run extract-simulator-specs (check pawn_asset in sim.config.json)"
+        )
+        drone_dims = None
+    else:
+        drone_dims = drone.get("dimensions_m")
     gate_dims = spec_snapshot.get("gate_reference", {}).get("dimensions_m")
     if drone_dims and gate_dims:
         passes.append(f"Simulator specification snapshot present: {spec_path}")
@@ -300,7 +308,7 @@ def extract_specification_snapshot(config: dict[str, Any]) -> Path:
         sim_cfg.get("map_asset", "/Game/FlyingCPP/Maps/FlyingExampleMapV2")
     )
     env["CODEX_SIM_SPEC_PAWN_ASSET"] = str(
-        sim_cfg.get("pawn_asset", "/AirSim/Blueprints/BP_FlyingPawn")
+        sim_cfg.get("pawn_asset", "/Game/FlyingCPP/Blueprints/BP_FlyingPawn")
     )
     env["CODEX_SIM_SPEC_GATE_TOKENS"] = str(
         sim_cfg.get("gate_search_tokens", "gate,ring,torus")

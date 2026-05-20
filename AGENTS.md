@@ -21,44 +21,37 @@ This repo uses multiple AI coding tools (OpenCode, Claude, Cursor, Copilot). Ins
 ## Simulator physics (120 Hz)
 
 - **Unreal:** fixed async physics step and substepping set in Colosseum (`PROJECT_PATH`). Optional merge: `scripts/unreal_default_engine_physics_120hz_fragment.ini` → `Config/DefaultEngine.ini`.
-- **Snapshot:** `docs/simulator_specs.json` from `uv run extract-simulator-specs`. With `simulator.specification_required: true`, `uv run preflight` and `uv run sim` validate it. AirSim RPC does not read live `PhysicsSettings` from Python.
-- **Vision / conformant:** `vision.fov_degrees` is **horizontal** FOV (see `src/vision/intrinsics.py`). With `simulator.specification_profile: official_conformant`, preflight pins FOV and 640×360; keep defaults and `profiles.official_conformant` aligned. `camera.pitch_up_degrees` is pilot "up"; AirSim `Pitch` and `set_front_camera_pose` negate it for UE.
+- **Snapshot:** `docs/simulator_specs.json` from `uv run extract-simulator-specs`. With `simulator.specification_required: true`, `uv run preflight` and `uv run sim` validate it.
+- **Vision / conformant:** `vision.fov_degrees` is **horizontal** FOV (see `src/vision/intrinsics.py`). With `simulator.specification_profile: official_conformant`, preflight pins FOV and 640×360; keep defaults and `profiles.official_conformant` aligned. `camera.pitch_up_degrees` is pilot "up"; UE camera `Pitch` in settings JSON negates it.
 
 ## Running
 
 ```bash
-uv run sim                              # One command: .env.local, UE5 (if configured), main.py
+uv run sim                              # One command: .env.local, UE5, PX4-SITL (WSL, auto on Windows), main.py
 uv run sim low-end                      # Low-res, reduced telemetry, attitude_four_motion
 uv run sim 3rd-person                   # FlyWithMe camera instead of FPV
 uv run sim-very-soft                    # Gentle landing profile
-uv run sim vjoy                         # Manual vJoy control + GUI
 uv run preflight                        # Safety check before launch
 uv run verify-sim-physics-metadata      # Assert docs/simulator_specs.json documents 120 Hz physics
 uv run extract-simulator-specs          # Regenerate snapshot from Unreal (needs PROJECT_PATH + UE)
-uv run calibrate                        # Depth calibration with manual GUI
 uv run check-mavlink                    # Sniff UDP 14540/14550 for MAVLink frames (--duration 0 = forever)
 uv run sim-mavlink                      # Launch UE with PX4Multirotor settings (needs PX4-SITL in WSL); Ctrl+C to stop
 uv run sim-mavlink probe                # Same, but auto-run check-mavlink for 60s after launch
-uv run mavlink-all                      # All-in-one: UE + PX4-SITL (WSL) + probe; logs to logs/mavlink/<ts>/. Requires WSL mirrored networking.
-uv run sim-restore-simpleflight         # Manually restore SimpleFlight settings.json from backup (uv run sim does this automatically)
+uv run mavlink-all                      # All-in-one: UE + PX4-SITL (WSL) + probe; logs to logs/mavlink/<ts>/
 uv run check-mavlink --decode-attitude    # Also decode ATTITUDE roll/pitch/yaw
 uv run attitude-listen                  # ATTITUDE-only UDP listener (Layer 1, no pymavlink)
-uv run python scripts/smoke_attitude_integration.py  # Smoke (decode + UDP inject)
-uv run --group dev pytest tests/ -q     # Unit tests (MAVLink ATTITUDE, etc.)
-uv run main.py                          # Run drone client (needs simulator running)
+uv run main.py                          # Run drone client (needs MAVLink HEARTBEAT)
 uv run highres-imu-smoke                # Probe HIGHRES_IMU against running MAVLink endpoint
 uv run sim-highres-imu-smoke            # Launch sim first, then probe HIGHRES_IMU
 uv run timesync-smoke                   # Probe TIMESYNC against running MAVLink endpoint
 uv run sim-timesync-smoke               # Launch sim first, then probe TIMESYNC
 uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream
-uv run sim-attitude-smoke               # Same via sim_launch (AirSim settings + UE if configured)
+uv run sim-attitude-smoke               # Same via sim_launch (simulator settings + UE if configured)
 ```
 
-**MAVLink commands are probe-only.** `sim-mavlink`, `sim-mavlink probe`, and `mavlink-all` switch AirSim to PX4Multirotor mode and verify the MAVLink bridge — they do **not** run `main.py`. Bare `uv run sim` (SimpleFlight + RPC) is the path for autonomous flight.
+**Flight control is MAVLink-only.** `main.py` uses `PymavlinkFlightClient` (`SET_POSITION_TARGET_LOCAL_NED`, `SET_ATTITUDE_TARGET`, `HIGHRES_IMU`, `TIMESYNC`). `sim-mavlink` / `mavlink-all` verify the bridge; they do not run `main.py`.
 
-`uv run sim` auto-restores SimpleFlight settings from `~/Documents/AirSim/settings.simpleflight.bak.json` if leftover PX4Multirotor config detected. Use `uv run sim-restore-simpleflight` to force manually.
-
-After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once AirSim RPC accepts connections, up to `simulator.rpc_ready_timeout_seconds`.
+After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once a MAVLink HEARTBEAT is seen, up to `simulator.rpc_ready_timeout_seconds`. On Windows with `control.mavlink.auto_start_px4` (default true), `uv run sim` also starts PX4-SITL in WSL after the HIL TCP listener is up (same prerequisites as `mavlink-all`: mirrored `.wslconfig`, built `~/PX4-Autopilot`). Set `AIGP_AUTO_PX4=0` to start PX4 manually.
 
 **Ctrl+C** (SIGINT) stops `main.py` and (if launcher started it) the UE process. **SIGTERM** is not wired to cleanup — Unreal may stay open.
 
@@ -70,8 +63,9 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `AIGP_LANDING_PROFILE` — override landing profile (`very_soft`, `faster_soft`).
 - `AIGP_ENABLE_TRACE=1` — enable flight path trace line.
 - `AIGP_PAUSE_BEFORE_EXIT=1` — pause before client exit.
-- `AIGP_SKIP_MAVLINK_INTEGRATION=1` — skip UDP loopback integration tests.
-- `AIRSIM_PORT` — set by launcher, forwarded to main.py.
+- `AIGP_MAVLINK_ENDPOINT` — override MAVLink UDP listen endpoint.
+- `AIGP_AUTO_PX4` — set to `0` to skip auto-starting PX4-SITL in WSL during `uv run sim`.
+- `SIMULATOR_RPC_PORT` — simulator API port (launcher / legacy tools).
 
 ### Output Artifacts
 
@@ -81,70 +75,42 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 
 ## Project Layout
 
-- `main.py` — Entry point. Connects to AirSim RPC, loads algorithm from config, runs it.
-- `sim.config.json` — Runtime config (algorithm name, sim ports, waypoints, control limits, vision, landing profiles).
-- `.env.local` — `PROJECT_PATH` to UE5 project. Loaded by `uv run sim` / `launch.sh` / `launch.ps1`. Not committed.
-- `src/config.py` — Reads `sim.config.json` from project root.
-- `src/sim_launch.py` — Launcher. Entry point for `uv run sim`, `uv run sim-very-soft`, `uv run sim-low-end`, `uv run calibrate`, `uv run sim-attitude-smoke`, `uv run sim-timesync-smoke`.
-- `src/preflight.py` — Preflight safety check. Entry point for `uv run preflight`.
-- `src/landing_telemetry.py` — Optional CSV samples during landing.
-- `src/control/` — Flight client abstraction (`flight_client.py`), AirSim adapter, MAVLink client (`mavlink_client.py`), primitives, command rate, IMU, timesync.
-- `src/control/algorithms/` — Pluggable flight algorithms via `@register("name")` decorator. Auto-discovered from `*.py` in the directory.
-- `src/vision/` — Vision subsystem: `feed.py` (FPV capture), `intrinsics.py` (pinhole K), `depth_perception.py` (MiDaS ONNX), `processing.py`.
-- `models/midas_v21_small.onnx` — Monocular depth estimation model.
-- `airsim/` — Vendored AirSim Python RPC client. **Do not modify.**
-- `msgpackrpc/` — Custom msgpack-rpc shim for Python 3.12 compat. **Do not modify.**
-- `simple_airsim/` — Empty. Unused.
-- `opensrc/` — Gitignored external sources. Not part of the project.
-- `scripts/` — Install, launch, depth calibration, and model download scripts.
-- `manual_flight_gui.py` — Manual flight GUI. Requires `uv sync --extra manual`.
+- `main.py` — Entry point. MAVLink client + algorithm loop.
+- `sim.config.json` — Runtime config (algorithm, MAVLink, vision, landing).
+- `.env.local` — `PROJECT_PATH` to UE5 project.
+- `src/config.py` — Reads `sim.config.json`.
+- `src/sim_launch.py` — Launcher (`uv run sim`, smokes, mavlink orchestration).
+- `src/control/main_loop.py` — Algorithm timeout and optional tick loop.
+- `src/control/mavlink_client.py` — `PymavlinkFlightClient`.
+- `src/control/flight_client.py` — Protocol + MAVLink setpoint types.
+- `src/control/algorithms/` — Pluggable algorithms (`@register`).
+- `src/vision/feed.py` — Vision stub (phase 1; no camera transport).
+- `opensrc/` — Gitignored external sources.
 
 ## Registered Algorithms
 
-Auto-discovered from `src/control/algorithms/*.py`:
-
 | Name | File | Description |
 |------|------|-------------|
-| `six_directions` | `six_directions.py` | 6-axis test pattern (default baseline) |
-| `attitude_four_motion` | `attitude_four_motion.py` | 4-direction motion with calibration |
-| `opencv_landing` | `opencv_landing.py` | Vision-guided landing |
-| `vision_guided_control` | `vision_guided_control.py` | Red-circle detector pursuit |
-| `autonomous_explore` | `autonomous_explore.py` | Depth-based obstacle avoidance + ring/target pursuit |
+| `mavlink_jitter` | `mavlink_jitter.py` | MAVLink stress-test pattern |
+| `six_directions` | `six_directions.py` | 6-axis SET_POSITION_TARGET demo |
+| `attitude_four_motion` | `attitude_four_motion.py` | 4-direction attitude control |
+| `opencv_landing` | `opencv_landing.py` | Vision landing (needs vision phase 2) |
+| `vision_guided_control` | `vision_guided_control.py` | Target pursuit (needs vision phase 2) |
+| `autonomous_explore` | `autonomous_explore.py` | Depth exploration (needs vision phase 2) |
 
-Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonomous_explore"`.
-
-## Adding a New Algorithm
-
-1. Create `src/control/algorithms/my_algo.py`
-2. Extend `Algorithm`, implement `run(self, client: FlightClient)`
-3. Decorate with `@register("my_algo")`
-4. File is auto-discovered — no manual import needed (auto-scanned from `*.py` in directory)
-5. Set `"algorithm": "my_algo"` in `sim.config.json`
-6. Access vision via `self.latest_frame()` and `self.vision_stats()` (set by `set_vision_feed`)
+Default algorithm in `sim.config.json`: `mavlink_jitter`.
 
 ## Coordinate Frame
 
-**NED** (North-East-Down). Negative z = above ground. Drone at 5m altitude → `z = -5.0`.
+**NED** (North-East-Down). Negative z = above ground.
 
 ### MAVLink `SET_POSITION_TARGET_LOCAL_NED`
 
-- **`MAV_FRAME_LOCAL_NED`**: origin is a fixed ground point (typically arm position); `x` north, `y` east, `z` down.
-- **`MAV_FRAME_BODY_NED`**: origin is the vehicle; `x` forward, `y` right, `z` down.
+- **`MAV_FRAME_LOCAL_NED`**: fixed origin; `x` north, `y` east, `z` down.
+- **`MAV_FRAME_BODY_NED`**: body frame; `x` forward, `y` right, `z` down.
 
-Helpers on `PymavlinkFlightClient` and `FlightClient` protocol. Checklist: `docs/set_position_target_pr_test_plan.md`.
-
-## Algorithm Config Sections in sim.config.json
-
-Each algorithm has its own top-level config key matching its name (e.g. `"autonomous_explore"`, `"attitude_four_motion"`). Read by algorithm constructor via `self._config`.
-
-Key top-level config keys:
-- `"control"` — `command_rate_hz`, `latency_tuning`, `max_speed_ms`, `max_altitude_m`
-- `"vision"` — FPV feed: `enabled`, `fps`, `fov_degrees`, `resolution`, `depth` (ONNX model)
-- `"landing"` — `profile`, `descent_speed_ms`, safety caps, telemetry toggle
-- `"safety"` — `algorithm_timeout_seconds`
-- `"low_end_profile"` — overrides applied when `AIGP_LOW_END=1`
-- `"waypoints"` — NED coordinate list
+Helpers: `src/control/setpoints.py`, `PymavlinkFlightClient`. Checklist: `docs/set_position_target_pr_test_plan.md`.
 
 ## Ruff Exclusions
 
-Ruff excludes: `.venv/`, `airsim/`, `msgpackrpc/`, `opensrc/`, `simple_airsim/`, `.claude/`, `.sisyphus/`, `.ruff_cache/`. Do not lint vendored code.
+Ruff excludes: `.venv/`, `opensrc/`, `.claude/`, `.sisyphus/`, `.ruff_cache/`.

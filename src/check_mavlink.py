@@ -4,7 +4,7 @@ Passive listener: start the simulator first, then run `uv run check-mavlink`.
 Sniffs MAVLink v1 (0xFE) and v2 (0xFD) frames on standard ports (14540, 14550),
 logs each packet's source/sysid/msgid, and exits with PASS/FAIL.
 
-Sends nothing. Does not change AirSim settings.
+Sends nothing. Does not change simulator settings.
 """
 
 from __future__ import annotations

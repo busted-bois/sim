@@ -1,2 +1,0 @@
-REQUEST = 0
-RESPONSE = 1

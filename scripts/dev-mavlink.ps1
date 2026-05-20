@@ -72,7 +72,7 @@ if ($EnableMirrored) {
 
 if (-not $SkipMirroredCheck -and -not (Test-MirroredMode)) {
     Write-Host "[ORCH] WSL mirrored networking is NOT enabled in $env:USERPROFILE\.wslconfig."
-    Write-Host "[ORCH] Required so PX4 in WSL can reach AirSim on Windows via 127.0.0.1."
+    Write-Host "[ORCH] Required so PX4 in WSL can reach the simulator on Windows via 127.0.0.1."
     Write-Host "[ORCH] Add to $env:USERPROFILE\.wslconfig :"
     Write-Host "         [wsl2]"
     Write-Host "         networkingMode=mirrored"
@@ -99,11 +99,11 @@ if ($px4BinCheck -ne "OK") {
 }
 
 # Friendly nudge: firewall rule no longer needed under mirrored mode.
-$rule = Get-NetFirewallRule -DisplayName "AirSim HIL TCP 4560" -ErrorAction SilentlyContinue
+$rule = Get-NetFirewallRule -DisplayName "PX4 HIL TCP 4560" -ErrorAction SilentlyContinue
 if ($rule) {
-    Write-Host "[ORCH] Note: 'AirSim HIL TCP 4560' firewall rule is still present but unnecessary."
+    Write-Host "[ORCH] Note: 'PX4 HIL TCP 4560' firewall rule is still present but unnecessary."
     Write-Host "[ORCH]       Remove it (admin) when convenient:"
-    Write-Host "[ORCH]         Remove-NetFirewallRule -DisplayName 'AirSim HIL TCP 4560'"
+    Write-Host "[ORCH]         Remove-NetFirewallRule -DisplayName 'PX4 HIL TCP 4560'"
 }
 
 # --------------------------------------------------------------------------
@@ -156,7 +156,7 @@ $manifest = [ordered]@{
     ue_executable = $Plan.colosseum
     ue_args = $Plan.args
     settings_path = $Plan.settings_path
-    airsim_port = $Plan.airsim_port
+    rpc_port = $Plan.rpc_port
     hil_tcp_port = $HilPort
     px4_command = "PX4_SIM_HOST_ADDR=127.0.0.1 make px4_sitl none_iris"
     wsl_distro = if ($WslDistro) { $WslDistro } else { "(default)" }
@@ -306,7 +306,7 @@ try {
     $UeState = @{}
     $UeProc = Start-LoggedProcess -Exe $Plan.colosseum -ArgList $UeArgs -LogPath $UeLog -State $UeState
 
-    Write-Host "[ORCH] Waiting (up to 120s) for AirSim HIL TCP :$HilPort to listen..."
+    Write-Host "[ORCH] Waiting (up to 120s) for PX4 HIL TCP :$HilPort to listen..."
     $deadline = (Get-Date).AddSeconds(120)
     $hilReady = $false
     while ((Get-Date) -lt $deadline) {
@@ -340,7 +340,7 @@ try {
     $Px4ArgList = @() + $WslArgs + @("-e", "bash", $px4ScriptWsl)
     $Px4Proc = Start-LoggedProcess -Exe "wsl" -ArgList $Px4ArgList -LogPath $Px4Log -State $Px4State
 
-    Write-Host "[ORCH] Waiting (up to 90s) for PX4 to connect to AirSim..."
+    Write-Host "[ORCH] Waiting (up to 90s) for PX4 to connect to the simulator..."
     $deadline = (Get-Date).AddSeconds(90)
     $px4Connected = $false
     $connLine = ""

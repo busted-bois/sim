@@ -31,11 +31,11 @@ import time
 
 import numpy as np
 
-import airsim
 from src.control.algorithms import Algorithm, register
 from src.control.flight_client import FlightClient
 from src.control.highres_imu import format_highres_imu_health
 from src.control.primitives import rotate_yaw, takeoff_with_settle
+from src.control.setpoints import apply_velocity_ned
 from src.control.utils import _clamp, _yaw_from_orientation, make_vz_trim
 from src.vision.intrinsics import yaw_mapping_half_fov_degrees
 from src.vision.processing import (
@@ -50,6 +50,13 @@ class AutonomousExplore(Algorithm):
     config_section = "autonomous_explore"
 
     def run(self, client: FlightClient) -> None:
+        vision_cfg = self._config.get("vision", {})
+        if not bool(vision_cfg.get("enabled", False)) or self._vision_feed is None:
+            print(
+                "[autonomous_explore] vision disabled or unavailable; exiting."
+            )
+            return
+
         cfg = self._config.get("autonomous_explore", {})
         control = self._config.get("control", {})
 
@@ -453,13 +460,14 @@ class AutonomousExplore(Algorithm):
                     # Vertical correction during lineup
                     vz_lineup = _clamp(target_v_gain * ny, -1.0, 1.0)
 
-                    client.moveByVelocityAsync(
+                    apply_velocity_ned(
+                        client,
                         lineup_v * cos_y,
                         lineup_v * sin_y,
                         vz_lineup,
                         dt,
-                        yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
-                    ).join()
+                        yaw_rate_dps=float(yaw_rate),
+                    )
                     if steps % max(1, int(rate_hz // 2)) == 0:
                         print(
                             f"[autonomous_explore] lineup nx={nx:+.2f} ny={ny:+.2f} "
@@ -494,13 +502,14 @@ class AutonomousExplore(Algorithm):
 
                 vx_world = fwd_speed * cos_y
                 vy_world = fwd_speed * sin_y
-                client.moveByVelocityAsync(
+                apply_velocity_ned(
+                    client,
                     vx_world,
                     vy_world,
                     vz_pursue,
                     dt,
-                    yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
-                ).join()
+                    yaw_rate_dps=float(yaw_rate),
+                )
                 if steps % max(1, int(rate_hz)) == 0:
                     print(
                         f"[autonomous_explore] pursue {kind} nx={nx:+.2f} ny={ny:+.2f} "
@@ -525,13 +534,14 @@ class AutonomousExplore(Algorithm):
                 )
                 # Gentle drift correction back to locked heading.
                 yaw_rate_scan = _clamp(2.0 * yaw_err_deg, -25.0, 25.0)
-                client.moveByVelocityAsync(
+                apply_velocity_ned(
+                    client,
                     post_flythrough_scan_speed_ms * cos_s,
                     post_flythrough_scan_speed_ms * sin_s,
                     vz,
                     dt,
-                    yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate_scan)),
-                ).join()
+                    yaw_rate_dps=float(yaw_rate_scan),
+                )
                 if steps % max(1, int(rate_hz)) == 0:
                     remaining = scan_until_s - time.monotonic()
                     print(
@@ -641,13 +651,14 @@ class AutonomousExplore(Algorithm):
 
             vx_world = fwd_speed * cos_y
             vy_world = fwd_speed * sin_y
-            client.moveByVelocityAsync(
+            apply_velocity_ned(
+                client,
                 vx_world,
                 vy_world,
                 vz,
                 dt,
-                yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
-            ).join()
+                yaw_rate_dps=float(yaw_rate),
+            )
 
             if steps % max(1, int(rate_hz)) == 0:
                 rounded = np.round(col_scores, 1).tolist()

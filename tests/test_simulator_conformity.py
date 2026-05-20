@@ -99,7 +99,7 @@ class SimulatorConformityTests(unittest.TestCase):
         config = {
             "simulator": {
                 "map_asset": "/Game/FlyingCPP/Maps/FlyingExampleMapV2",
-                "pawn_asset": "Class'/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C'",
+                "pawn_asset": "/Game/FlyingCPP/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
                 "gate_search_tokens": "gate,ring,torus",
                 "physics_update_hz": 120.0,
                 "specification_required": True,

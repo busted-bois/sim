@@ -30,7 +30,7 @@ class DepthEstimator:
         self.model_path = model_path
         self.net = None
 
-        # Calibration parameters (placeholders, should be tuned for AirSim)
+        # Calibration parameters (placeholders, should be tuned for the simulator)
         # Formula: metric_depth = scale * relative_depth + offset
         # Note: MiDaS outputs inverse depth (disparity-like), so logic might vary.
         self.scale = 1.0
@@ -122,7 +122,7 @@ class DepthEstimator:
 
     def calibrate(self, relative_map: np.ndarray, ground_truth_map: np.ndarray):
         """
-        Calibrates the model's output using a ground truth depth map from AirSim.
+        Calibrates the model's output using a ground truth depth map from the simulator.
         Uses simple linear regression to find scale and offset.
         """
         # Flatten and remove invalid/infinity values if any

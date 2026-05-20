@@ -7,6 +7,10 @@ import time
 
 from src.control.algorithms import Algorithm, register
 from src.control.flight_client import FlightClient
+from src.control.main_loop import VehicleState
+from src.control.primitives import takeoff_with_settle
+from src.control.setpoints import apply_velocity_ned
+from src.vision import VisionFrame
 
 _JITTER_MOVES = [
     ("forward", 1.0, 0.0, 0.0),
@@ -28,92 +32,122 @@ _JITTER_MOVES = [
 
 @register("mavlink_jitter")
 class MavlinkJitter(Algorithm):
-    """Haphazard movement to stress-test MAVLink command pipeline."""
-
     name = "mavlink_jitter"
     config_section = "mavlink_jitter"
+    uses_control_loop = True
 
-    def run(self, client: FlightClient) -> None:
+    def __init__(self, config) -> None:
+        super().__init__(config)
+        self._tick_initialized = False
+        self._rng: random.Random | None = None
+        self._deadline_s = 0.0
+        self._move_deadline_s = 0.0
+        self._move_count = 0
+        self._vx = 0.0
+        self._vy = 0.0
+        self._vz = 0.0
+        self._yaw_rate_dps = 0.0
+        self._hover_between = True
+        self._hover_dur = 0.5
+        self._max_speed = 2.0
+        self._move_dur = 2.0
+        self._altitude_jitter = 0.5
+        self._yaw_rate_cfg = 30.0
+        self._period_s = 0.02
+
+    def run(self, _client: FlightClient) -> None:
+        return
+
+    def run_tick(
+        self,
+        client: FlightClient,
+        state: VehicleState,
+        frame: VisionFrame | None,
+    ) -> None:
+        _ = state, frame
+        if not self._tick_initialized:
+            self._init_tick_loop(client)
+            return
+
+        now = time.perf_counter()
+        if now >= self._deadline_s:
+            print(f"[mavlink_jitter] Done -- {self._move_count} moves. Hovering.")
+            client.hoverAsync().join()
+            self.flight_complete = True
+            return
+
+        if now >= self._move_deadline_s:
+            if self._hover_between and (self._deadline_s - now) > 1.0:
+                client.hoverAsync().join()
+                time.sleep(self._hover_dur)
+            self._start_move(now)
+            return
+
+        apply_velocity_ned(
+            client,
+            self._vx,
+            self._vy,
+            self._vz,
+            self._period_s,
+            yaw_rate_dps=self._yaw_rate_dps,
+        )
+
+    def _init_tick_loop(self, client: FlightClient) -> None:
         cfg = self._config.get("mavlink_jitter", {})
         control_cfg = self._config.get("control", {})
-        max_speed = max(0.1, float(control_cfg.get("max_speed_ms", 2.0)))
+        self._max_speed = max(0.1, float(control_cfg.get("max_speed_ms", 2.0)))
         duration_s = max(5.0, float(cfg.get("duration_s", 60.0)))
-        move_dur = max(0.5, float(cfg.get("move_duration_s", 2.0)))
-        yaw_rate = float(cfg.get("yaw_rate_dps", 30.0))
-        altitude_jitter = float(cfg.get("altitude_jitter_m", 0.5))
-        hover_between = bool(cfg.get("hover_between_moves", True))
-        hover_dur = max(0.1, float(cfg.get("hover_duration_s", 0.5)))
+        self._move_dur = max(0.5, float(cfg.get("move_duration_s", 2.0)))
+        self._yaw_rate_cfg = float(cfg.get("yaw_rate_dps", 30.0))
+        self._altitude_jitter = float(cfg.get("altitude_jitter_m", 0.5))
+        self._hover_between = bool(cfg.get("hover_between_moves", True))
+        self._hover_dur = max(0.1, float(cfg.get("hover_duration_s", 0.5)))
         seed = cfg.get("random_seed", 42)
-
-        rng = random.Random(seed)
-
+        rate_hz = max(5.0, float(control_cfg.get("command_rate_hz", 50.0)))
+        self._period_s = 1.0 / rate_hz
+        self._rng = random.Random(seed)
+        self._deadline_s = time.perf_counter() + duration_s
+        self._move_count = 0
+        self._tick_initialized = True
         print("[mavlink_jitter] Taking off...")
-        client.takeoffAsync().join()
-        self._log_state(client, "post_takeoff")
+        takeoff_with_settle(client, label="mavlink_jitter")
         time.sleep(1.0)
+        self._start_move(time.perf_counter())
 
-        start = time.perf_counter()
-        move_count = 0
+    def _start_move(self, now: float) -> None:
+        assert self._rng is not None
+        remaining = self._deadline_s - now
+        if remaining < 0.5:
+            self._move_deadline_s = now
+            return
 
-        while time.perf_counter() - start < duration_s:
-            remaining = duration_s - (time.perf_counter() - start)
-            if remaining < 0.5:
-                break
+        label, vx, vy, vz = self._rng.choice(_JITTER_MOVES)
+        speed_factor = 0.3 + self._rng.random() * 0.7
+        vx *= self._max_speed * speed_factor
+        vy *= self._max_speed * speed_factor
+        vz *= self._max_speed * speed_factor
+        if self._rng.random() < 0.3:
+            vz += self._rng.uniform(-self._altitude_jitter, self._altitude_jitter)
 
-            label, vx, vy, vz = rng.choice(_JITTER_MOVES)
-            speed_factor = 0.3 + rng.random() * 0.7
-            vx *= max_speed * speed_factor
-            vy *= max_speed * speed_factor
-            vz *= max_speed * speed_factor
+        this_dur = min(self._move_dur, remaining - 0.1)
+        if this_dur < 0.3:
+            self._move_deadline_s = now
+            return
 
-            if rng.random() < 0.3:
-                vz += rng.uniform(-altitude_jitter, altitude_jitter)
-
-            this_dur = min(move_dur, remaining - 0.1)
-            if this_dur < 0.3:
-                break
-
-            move_count += 1
+        self._move_count += 1
+        self._vx = vx
+        self._vy = vy
+        self._vz = vz
+        self._move_deadline_s = now + this_dur
+        if self._move_count % 5 == 0:
+            self._yaw_rate_dps = float(self._rng.choice([-1, 1]) * self._yaw_rate_cfg)
             print(
-                f"[mavlink_jitter] Move #{move_count}: {label} "
-                f"vx={vx:+.2f} vy={vy:+.2f} vz={vz:+.2f} "
-                f"dur={this_dur:.1f}s ({remaining:.1f}s remaining)"
+                f"[mavlink_jitter] Move #{self._move_count}: yaw "
+                f"{self._yaw_rate_dps:+.0f} deg/s for {this_dur:.1f}s"
             )
-
-            if move_count % 5 == 0:
-                rate = rng.choice([-1, 1]) * yaw_rate
-                print(
-                    f"[mavlink_jitter]   -> yaw rotation "
-                    f"{rate:+.0f} deg/s for {this_dur:.1f}s"
-                )
-                client.rotateByYawRateAsync(rate, this_dur).join()
-            else:
-                client.moveByVelocityAsync(vx, vy, vz, this_dur).join()
-
-            self._log_state(client, f"after_move_{move_count}")
-
-            if hover_between and remaining > 1.0:
-                client.hoverAsync().join()
-                time.sleep(hover_dur)
-
-        print(
-            f"[mavlink_jitter] Done -- {move_count} moves in "
-            f"{duration_s:.0f}s. Hovering."
-        )
-        client.hoverAsync().join()
-        time.sleep(1.0)
-
-    def _log_state(self, client: FlightClient, label: str) -> None:
-        try:
-            state = client.getMultirotorState()
-            kin = state.kinematics_estimated
-            pos = kin.position
-            vel = kin.linear_velocity
-            speed = (vel.x_val**2 + vel.y_val**2 + vel.z_val**2) ** 0.5
+        else:
+            self._yaw_rate_dps = 0.0
             print(
-                f"[mavlink_jitter]   state@{label}: "
-                f"pos=({pos.x_val:.2f}, {pos.y_val:.2f}, {pos.z_val:.2f}) "
-                f"speed={speed:.2f} m/s"
+                f"[mavlink_jitter] Move #{self._move_count}: {label} "
+                f"vx={vx:+.2f} vy={vy:+.2f} vz={vz:+.2f} dur={this_dur:.1f}s"
             )
-        except Exception as exc:
-            print(f"[mavlink_jitter]   state@{label}: error: {exc}")

@@ -9,6 +9,7 @@ from src.control.flight_client import (
     build_velocity_type_mask,
 )
 from src.control.primitives import takeoff_with_settle
+from src.control.setpoints import apply_velocity_ned
 
 DIRECTIONS = [
     ("+X", 2.0, 0.0, 0.0),
@@ -79,9 +80,9 @@ class SixDirections(Algorithm):
                 elif callable(stream_local_ned):
                     stream_local_ned(command, duration_s).join()
                 else:
-                    client.moveByVelocityAsync(vx_cmd, vy_cmd, vz_cmd, duration_s).join()
+                    apply_velocity_ned(client, vx_cmd, vy_cmd, vz_cmd, duration_s)
             else:
-                client.moveByVelocityAsync(vx_cmd, vy_cmd, vz_cmd, duration_s).join()
+                apply_velocity_ned(client, vx_cmd, vy_cmd, vz_cmd, duration_s)
             elapsed = time.perf_counter() - t0
             shortfall = duration_s - elapsed
             if shortfall > 1e-3:
