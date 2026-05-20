@@ -1,5 +1,5 @@
 {
-  "algorithm": "mavlink_jitter",
+  "algorithm": "autonomous_explore",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -172,7 +172,22 @@
     "flythrough_align_max_nx": 0.18,
     "flythrough_align_max_ny": 0.15,
     "lineup_yaw_gain_mult": 1.6,
-    "red_only_after_gate": true
+    "red_only_after_gate": true,
+    "exploration": {
+      "panorama_enabled": true,
+      "panorama_interval_s": 10.0,
+      "panorama_yaw_rate_dps": 45.0,
+      "panorama_creep_speed_ms": 0.0,
+      "leg_enabled": true,
+      "leg_duration_s": 10.0,
+      "leg_turn_deg": 90.0,
+      "leg_turn_rate_dps": 35.0,
+      "altitude_layers_m": [3.5, 5.0, 6.5],
+      "altitude_layer_dwell_s": 18.0,
+      "vertical_depth_bias_gain": 0.4,
+      "vertical_depth_bias_enabled": true,
+      "legacy_scan_enabled": false
+    }
   },
   "vision_guided_control": {
     "detector": "red_circle",

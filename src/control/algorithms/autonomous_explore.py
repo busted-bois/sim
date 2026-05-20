@@ -22,6 +22,7 @@ Inspired by:
 MiDaS small outputs disparity-like inverse depth (high value = close
 obstacle), so column scores are inverted before comparison. Set
 `autonomous_explore.inverse_depth=false` if you swap in a true-depth model.
+Optional `exploration` config adds XY legs, altitude layers, and 360° scans.
 """
 
 from __future__ import annotations
@@ -33,10 +34,15 @@ import numpy as np
 
 import airsim
 from src.control.algorithms import Algorithm, register
+from src.control.exploration.scheduler import (
+    ExplorationScheduler,
+    build_wander_tick_input,
+    parse_exploration_settings,
+)
 from src.control.flight_client import FlightClient
 from src.control.highres_imu import format_highres_imu_health
 from src.control.primitives import rotate_yaw, takeoff_with_settle
-from src.control.utils import _clamp, _yaw_from_orientation, make_vz_trim
+from src.control.utils import _clamp, _yaw_from_orientation
 from src.vision.intrinsics import yaw_mapping_half_fov_degrees
 from src.vision.processing import (
     blue_ring_info_normalized,
@@ -76,7 +82,13 @@ class AutonomousExplore(Algorithm):
             creep_norm_thresh = brake_norm_thresh * 0.4
 
         hold_altitude_m = _clamp(float(cfg.get("hold_altitude_m", 5.0)), 1.5, 50.0)
+        max_altitude_m = _clamp(float(control.get("max_altitude_m", 50.0)), hold_altitude_m, 50.0)
         z_hold = -hold_altitude_m  # NED: above ground = negative z
+        explore_settings = parse_exploration_settings(
+            cfg.get("exploration"),
+            hold_altitude_m=hold_altitude_m,
+            max_altitude_m=max_altitude_m,
+        )
         face_forward_on_start = bool(cfg.get("face_forward_on_start", True))
 
         pursue_targets = bool(cfg.get("pursue_targets", True))
@@ -154,8 +166,13 @@ class AutonomousExplore(Algorithm):
             "[autonomous_explore] start "
             f"max_v={max_v:.2f} cruise={cruise_v:.2f} rate_hz={rate_hz:.1f} "
             f"duration_s={duration_s:.1f} n_cols={n_cols} z_hold={z_hold:.1f} "
-            f"inverse_depth={inverse_depth}"
+            f"inverse_depth={inverse_depth} "
+            f"panorama={explore_settings.panorama_enabled} "
+            f"legs={explore_settings.leg_enabled} "
+            f"alt_layers={explore_settings.altitude_layers_m} "
+            f"legacy_scan={explore_settings.legacy_scan_enabled}"
         )
+        legacy_scan = explore_settings.legacy_scan_enabled
         imu_health = self.highres_imu_health(client)
         if imu_health is not None:
             print(f"[autonomous_explore] imu_health {format_highres_imu_health(imu_health)}")
@@ -178,9 +195,15 @@ class AutonomousExplore(Algorithm):
         )
         print(f"[autonomous_explore] start heading yaw={spawn_yaw_deg:+.1f}°")
 
-        vz_trim = make_vz_trim(client, z_hold)
-
         t0 = time.monotonic()
+        spawn_state = client.getMultirotorState().kinematics_estimated
+        spawn_z = float(spawn_state.position.z_val)
+        explore_sched = ExplorationScheduler(
+            explore_settings,
+            start_s=t0,
+            initial_yaw_rad=_yaw_from_orientation(spawn_state.orientation),
+            initial_z_ned=spawn_z,
+        )
         steps = 0
         no_frame_streak = 0
         # Timers for metrics
@@ -294,11 +317,17 @@ class AutonomousExplore(Algorithm):
                         print(f"[autonomous_explore] depth error: {exc}")
                     depth_map = None
 
-            yaw_rad = _yaw_from_orientation(
-                client.getMultirotorState().kinematics_estimated.orientation
-            )
+            kin = client.getMultirotorState().kinematics_estimated
+            yaw_rad = _yaw_from_orientation(kin.orientation)
+            z_ned = float(kin.position.z_val)
             cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
-            vz = vz_trim()
+            err_z = z_ned - explore_sched.z_hold_ned
+            if err_z < -0.3:
+                vz = 0.35
+            elif err_z > 0.3:
+                vz = -0.35
+            else:
+                vz = 0.0
 
             # Target pursuit overrides depth-based wander whenever a blue ring
             # or red circle is in view. Blue takes priority — rings are gates
@@ -327,7 +356,7 @@ class AutonomousExplore(Algorithm):
                     last_target_seen_s = now_s
                     last_target_nx = real_blue[0]
                     last_blue = (real_blue[0], real_blue[1], real_blue[2], now_s, yaw_rad)
-                    # CRITICAL: If we see a gate, we LOCK ON and ignore everything else
+                    explore_sched.reset_panorama_timer(now_s)
                     blue_lock_until_s = now_s + 2.5
                 blue_lock_engaged = now_s < blue_lock_until_s
 
@@ -335,6 +364,7 @@ class AutonomousExplore(Algorithm):
                     last_target_seen_s = now_s
                     last_target_nx = real_red[0]
                     last_red = (real_red[0], real_red[1], real_red[2], now_s, yaw_rad)
+                    explore_sched.reset_panorama_timer(now_s)
                     red_lock_until_s = now_s + 2.0
                 red_lock_engaged = now_s < red_lock_until_s
 
@@ -544,10 +574,33 @@ class AutonomousExplore(Algorithm):
 
             if depth_map is None:
                 no_frame_streak += 1
-                client.moveByVelocityAsync(0.0, 0.0, vz, dt).join()
+                tick_now = time.monotonic()
+                defer_panorama = tick_now - last_target_seen_s < 2.0
+                sched_out = explore_sched.tick(
+                    build_wander_tick_input(
+                        now_s=tick_now,
+                        dt_s=dt,
+                        yaw_rad=yaw_rad,
+                        z_ned=z_ned,
+                        cos_yaw=cos_y,
+                        sin_yaw=sin_y,
+                        base_vz=vz,
+                        defer_panorama=defer_panorama,
+                    )
+                )
+                client.moveByVelocityAsync(
+                    sched_out.fwd_speed * cos_y,
+                    sched_out.fwd_speed * sin_y,
+                    sched_out.vz,
+                    dt,
+                    yaw_mode=airsim.YawMode(
+                        is_rate=True, yaw_or_rate=float(sched_out.yaw_rate_deg_s)
+                    ),
+                ).join()
                 if steps % max(1, int(rate_hz)) == 0:
                     print(
-                        f"[autonomous_explore] no depth (streak={no_frame_streak}); hovering"
+                        f"[autonomous_explore] no depth (streak={no_frame_streak}) "
+                        f"{sched_out.label}; vz={sched_out.vz:+.1f}"
                     )
                 steps += 1
                 self._sleep_remaining(tick_start, dt)
@@ -609,11 +662,11 @@ class AutonomousExplore(Algorithm):
                     fwd_speed = cruise_v
                     state_label = "cruise"
 
-            # --- ACTIVE SCANNING LOGIC ---
-            # If we've been blind for a while, start an active search pattern.
-            if target_info is None:
-                time_since_target = time.monotonic() - last_target_seen_s
-                # Trigger search immediately when the dropout recovery/lock fails (~2.0s)
+            tick_now = time.monotonic()
+            time_since_target = tick_now - last_target_seen_s
+            defer_panorama = time_since_target < 2.0
+
+            if target_info is None and legacy_scan:
                 if time_since_target > 2.0:
                     # If this is the start of a search, pick direction based on
                     # where we last saw a target.
@@ -629,6 +682,7 @@ class AutonomousExplore(Algorithm):
                     # turn away from the gate area because of depth-avoidance.
                     yaw_rate = search_scan_offset
                     state_label = "SCANNING"
+                    defer_panorama = True
                 elif time_since_target > 0.5:
                     # Brief "coasting" period: suppress aggressive depth-wander
                     # immediately after losing a target to prevent the "snap-away"
@@ -638,6 +692,34 @@ class AutonomousExplore(Algorithm):
             else:
                 # Reset scan offset if we have a target
                 search_scan_offset = 0.0
+
+            band_h = band.shape[0]
+            mid = max(1, band_h // 2)
+            upper_clear: float | None = None
+            lower_clear: float | None = None
+            if band_h >= 2:
+                upper_clear = float(np.percentile(band[:mid, :], clearance_percentile))
+                lower_clear = float(np.percentile(band[mid:, :], clearance_percentile))
+            sched_out = explore_sched.tick(
+                build_wander_tick_input(
+                    now_s=tick_now,
+                    dt_s=dt,
+                    yaw_rad=yaw_rad,
+                    z_ned=z_ned,
+                    cos_yaw=cos_y,
+                    sin_yaw=sin_y,
+                    base_vz=vz,
+                    fwd_speed=fwd_speed,
+                    yaw_rate_deg_s=yaw_rate,
+                    upper_clearance=upper_clear,
+                    lower_clearance=lower_clear,
+                    defer_panorama=defer_panorama,
+                )
+            )
+            fwd_speed = sched_out.fwd_speed
+            yaw_rate = sched_out.yaw_rate_deg_s
+            vz = sched_out.vz
+            state_label = sched_out.label
 
             vx_world = fwd_speed * cos_y
             vy_world = fwd_speed * sin_y
@@ -655,7 +737,8 @@ class AutonomousExplore(Algorithm):
                     f"[autonomous_explore] {state_label} "
                     f"cols={rounded} chosen={chosen}/{n_cols - 1} "
                     f"fwd={fwd_speed:.2f} yaw_rate={yaw_rate:+.1f} "
-                    f"center_norm={center_norm:.2f} range={raw_range:.1f}"
+                    f"center_norm={center_norm:.2f} range={raw_range:.1f} "
+                    f"z_hold={-sched_out.z_hold_ned:.1f}m"
                 )
 
             steps += 1
