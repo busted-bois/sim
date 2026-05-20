@@ -18,12 +18,45 @@ class _LaunchHandles:
     """Processes started by this launcher (for Ctrl+C / SIGINT cleanup)."""
 
     ue: subprocess.Popen | None = None
+    px4: subprocess.Popen | None = None
     main: subprocess.Popen | None = None
     cleanup_done: bool = False
 
 
 _handles = _LaunchHandles()
 _signals_registered: bool = False
+PX4_CONNECT_LOG_MARKER = "Simulator connected on TCP port"
+
+
+def _stop_px4_sitl() -> None:
+    if _handles.px4 is not None and _handles.px4.poll() is None:
+        _handles.px4.terminate()
+        try:
+            _handles.px4.wait(timeout=8.0)
+        except subprocess.TimeoutExpired:
+            _handles.px4.kill()
+            try:
+                _handles.px4.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                pass
+    _handles.px4 = None
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                [
+                    "wsl",
+                    "-e",
+                    "bash",
+                    "-c",
+                    "pkill -INT -f 'px4 -i 0' 2>/dev/null; "
+                    "pkill -f 'make px4_sitl' 2>/dev/null; true",
+                ],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
 
 
 def _cleanup_on_interrupt() -> None:
@@ -42,6 +75,7 @@ def _cleanup_on_interrupt() -> None:
                 _handles.main.wait(timeout=3.0)
             except subprocess.TimeoutExpired:
                 pass
+    _stop_px4_sitl()
     if _handles.ue is not None and _handles.ue.poll() is None:
         _handles.ue.terminate()
         try:
@@ -95,6 +129,132 @@ def _normalize_view_mode(view_mode: str) -> str:
     return "Fpv"
 
 
+def _bridge_profile(config: dict) -> dict:
+    mav_cfg = config.get("control", {}).get("mavlink", {})
+    profile = mav_cfg.get("bridge_profile")
+    if isinstance(profile, dict):
+        return profile
+    legacy = mav_cfg.get("simulator_bridge_profile")
+    if isinstance(legacy, dict):
+        return legacy
+    return {}
+
+
+def _configured_vehicle_type(config: dict) -> str:
+    vehicle_type = str(_bridge_profile(config).get("vehicle_type", "PX4Multirotor")).strip()
+    allowed_mav = {"px4multirotor", "arducopter", "ardurover", "arducoptersolo", "simpleflight"}
+    if vehicle_type.lower() not in allowed_mav:
+        print(
+            "Warning: control.mavlink.bridge_profile.vehicle_type="
+            f"{vehicle_type!r} is not a supported simulator MAVLink backend; "
+            "forcing PX4Multirotor."
+        )
+        return "PX4Multirotor"
+    if vehicle_type.lower() == "simpleflight":
+        return "SimpleFlight"
+    return vehicle_type
+
+
+def _uses_px4_multirotor(config: dict, *, transport: str) -> bool:
+    return str(transport).strip().lower() == "mavlink" and (
+        _configured_vehicle_type(config).lower() == "px4multirotor"
+    )
+
+
+def _auto_start_px4_enabled(config: dict) -> bool:
+    env_val = os.environ.get("AIGP_AUTO_PX4", "").strip().lower()
+    if env_val in {"0", "false", "no", "off"}:
+        return False
+    if env_val in {"1", "true", "yes", "on"}:
+        return True
+    mav_cfg = config.get("control", {}).get("mavlink", {})
+    return bool(mav_cfg.get("auto_start_px4", True))
+
+
+def _camera_settings_from_config(config: dict) -> dict:
+    from src.vision.intrinsics import horizontal_fov_degrees
+
+    vision_cfg = config.get("vision", {})
+    camera_cfg = config.get("camera", {})
+    pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
+    camera_pitch = -float(camera_cfg.get("pitch_up_degrees", 20.0))
+    camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
+    camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
+    camera_name = str(vision_cfg.get("camera_name", "0"))
+    resolution = vision_cfg.get("resolution", [640, 360])
+    if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
+        capture_width = int(resolution[0])
+        capture_height = int(resolution[1])
+    else:
+        capture_width = int(vision_cfg.get("width", 640))
+        capture_height = int(vision_cfg.get("height", 360))
+    front_camera_settings = {
+        "X": float(pose_offset[0]),
+        "Y": float(pose_offset[1]),
+        "Z": float(pose_offset[2]),
+        "Pitch": camera_pitch,
+        "Roll": camera_roll,
+        "Yaw": camera_yaw,
+        "CaptureSettings": [
+            {
+                "ImageType": 0,
+                "Width": capture_width,
+                "Height": capture_height,
+                "FOV_Degrees": float(vision_cfg.get("fov_degrees", horizontal_fov_degrees())),
+            }
+        ],
+    }
+    return {
+        camera_name: front_camera_settings,
+        "front_center": dict(front_camera_settings),
+    }
+
+
+def _print_control_link_wait(
+    transport: str, config: dict, host: str, rpc_port: int, timeout_label: str
+) -> None:
+    wait_label = "MAVLink control link" if transport == "mavlink" else "simulator RPC"
+    if transport == "mavlink":
+        from src.mavlink_endpoints import mavlink_endpoint_from_config
+
+        print(
+            f"Waiting for {wait_label} ({mavlink_endpoint_from_config(config)}, "
+            f"timeout {timeout_label}s)..."
+        )
+    else:
+        print(f"Waiting for {wait_label} on {host}:{rpc_port} (timeout {timeout_label}s)...")
+
+
+def _ensure_simulator_settings_for_launch(
+    rpc_port: int,
+    view_mode: str,
+    *,
+    corner_chase_pip: bool,
+    enable_trace: bool,
+    config: dict,
+    transport: str,
+    use_vjoy: bool = False,
+) -> Path:
+    if _uses_px4_multirotor(config, transport=transport) and not use_vjoy:
+        return _ensure_px4_settings_for_launch(
+            rpc_port,
+            view_mode,
+            corner_chase_pip=corner_chase_pip,
+            enable_trace=enable_trace,
+            config=config,
+        )
+    _ensure_camera_settings(
+        rpc_port,
+        view_mode,
+        corner_chase_pip=corner_chase_pip,
+        enable_trace=enable_trace,
+        config=config,
+        transport=transport,
+        use_vjoy=use_vjoy,
+    )
+    return _simulator_settings_path(config)
+
+
 def _ensure_camera_settings(
     rpc_port: int,
     view_mode: str,
@@ -105,8 +265,6 @@ def _ensure_camera_settings(
     transport: str,
     use_vjoy: bool = False,
 ) -> None:
-    from src.vision.intrinsics import horizontal_fov_degrees
-
     settings_path = _simulator_settings_path(config)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -148,58 +306,16 @@ def _ensure_camera_settings(
     normalized_view_mode = _normalize_view_mode(view_mode)
     transport_l = str(transport).strip().lower()
     vehicle_name = "Drone1"
-    vision_cfg = config.get("vision", {})
-    camera_cfg = config.get("camera", {})
-    pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
-    camera_pitch = -float(camera_cfg.get("pitch_up_degrees", 20.0))
-    camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
-    camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
-    camera_name = str(vision_cfg.get("camera_name", "0"))
-    resolution = vision_cfg.get("resolution", [640, 360])
-    if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
-        capture_width = int(resolution[0])
-        capture_height = int(resolution[1])
-    else:
-        capture_width = int(vision_cfg.get("width", 640))
-        capture_height = int(vision_cfg.get("height", 360))
-    front_camera_settings = {
-        "X": float(pose_offset[0]),
-        "Y": float(pose_offset[1]),
-        "Z": float(pose_offset[2]),
-        "Pitch": camera_pitch,
-        "Roll": camera_roll,
-        "Yaw": camera_yaw,
-        "CaptureSettings": [
-            {
-                "ImageType": 0,
-                "Width": capture_width,
-                "Height": capture_height,
-                "FOV_Degrees": float(vision_cfg.get("fov_degrees", horizontal_fov_degrees())),
-            }
-        ],
-    }
-    cameras_settings = {
-        camera_name: front_camera_settings,
-        "front_center": dict(front_camera_settings),
-    }
+    cameras_settings = _camera_settings_from_config(config)
     if transport_l == "mavlink":
-        mav_cfg = config.get("control", {}).get("mavlink", {})
-        bridge_mav_cfg = mav_cfg.get("bridge_profile", {})
+        bridge_mav_cfg = _bridge_profile(config)
         udp_ip = str(bridge_mav_cfg.get("udp_ip", "127.0.0.1")).strip() or "127.0.0.1"
         udp_port = int(bridge_mav_cfg.get("udp_port", 14560))
         control_port_local = int(bridge_mav_cfg.get("control_port_local", 14540))
         control_port_remote = int(bridge_mav_cfg.get("control_port_remote", 14580))
         qgc_host_ip = str(bridge_mav_cfg.get("qgc_host_ip", "127.0.0.1")).strip() or "127.0.0.1"
         qgc_port = int(bridge_mav_cfg.get("qgc_port", 14550))
-        vehicle_type = str(bridge_mav_cfg.get("vehicle_type", "PX4Multirotor")).strip()
-        allowed_mav = {"px4multirotor", "arducopter", "ardurover", "arducoptersolo"}
-        if vehicle_type.lower() not in allowed_mav:
-            print(
-                "Warning: control.mavlink.bridge_profile.vehicle_type="
-                f"{vehicle_type!r} is not a supported simulator MAVLink backend; "
-                "forcing PX4Multirotor."
-            )
-            vehicle_type = "PX4Multirotor"
+        vehicle_type = _configured_vehicle_type(config)
         vehicle_settings = {
             "VehicleType": vehicle_type,
             "UseSerial": False,
@@ -403,16 +519,7 @@ def _settings_path_from_config() -> Path:
     return _simulator_settings_path(load_config())
 
 
-def _ensure_px4_mavlink_settings(rpc_port: int) -> Path:
-    settings_path = _settings_path_from_config()
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings: dict = {}
-    if settings_path.is_file():
-        try:
-            settings = json.loads(settings_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            print(f"[mavlink] Warning: invalid simulator settings at {settings_path}; rewriting.")
-
+def _backup_simpleflight_settings_if_needed(settings_path: Path, settings: dict) -> None:
     backup_path = settings_path.with_name("settings.simpleflight.bak.json")
     is_simple = (
         isinstance(settings.get("Vehicles"), dict)
@@ -423,19 +530,88 @@ def _ensure_px4_mavlink_settings(rpc_port: int) -> Path:
     )
     if is_simple and not backup_path.is_file():
         backup_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-        print(f"[mavlink] backed up SimpleFlight settings to {backup_path}")
+        print(f"[launcher] backed up SimpleFlight settings to {backup_path}")
 
-    settings["SettingsVersion"] = 1.2
-    settings["SimMode"] = "Multirotor"
-    settings["ApiServerPort"] = int(rpc_port)
-    settings["ClockType"] = "SteppableClock"
-    settings["Vehicles"] = {"PX4": json.loads(json.dumps(PX4_VEHICLE_TEMPLATE))}
-    settings.pop("SubWindows", None)
-    settings.pop("CameraDirector", None)
 
-    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-    print(f"[mavlink] wrote PX4Multirotor settings to {settings_path}")
+def _ensure_px4_settings_for_launch(
+    rpc_port: int,
+    view_mode: str,
+    *,
+    corner_chase_pip: bool,
+    enable_trace: bool,
+    config: dict,
+) -> Path:
+    settings_path = _simulator_settings_path(config)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings: dict = {}
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print(f"[launcher] Warning: invalid simulator settings at {settings_path}; rewriting.")
+
+    _backup_simpleflight_settings_if_needed(settings_path, settings)
+
+    normalized_view_mode = _normalize_view_mode(view_mode)
+    vehicle = json.loads(json.dumps(PX4_VEHICLE_TEMPLATE))
+    vehicle["Cameras"] = _camera_settings_from_config(config)
+    vehicle["EnableTrace"] = bool(enable_trace)
+
+    required_settings: dict = {
+        "SettingsVersion": 1.2,
+        "SimMode": "Multirotor",
+        "ViewMode": normalized_view_mode,
+        "LocalHostIp": "127.0.0.1",
+        "ApiServerPort": int(rpc_port),
+        "ClockType": "SteppableClock",
+        "Vehicles": {"PX4": vehicle},
+        "Recording": {
+            "Cameras": [
+                {"CameraName": "0", "ImageType": 0, "PixelsAsFloat": False, "Compress": False}
+            ]
+        },
+    }
+    if corner_chase_pip:
+        required_settings["SubWindows"] = [
+            {
+                "WindowID": 0,
+                "ImageType": 0,
+                "CameraName": "0",
+                "External": False,
+                "Visible": True,
+            }
+        ]
+    if normalized_view_mode == "Fpv":
+        required_settings["CameraDirector"] = {"FollowDistance": -50.0}
+
+    merged = _deep_merge_dict(settings, required_settings)
+    merged["Vehicles"] = dict(required_settings["Vehicles"])
+    merged.pop("SubWindows", None)
+    if "SubWindows" in required_settings:
+        merged["SubWindows"] = required_settings["SubWindows"]
+    if normalized_view_mode == "FlyWithMe":
+        merged.pop("CameraDirector", None)
+    elif "CameraDirector" in required_settings:
+        merged["CameraDirector"] = required_settings["CameraDirector"]
+
+    settings_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    print(
+        f"[launcher] wrote PX4Multirotor TCP HIL settings "
+        f"(ViewMode={normalized_view_mode}) to {settings_path}"
+    )
     return settings_path
+
+
+def _ensure_px4_mavlink_settings(rpc_port: int) -> Path:
+    from src.config import load_config
+
+    return _ensure_px4_settings_for_launch(
+        rpc_port,
+        "Fpv",
+        corner_chase_pip=False,
+        enable_trace=False,
+        config=load_config(),
+    )
 
 
 def _is_tcp_listening_passive(port: int) -> bool:
@@ -478,6 +654,134 @@ def _windows_host_ip_for_wsl() -> str:
     except (OSError, subprocess.SubprocessError):
         pass
     return "127.0.0.1"
+
+
+def _wsl_available() -> bool:
+    try:
+        out = subprocess.run(
+            ["wsl", "-e", "true"],
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        return out.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _wsl_px4_binary_ready() -> bool:
+    try:
+        out = subprocess.run(
+            [
+                "wsl",
+                "-e",
+                "bash",
+                "-c",
+                "test -x ~/PX4-Autopilot/build/px4_sitl_default/bin/px4 && echo OK",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return out.stdout.strip() == "OK"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _px4_launch_script_wsl_path() -> str:
+    script_win = ROOT / "scripts" / "launch_px4_wsl.sh"
+    if not script_win.is_file():
+        raise SystemExit(f"PX4 launch script not found: {script_win}")
+    out = subprocess.run(
+        ["wsl", "-e", "wslpath", "-u", str(script_win)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    path = out.stdout.strip()
+    if out.returncode != 0 or not path:
+        raise SystemExit(
+            f"Could not translate {script_win} to a WSL path (wslpath exit {out.returncode})."
+        )
+    return path
+
+
+def _wait_for_hil_tcp_listener(timeout_s: float) -> bool:
+    deadline = time.time() + max(1.0, float(timeout_s))
+    while time.time() < deadline:
+        if _is_tcp_listening_passive(PX4_HIL_TCP_PORT):
+            return True
+        if _handles.ue is not None and _handles.ue.poll() is not None:
+            return False
+        time.sleep(1.0)
+    return False
+
+
+def _start_px4_sitl_process() -> subprocess.Popen:
+    px4_script = _px4_launch_script_wsl_path()
+    print("[launcher] Starting PX4-SITL in WSL...")
+    return subprocess.Popen(
+        ["wsl", "-e", "bash", px4_script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+    )
+
+
+def _wait_for_px4_simulator_connected(proc: subprocess.Popen, timeout_s: float) -> bool:
+    deadline = time.time() + max(1.0, float(timeout_s))
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            return False
+        if proc.stdout is None:
+            time.sleep(0.25)
+            continue
+        line = proc.stdout.readline()
+        if not line:
+            time.sleep(0.1)
+            continue
+        if PX4_CONNECT_LOG_MARKER in line:
+            print(f"[launcher] PX4 connected: {line.strip()}")
+            return True
+    return False
+
+
+def _verify_px4_prerequisites() -> None:
+    if not _wsl_available():
+        raise SystemExit(
+            "WSL is not available. Install WSL2 or run with AIGP_AUTO_PX4=0 and start "
+            "PX4-SITL manually (see instructions below)."
+        )
+    if not _wsl_px4_binary_ready():
+        raise SystemExit(
+            "PX4 binary missing at ~/PX4-Autopilot/build/px4_sitl_default/bin/px4. "
+            "Build once: wsl -e bash -c 'cd ~/PX4-Autopilot && make px4_sitl none_iris'"
+        )
+
+
+def _bring_up_px4_hil_after_ue(*, hil_wait_s: float = 120.0, px4_connect_s: float = 90.0) -> None:
+    print(
+        f"[launcher] Waiting (passively) for PX4 HIL TCP listener on :{PX4_HIL_TCP_PORT}..."
+    )
+    if not _wait_for_hil_tcp_listener(hil_wait_s):
+        raise SystemExit(
+            f"PX4 HIL TCP listener never came up on :{PX4_HIL_TCP_PORT}. "
+            "Check UE logs and that the Colosseum PX4Multirotor plugin is loaded."
+        )
+    print(f"[launcher] PX4 HIL listener is ready on :{PX4_HIL_TCP_PORT}")
+
+    _verify_px4_prerequisites()
+    _handles.px4 = _start_px4_sitl_process()
+    if not _wait_for_px4_simulator_connected(_handles.px4, px4_connect_s):
+        raise SystemExit(
+            "PX4-SITL did not log 'Simulator connected on TCP port'. "
+            "Ensure WSL mirrored networking is enabled and PX4 was built with "
+            "`make px4_sitl none_iris`."
+        )
 
 
 def _print_px4_bringup_instructions(wsl_host_ip: str) -> None:
@@ -561,12 +865,10 @@ def restore_simpleflight_settings() -> bool:
     return False
 
 
-def _maybe_restore_simpleflight_from_backup() -> bool:
-    # Self-heal for users who ran sim-mavlink/mavlink-all and skipped Ctrl+C
-    # cleanup (Task Manager kill, BSOD). Only restores when the current file
-    # still looks like PX4Multirotor, so a freshly-edited SimpleFlight config
-    # is never clobbered.
-    settings_path = _settings_path_from_config()
+def _maybe_restore_simpleflight_from_backup(config: dict) -> bool:
+    if _configured_vehicle_type(config).lower() != "simpleflight":
+        return False
+    settings_path = _simulator_settings_path(config)
     backup_path = settings_path.with_name("settings.simpleflight.bak.json")
     if not (settings_path.is_file() and backup_path.is_file()):
         return False
@@ -613,6 +915,7 @@ def main_mavlink_all() -> None:
 def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> None:
     _register_signal_handlers_once()
     _handles.ue = None
+    _handles.px4 = None
     _handles.main = None
     _handles.cleanup_done = False
 
@@ -730,6 +1033,7 @@ def launch(
 ) -> None:
     _register_signal_handlers_once()
     _handles.ue = None
+    _handles.px4 = None
     _handles.main = None
     _handles.cleanup_done = False
 
@@ -742,7 +1046,7 @@ def launch(
     config = load_config()
     assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
-    _maybe_restore_simpleflight_from_backup()
+    _maybe_restore_simpleflight_from_backup(config)
     transport = _launch_transport_for_session(config)
     resolved_transport = transport
     resolved_mavlink_endpoint: str | None = None
@@ -763,7 +1067,7 @@ def launch(
     rpc_port = int(sim_cfg.get("rpc_port", 41451))
     rpc_ready_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
     rpc_tout_label = f"{rpc_ready_timeout_s:.0f}"
-    _ensure_camera_settings(
+    _ensure_simulator_settings_for_launch(
         rpc_port,
         view_mode,
         corner_chase_pip=corner_chase_pip,
@@ -821,8 +1125,20 @@ def launch(
             f"[launcher] UE physics timestep is project-defined ({physics_hz:.0f} Hz in config); "
             "not set via simulator settings.json. Run: uv run preflight"
         )
-        wait_label = "MAVLink control link" if transport == "mavlink" else "simulator RPC"
-        print(f"Waiting for {wait_label} on {host}:{rpc_port} (timeout {rpc_tout_label}s)...")
+        if (
+            transport == "mavlink"
+            and _uses_px4_multirotor(config, transport=transport)
+            and resolved_mavlink_endpoint is None
+        ):
+            if _auto_start_px4_enabled(config) and sys.platform == "win32":
+                try:
+                    _bring_up_px4_hil_after_ue()
+                except KeyboardInterrupt:
+                    _cleanup_on_interrupt()
+                    raise SystemExit(130) from None
+            else:
+                _print_px4_bringup_instructions(_windows_host_ip_for_wsl())
+        _print_control_link_wait(transport, config, host, rpc_port, rpc_tout_label)
         try:
             resolved_transport, resolved_mavlink_endpoint = _wait_for_control_link(
                 host,
@@ -840,8 +1156,7 @@ def launch(
             print(f"simulator RPC is ready on {host}:{rpc_port}")
     else:
         print(f"Colosseum not found at '{colosseum}', skipping simulator launch.")
-        wait_label = "MAVLink control link" if transport == "mavlink" else "simulator RPC"
-        print(f"Waiting for {wait_label} on {host}:{rpc_port} (timeout {rpc_tout_label}s)...")
+        _print_control_link_wait(transport, config, host, rpc_port, rpc_tout_label)
         try:
             resolved_transport, resolved_mavlink_endpoint = _wait_for_control_link(
                 host,

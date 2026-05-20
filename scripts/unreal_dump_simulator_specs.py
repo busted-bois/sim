@@ -177,7 +177,9 @@ def _resolve_pawn_asset(pawn_asset_path):
     raw_name = raw_name.rsplit("/", 1)[-1]
     raw_name = raw_name.split(".", 1)[0]
     raw_name = raw_name.removesuffix("_C")
-    asset, resolved_path = _find_asset_by_name(raw_name, ["/Game/FlyingCPP/Blueprints", "/Game"])
+    asset, resolved_path = _find_asset_by_name(
+        raw_name, ["/AirSim/Blueprints", "/Game/FlyingCPP/Blueprints", "/Game"]
+    )
     if asset is not None:
         return asset, resolved_path
     return None, None
@@ -385,7 +387,7 @@ def main():
     map_asset = os.environ.get("CODEX_SIM_SPEC_MAP", "/Game/FlyingCPP/Maps/FlyingExampleMapV2")
     pawn_asset = os.environ.get(
         "CODEX_SIM_SPEC_PAWN_ASSET",
-        "/Game/FlyingCPP/Blueprints/BP_FlyingPawn",
+        "/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
     )
     gate_tokens = [
         token.strip().lower()

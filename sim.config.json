@@ -5,9 +5,9 @@
     "map_name": "BlocksV2",
     "map_asset": "/Game/FlyingCPP/Maps/FlyingExampleMapV2",
     "specification_profile": "official_conformant",
-    "pawn_asset": "Class'/Game/FlyingCPP/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C'",
+    "pawn_asset": "/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
     "gate_search_tokens": "gate,ring,torus,hoop",
-    "extra_ue_args": [],
+    "extra_ue_args": ["-map=/Game/FlyingCPP/Maps/FlyingExampleMapV2"],
     "windowed": true,
     "res_x": 1280,
     "res_y": 720,
@@ -16,7 +16,7 @@
     "physics_update_hz": 120,
     "specification_path": "docs/simulator_specs.json",
     "specification_required": true,
-    "rpc_ready_timeout_seconds": 120,
+    "rpc_ready_timeout_seconds": 180,
     "trace": {
       "enabled": true,
       "color_rgba": [1.0, 0.0, 1.0, 1.0],
@@ -212,7 +212,7 @@
       "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],
       "auto_discover_endpoints": true,
       "state_request_hz": 20,
-      "guided_custom_mode": 4,
+      "guided_custom_mode": 6,
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,
@@ -253,6 +253,7 @@
           "duration_seconds": 0.35
         }
       },
+      "auto_start_px4": true,
       "bridge_profile": {
         "vehicle_name": "Drone1",
         "vehicle_type": "PX4Multirotor",

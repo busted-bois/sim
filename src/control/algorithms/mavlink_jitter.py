@@ -8,6 +8,7 @@ import time
 from src.control.algorithms import Algorithm, register
 from src.control.flight_client import FlightClient
 from src.control.main_loop import VehicleState
+from src.control.primitives import takeoff_with_settle
 from src.control.setpoints import apply_velocity_ned
 from src.vision import VisionFrame
 
@@ -55,9 +56,7 @@ class MavlinkJitter(Algorithm):
         self._period_s = 0.02
 
     def run(self, client: FlightClient) -> None:
-        print("[mavlink_jitter] Taking off...")
-        client.takeoffAsync().join()
-        time.sleep(1.0)
+        _ = client
 
     def run_tick(
         self,
@@ -67,7 +66,7 @@ class MavlinkJitter(Algorithm):
     ) -> None:
         _ = state, frame
         if not self._tick_initialized:
-            self._init_tick_loop()
+            self._init_tick_loop(client)
             return
 
         now = time.perf_counter()
@@ -93,7 +92,7 @@ class MavlinkJitter(Algorithm):
             yaw_rate_dps=self._yaw_rate_dps,
         )
 
-    def _init_tick_loop(self) -> None:
+    def _init_tick_loop(self, client: FlightClient) -> None:
         cfg = self._config.get("mavlink_jitter", {})
         control_cfg = self._config.get("control", {})
         self._max_speed = max(0.1, float(control_cfg.get("max_speed_ms", 2.0)))
@@ -110,6 +109,9 @@ class MavlinkJitter(Algorithm):
         self._deadline_s = time.perf_counter() + duration_s
         self._move_count = 0
         self._tick_initialized = True
+        print("[mavlink_jitter] Taking off...")
+        takeoff_with_settle(client, label="mavlink_jitter")
+        time.sleep(1.0)
         self._start_move(time.perf_counter())
 
     def _start_move(self, now: float) -> None:

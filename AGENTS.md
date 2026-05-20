@@ -27,7 +27,7 @@ This repo uses multiple AI coding tools (OpenCode, Claude, Cursor, Copilot). Ins
 ## Running
 
 ```bash
-uv run sim                              # One command: .env.local, UE5 (if configured), main.py
+uv run sim                              # One command: .env.local, UE5, PX4-SITL (WSL, auto on Windows), main.py
 uv run sim low-end                      # Low-res, reduced telemetry, attitude_four_motion
 uv run sim 3rd-person                   # FlyWithMe camera instead of FPV
 uv run sim-very-soft                    # Gentle landing profile
@@ -51,7 +51,7 @@ uv run sim-attitude-smoke               # Same via sim_launch (simulator setting
 
 **Flight control is MAVLink-only.** `main.py` uses `PymavlinkFlightClient` (`SET_POSITION_TARGET_LOCAL_NED`, `SET_ATTITUDE_TARGET`, `HIGHRES_IMU`, `TIMESYNC`). `sim-mavlink` / `mavlink-all` verify the bridge; they do not run `main.py`.
 
-After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once a MAVLink HEARTBEAT is seen, up to `simulator.rpc_ready_timeout_seconds`.
+After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once a MAVLink HEARTBEAT is seen, up to `simulator.rpc_ready_timeout_seconds`. On Windows with `control.mavlink.auto_start_px4` (default true), `uv run sim` also starts PX4-SITL in WSL after the HIL TCP listener is up (same prerequisites as `mavlink-all`: mirrored `.wslconfig`, built `~/PX4-Autopilot`). Set `AIGP_AUTO_PX4=0` to start PX4 manually.
 
 **Ctrl+C** (SIGINT) stops `main.py` and (if launcher started it) the UE process. **SIGTERM** is not wired to cleanup — Unreal may stay open.
 
@@ -64,6 +64,7 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `AIGP_ENABLE_TRACE=1` — enable flight path trace line.
 - `AIGP_PAUSE_BEFORE_EXIT=1` — pause before client exit.
 - `AIGP_MAVLINK_ENDPOINT` — override MAVLink UDP listen endpoint.
+- `AIGP_AUTO_PX4` — set to `0` to skip auto-starting PX4-SITL in WSL during `uv run sim`.
 - `SIMULATOR_RPC_PORT` — simulator API port (launcher / legacy tools).
 
 ### Output Artifacts

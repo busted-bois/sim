@@ -128,6 +128,7 @@ From a fresh Cursor session, use this exact sequence.
 | Symptom | Likely cause | Fix |
 | ------- | ------------ | --- |
 | Unreal asks for a project file first | `PROJECT_PATH` missing or wrong | Set `PROJECT_PATH` in `.env.local` or `simulator.project_path`, or run `pwsh scripts/fix_project_path.ps1`. |
+| On-screen: **not receiving any messages from HIL** | PX4-SITL not connected to the simulator (TCP 4560) | On Windows, `uv run sim` auto-starts PX4 when WSL mirrored networking and a built `~/PX4-Autopilot` tree are available (`control.mavlink.auto_start_px4`, default true). Set `AIGP_AUTO_PX4=0` to start PX4 manually, or run `uv run mavlink-all` to validate the stack. |
 | MAVLink / connection errors | Simulator not up or wrong endpoint | Start Unreal; check `control.mavlink.endpoint` and bridge ports. |
 | Preflight warns simulator RPC not open | Normal if UE is not running yet | Start the sim, or set `preflight.require_simulator_rpc` to `false` (default). |
 | `HIGHRES_IMU` smoke test times out | MAVLink transport not active, wrong endpoint, or autopilot not publishing IMU | Set `control.transport="mavlink"`, verify `control.mavlink.endpoint`, and rerun `uv run highres-imu-smoke` after the vehicle is fully up. |

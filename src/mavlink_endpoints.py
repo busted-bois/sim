@@ -126,7 +126,7 @@ def pymavlink_flight_client_from_config(config: dict):
         endpoint=endpoint,
         command_rate_hz=float(control_cfg.get("command_rate_hz", 50.0)),
         state_request_hz=float(mav_cfg.get("state_request_hz", 20.0)),
-        guided_custom_mode=int(mav_cfg.get("guided_custom_mode", 4)),
+        guided_custom_mode=int(mav_cfg.get("guided_custom_mode", 6)),
         takeoff_altitude_m=float(mav_cfg.get("takeoff_altitude_m", 5.0)),
         land_descent_speed_ms=float(config.get("landing", {}).get("descent_speed_ms", 2.0)),
         source_system=int(mav_cfg.get("source_system", 255)),

@@ -114,6 +114,9 @@ class PymavlinkFlightClient:
 
     _DEFAULT_ENDPOINT: Final[str] = "udpin:0.0.0.0:14550"
     _GUIDED_MODE_MIN_RESEND_INTERVAL_S: Final[float] = 1.0
+    _PX4_MAIN_MODE_OFFBOARD: Final[int] = 6
+    _MAV_FORCE_ARM_PARAM2: Final[float] = 21196.0
+    _OFFBOARD_PRIME_SETPOINT_COUNT: Final[int] = 10
     _POSITION_TARGET_FRAME_MAP: Final[dict[str, int]] = {
         "local_ned": int(mavutil.mavlink.MAV_FRAME_LOCAL_NED),
         "body_ned": int(mavutil.mavlink.MAV_FRAME_BODY_NED),
@@ -125,7 +128,7 @@ class PymavlinkFlightClient:
         endpoint: str | None = None,
         command_rate_hz: float = 50.0,
         state_request_hz: float = 20.0,
-        guided_custom_mode: int = 4,
+        guided_custom_mode: int = 6,
         takeoff_altitude_m: float = 5.0,
         takeoff_climb_speed_ms: float = 1.0,
         land_descent_speed_ms: float = 0.6,
@@ -264,34 +267,37 @@ class PymavlinkFlightClient:
             self._request_message_intervals()
         self._start_telemetry_pump()
         if self._prepare_for_flight_on_connect:
-            self._set_guided_mode(force=True)
+            if self._guided_custom_mode != self._PX4_MAIN_MODE_OFFBOARD:
+                self._set_guided_mode(force=True)
 
     def enableApiControl(self, enable: bool) -> None:
         _ = enable
 
+    def is_armed(self) -> bool:
+        telemetry = self._get_latest_telemetry()
+        return bool(telemetry is not None and telemetry.armed)
+
     def armDisarm(self, arm: bool) -> None:
         if self._log_commands:
             _logger.info("[MAVLink <<] %s", "ARM" if arm else "DISARM")
-        assert self._mav is not None and self._target_system is not None
-        self._mav.mav.command_long_send(
-            self._target_system,
-            self._target_component or 1,
-            mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
-            0,
-            1 if arm else 0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        )
+        self._send_arm_disarm_command(arm, force=False)
         deadline = time.monotonic() + 8.0
         while time.monotonic() < deadline:
-            telemetry = self._get_latest_telemetry()
-            if telemetry is not None and telemetry.armed == arm:
+            if self.is_armed() == arm:
                 return
             time.sleep(0.05)
+        if arm and not self.is_armed():
+            self._send_arm_disarm_command(True, force=True)
+            deadline = time.monotonic() + 8.0
+            while time.monotonic() < deadline:
+                if self.is_armed():
+                    return
+                time.sleep(0.05)
+        if arm and not self.is_armed():
+            raise RuntimeError(
+                "Vehicle did not arm after MAV_CMD_COMPONENT_ARM_DISARM. "
+                "Check PX4 preflight status in the simulator console."
+            )
 
     def takeoffAsync(self) -> _Joinable:
         return _Joinable(self._takeoff)
@@ -581,13 +587,16 @@ class PymavlinkFlightClient:
         if self._log_commands:
             _logger.info("[MAVLink <<] TAKEOFF alt=%sm", self._takeoff_altitude_m)
         self._state_ready_evt.wait(timeout=self._heartbeat_timeout_s)
-        self._set_guided_mode(force=True)
-        self._send_takeoff_command()
-
         target_z = -abs(self._takeoff_altitude_m)
         climb_vz = -abs(self._takeoff_climb_speed_ms)
         expected_s = abs(self._takeoff_altitude_m) / max(0.1, abs(self._takeoff_climb_speed_ms))
         deadline = time.time() + min(self._takeoff_timeout_s, expected_s + 0.8)
+
+        if self._guided_custom_mode == self._PX4_MAIN_MODE_OFFBOARD:
+            self._prepare_px4_flight_mode()
+        else:
+            self._set_guided_mode(force=True)
+            self._send_takeoff_command()
 
         while time.time() < deadline:
             self._stream_velocity(0.0, 0.0, climb_vz, 0.2)
@@ -867,11 +876,44 @@ class PymavlinkFlightClient:
         except Exception:
             return None
 
+    def _send_arm_disarm_command(self, arm: bool, *, force: bool) -> None:
+        assert self._mav is not None and self._target_system is not None
+        self._mav.mav.command_long_send(
+            self._target_system,
+            self._target_component or 1,
+            mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+            0,
+            1 if arm else 0,
+            self._MAV_FORCE_ARM_PARAM2 if force and arm else 0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+
+    def _prime_offboard_setpoints(self) -> None:
+        zero = SetPositionTargetLocalNedCommand(
+            frame=SET_POSITION_FRAME_LOCAL_NED,
+            type_mask=build_velocity_type_mask(),
+        )
+        for _ in range(self._OFFBOARD_PRIME_SETPOINT_COUNT):
+            self._send_set_position_target_local_ned(zero)
+
+    def _prepare_px4_flight_mode(self) -> None:
+        if self._guided_custom_mode == self._PX4_MAIN_MODE_OFFBOARD:
+            self._prime_offboard_setpoints()
+        self._set_guided_mode(force=True)
+
     def _set_guided_mode(self, *, force: bool = False) -> None:
         if self._mav is None or self._target_system is None:
             return
         if force and self._log_commands:
-            _logger.info("[MAVLink <<] SET_GUIDED_MODE force=%s", force)
+            _logger.info(
+                "[MAVLink <<] SET_MODE custom_mode=%s force=%s",
+                self._guided_custom_mode,
+                force,
+            )
         now_s = time.monotonic()
         if not force and self._guided_mode_last_sent_monotonic_s is not None:
             if (
@@ -879,6 +921,12 @@ class PymavlinkFlightClient:
                 < self._GUIDED_MODE_MIN_RESEND_INTERVAL_S
             ):
                 return
+        if (
+            force
+            and self._guided_custom_mode == self._PX4_MAIN_MODE_OFFBOARD
+            and self._guided_mode_last_sent_monotonic_s is None
+        ):
+            self._prime_offboard_setpoints()
         self._mav.mav.command_long_send(
             self._target_system,
             self._target_component or 1,
