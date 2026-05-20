@@ -26,6 +26,7 @@ class _LaunchHandles:
 _handles = _LaunchHandles()
 _signals_registered: bool = False
 PX4_CONNECT_LOG_MARKER = "Simulator connected on TCP port"
+_WIN_SUBPROCESS_CREATIONFLAGS = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
 
 def _stop_px4_sitl() -> None:
@@ -720,7 +721,7 @@ def _start_px4_sitl_process() -> subprocess.Popen:
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+        creationflags=_WIN_SUBPROCESS_CREATIONFLAGS if sys.platform == "win32" else 0,
     )
 
 
@@ -941,7 +942,7 @@ def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> N
             cmd.extend(str(a) for a in extra if str(a).strip())
         _handles.ue = subprocess.Popen(
             cmd,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+            creationflags=_WIN_SUBPROCESS_CREATIONFLAGS if sys.platform == "win32" else 0,
         )
         print(
             f"[mavlink] waiting (passively) for PX4 HIL TCP listener on "
@@ -1110,7 +1111,7 @@ def launch(
 
         _handles.ue = subprocess.Popen(
             cmd,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+            creationflags=_WIN_SUBPROCESS_CREATIONFLAGS if sys.platform == "win32" else 0,
         )
         physics_hz = float(sim_cfg.get("physics_update_hz", 0.0) or 0.0)
         print(
