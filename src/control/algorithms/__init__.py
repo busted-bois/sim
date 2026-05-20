@@ -26,10 +26,16 @@ class Algorithm:
     def __init__(self, config: Config | dict[str, Any]) -> None:
         self._config = config
         self._vision_feed: VisionFeed | None = None
+        self.flight_complete = False
+
+    uses_control_loop: bool = False
 
     def run(self, client: FlightClient) -> None:
         """Execute the algorithm with full control over the flight client."""
         raise NotImplementedError
+
+    def run_tick(self, client: FlightClient, state, frame) -> None:
+        return
 
     def set_vision_feed(self, vision_feed: VisionFeed | None) -> None:
         self._vision_feed = vision_feed

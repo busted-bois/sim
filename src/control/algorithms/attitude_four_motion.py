@@ -10,6 +10,7 @@ from src.control.algorithms import Algorithm, register
 from src.control.flight_client import FlightClient
 from src.control.highres_imu import format_highres_imu_health
 from src.control.primitives import takeoff_with_settle
+from src.control.setpoints import attitude_target_command
 from src.control.utils import _clamp
 from src.vision.processing import mean_rgb_summary
 
@@ -96,13 +97,13 @@ class AttitudeFourMotion(Algorithm):
             yaw_cmd_deg: float,
             throttle: float,
         ) -> None:
-            client.moveByRollPitchYawThrottleAsync(
+            command = attitude_target_command(
                 math.radians(roll_deg),
                 math.radians(pitch_deg),
                 math.radians(yaw_cmd_deg),
                 _clamp(throttle, 0.0, 1.0),
-                dt,
-            ).join()
+            )
+            client.streamSetAttitudeTargetAsync(command, dt).join()
 
         def run_phase(
             label: str,
@@ -219,7 +220,7 @@ class AttitudeFourMotion(Algorithm):
             )
 
         takeoff_t0 = time.perf_counter()
-        # AirSim's RPC port opens before SimpleFlight's vehicle physics finishes
+        # Simulator RPC port may open before vehicle physics finishes settling
         takeoff_with_settle(client, max_attempts=4, label="attitude_four_motion")
         takeoff_wall_s = time.perf_counter() - takeoff_t0
         takeoff_min_wall_s = 2.0

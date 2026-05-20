@@ -68,8 +68,15 @@ def _register_signal_handlers_once() -> None:
     _signals_registered = True
 
 
-def _airsim_settings_path() -> Path:
-    return Path.home() / "Documents" / "AirSim" / "settings.json"
+def _simulator_settings_path(config: dict | None = None) -> Path:
+    if config is not None:
+        raw = str(config.get("simulator", {}).get("settings_path", "")).strip()
+        if raw:
+            path = Path(raw).expanduser()
+            if not path.is_absolute():
+                path = ROOT / path
+            return path
+    return Path.home() / "Documents" / "Colosseum" / "settings.json"
 
 
 def _deep_merge_dict(base: dict, update: dict) -> dict:
@@ -89,7 +96,7 @@ def _normalize_view_mode(view_mode: str) -> str:
 
 
 def _ensure_camera_settings(
-    airsim_port: int,
+    rpc_port: int,
     view_mode: str,
     *,
     corner_chase_pip: bool,
@@ -100,7 +107,7 @@ def _ensure_camera_settings(
 ) -> None:
     from src.vision.intrinsics import horizontal_fov_degrees
 
-    settings_path = _airsim_settings_path()
+    settings_path = _simulator_settings_path(config)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
 
     settings: dict = {}
@@ -108,11 +115,11 @@ def _ensure_camera_settings(
         try:
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            print(f"Warning: invalid AirSim settings JSON at {settings_path}; rewriting file.")
+            print(f"Warning: invalid simulator settings JSON at {settings_path}; rewriting file.")
 
     vehicles = settings.get("Vehicles")
     if isinstance(vehicles, dict):
-        # Drop any vehicle that isn't "Drone1" — AirSim spawns one drone per
+        # Drop any vehicle that isn't "Drone1" — simulator spawns one drone per
         # entry, so a stray "SimpleFlight" / "Drone2" / etc. causes duplicate
         # drones to appear stacked at spawn. Drone1 is the only name the rest
         # of this codebase uses.
@@ -177,19 +184,19 @@ def _ensure_camera_settings(
     }
     if transport_l == "mavlink":
         mav_cfg = config.get("control", {}).get("mavlink", {})
-        airsim_mav_cfg = mav_cfg.get("airsim_profile", {})
-        udp_ip = str(airsim_mav_cfg.get("udp_ip", "127.0.0.1")).strip() or "127.0.0.1"
-        udp_port = int(airsim_mav_cfg.get("udp_port", 14560))
-        control_port_local = int(airsim_mav_cfg.get("control_port_local", 14540))
-        control_port_remote = int(airsim_mav_cfg.get("control_port_remote", 14580))
-        qgc_host_ip = str(airsim_mav_cfg.get("qgc_host_ip", "127.0.0.1")).strip() or "127.0.0.1"
-        qgc_port = int(airsim_mav_cfg.get("qgc_port", 14550))
-        vehicle_type = str(airsim_mav_cfg.get("vehicle_type", "PX4Multirotor")).strip()
+        bridge_mav_cfg = mav_cfg.get("bridge_profile", {})
+        udp_ip = str(bridge_mav_cfg.get("udp_ip", "127.0.0.1")).strip() or "127.0.0.1"
+        udp_port = int(bridge_mav_cfg.get("udp_port", 14560))
+        control_port_local = int(bridge_mav_cfg.get("control_port_local", 14540))
+        control_port_remote = int(bridge_mav_cfg.get("control_port_remote", 14580))
+        qgc_host_ip = str(bridge_mav_cfg.get("qgc_host_ip", "127.0.0.1")).strip() or "127.0.0.1"
+        qgc_port = int(bridge_mav_cfg.get("qgc_port", 14550))
+        vehicle_type = str(bridge_mav_cfg.get("vehicle_type", "PX4Multirotor")).strip()
         allowed_mav = {"px4multirotor", "arducopter", "ardurover", "arducoptersolo"}
         if vehicle_type.lower() not in allowed_mav:
             print(
-                "Warning: control.mavlink.airsim_profile.vehicle_type="
-                f"{vehicle_type!r} is not a supported AirSim MAVLink backend; "
+                "Warning: control.mavlink.bridge_profile.vehicle_type="
+                f"{vehicle_type!r} is not a supported simulator MAVLink backend; "
                 "forcing PX4Multirotor."
             )
             vehicle_type = "PX4Multirotor"
@@ -197,7 +204,7 @@ def _ensure_camera_settings(
             "VehicleType": vehicle_type,
             "UseSerial": False,
             "UseTcp": False,
-            "LockStep": bool(airsim_mav_cfg.get("lock_step", False)),
+            "LockStep": bool(bridge_mav_cfg.get("lock_step", False)),
             "UdpIp": udp_ip,
             "UdpPort": udp_port,
             "ControlIp": "127.0.0.1",
@@ -222,7 +229,7 @@ def _ensure_camera_settings(
         "SimMode": "Multirotor",
         "ViewMode": normalized_view_mode,
         "LocalHostIp": "127.0.0.1",
-        "ApiServerPort": int(airsim_port),
+        "ApiServerPort": int(rpc_port),
         "Vehicles": {vehicle_name: vehicle_settings},
         "Recording": {
             "Cameras": [
@@ -232,7 +239,7 @@ def _ensure_camera_settings(
     }
     if use_vjoy:
         required_settings["Usage"] = "vJoy"
-        print("[launcher] AirSim configured for vJoy manual control.")
+        print("[launcher] Simulator configured for vJoy manual control.")
 
     if corner_chase_pip:
         # Use forward camera for PiP; "Chase" crashes on some builds.
@@ -259,13 +266,13 @@ def _ensure_camera_settings(
         merged["SubWindows"] = required_settings["SubWindows"]
 
     if use_vjoy:
-        # Clear specific vehicles to prevent AirSim from spawning a second drone
+        # Clear specific vehicles to prevent simulator from spawning a second drone
         # when 'Usage: vJoy' is also set at the top level.
         merged.pop("Vehicles", None)
         print("[launcher] Cleared 'Vehicles' from settings for vJoy mode.")
 
     if enable_trace and not use_vjoy:
-        # Enable AirSim trace for third-person mode (only if not in vJoy mode
+        # Enable simulator trace for third-person mode (only if not in vJoy mode
         # to keep settings clean and avoid double-spawn).
         merged_vehicles = merged.get("Vehicles")
         if not isinstance(merged_vehicles, dict):
@@ -280,7 +287,7 @@ def _ensure_camera_settings(
         merged.pop("CameraDirector", None)
 
     settings_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
-    print(f"Configured AirSim ViewMode={normalized_view_mode} in {settings_path}")
+    print(f"Configured simulator ViewMode={normalized_view_mode} in {settings_path}")
 
 
 def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
@@ -291,103 +298,32 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
         return False
 
 
-def _probe_airsim_rpc(host: str, port: int, *, timeout_value: int = 3) -> bool:
-    import airsim as _airsim
-
-    if not _is_port_open(host, port):
-        return False
-    probe_client = None
-    try:
-        probe_client = _airsim.MultirotorClient(ip=host, port=port, timeout_value=timeout_value)
-        if probe_client.ping():
-            probe_client.getMultirotorState()
-            return True
-    except Exception:
-        pass
-    finally:
-        if probe_client is not None:
-            try:
-                probe_client.client.close()
-            except Exception:
-                pass
-    return False
-
-
-def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
-    """Wait until AirSim answers ping() and getMultirotorState() on this RPC port."""
-    deadline = time.time() + max(1.0, timeout_s)
-    while time.time() < deadline:
-        if _probe_airsim_rpc(host, port):
-            return True
-        time.sleep(1.0)
-    return False
 
 
 def _launch_transport_for_session(config: dict) -> str:
     from src.mavlink_endpoints import resolve_control_transport
 
-    transport = resolve_control_transport(config)
-    if transport != "mavlink":
-        return transport
-    settings_path = _airsim_settings_path()
-    if not settings_path.is_file():
-        return transport
-    try:
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return transport
-    vehicles = settings.get("Vehicles")
-    if isinstance(vehicles, dict) and any(
-        isinstance(v, dict) and v.get("VehicleType") == "SimpleFlight" for v in vehicles.values()
-    ):
-        print("[launcher] SimpleFlight settings; using AirSim RPC.")
-        return "airsim"
-    return transport
+    return resolve_control_transport(config)
 
 
 def _wait_for_control_link(
     host: str,
-    airsim_port: int,
+    rpc_port: int,
     config: dict,
     wait_timeout_s: float,
     transport: str,
 ) -> tuple[str, str | None]:
     from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint
 
-    requested = str(transport).strip().lower()
+    _ = host, rpc_port, transport
     timeout_s = max(15.0, float(wait_timeout_s))
-    if requested != "mavlink":
-        if _wait_for_airsim_rpc(host, airsim_port, timeout_s):
-            return "airsim", None
-        raise SystemExit(
-            f"AirSim RPC did not become ready on {host}:{airsim_port} "
-            f"within {timeout_s:.0f}s. Ensure Unreal finished loading the map."
-        )
-
-    strict = os.environ.get("AIGP_MAVLINK_STRICT", "").strip() == "1"
-    mav_phase_s = min(30.0, max(8.0, timeout_s * 0.25))
-    resolved = first_mavlink_heartbeat_endpoint(config, timeout_s=mav_phase_s)
+    resolved = first_mavlink_heartbeat_endpoint(config, timeout_s=timeout_s)
     if resolved is not None:
         return "mavlink", resolved
 
-    if strict:
-        raise SystemExit(
-            f"AIGP_MAVLINK_STRICT=1: no MAVLink HEARTBEAT within {timeout_s:.0f}s. "
-            "Check MAVLink wiring in the simulator."
-        )
-
-    rest_s = max(10.0, timeout_s - mav_phase_s)
-    print(
-        "No MAVLink HEARTBEAT detected yet. "
-        f"Trying AirSim RPC for up to {rest_s:.0f}s. "
-        'Set AIGP_MAVLINK_STRICT=1 to require MAVLink.'
-    )
-    if _wait_for_airsim_rpc(host, airsim_port, rest_s):
-        print("AirSim RPC is ready; using AirSim transport for this session.")
-        return "airsim", None
-
     raise SystemExit(
-        f"Neither MAVLink HEARTBEAT nor AirSim RPC became ready within {timeout_s:.0f}s."
+        f"No MAVLink HEARTBEAT within {timeout_s:.0f}s. "
+        "Ensure Unreal finished loading and MAVLink bridge is active."
     )
 
 
@@ -461,15 +397,21 @@ PX4_VEHICLE_TEMPLATE: dict = {
 PX4_HIL_TCP_PORT = 4560
 
 
-def _ensure_px4_mavlink_settings(airsim_port: int) -> Path:
-    settings_path = _airsim_settings_path()
+def _settings_path_from_config() -> Path:
+    from src.config import load_config
+
+    return _simulator_settings_path(load_config())
+
+
+def _ensure_px4_mavlink_settings(rpc_port: int) -> Path:
+    settings_path = _settings_path_from_config()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings: dict = {}
     if settings_path.is_file():
         try:
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            print(f"[mavlink] Warning: invalid AirSim settings at {settings_path}; rewriting.")
+            print(f"[mavlink] Warning: invalid simulator settings at {settings_path}; rewriting.")
 
     backup_path = settings_path.with_name("settings.simpleflight.bak.json")
     is_simple = (
@@ -485,7 +427,7 @@ def _ensure_px4_mavlink_settings(airsim_port: int) -> Path:
 
     settings["SettingsVersion"] = 1.2
     settings["SimMode"] = "Multirotor"
-    settings["ApiServerPort"] = int(airsim_port)
+    settings["ApiServerPort"] = int(rpc_port)
     settings["ClockType"] = "SteppableClock"
     settings["Vehicles"] = {"PX4": json.loads(json.dumps(PX4_VEHICLE_TEMPLATE))}
     settings.pop("SubWindows", None)
@@ -499,7 +441,7 @@ def _ensure_px4_mavlink_settings(airsim_port: int) -> Path:
 def _is_tcp_listening_passive(port: int) -> bool:
     """Check if any process is LISTENING on a TCP port WITHOUT opening a connection.
 
-    AirSim's PX4Multirotor HIL accepts exactly one TCP connection then stops listening
+    PX4Multirotor HIL accepts exactly one TCP connection then stops listening
     (single-shot acceptTcp at MavLinkMultirotorApi.hpp:1317). An active probe like
     socket.create_connection() would consume the slot, leaving the real PX4 unable to
     connect. Use kernel state (netstat) instead.
@@ -553,10 +495,10 @@ def _print_px4_bringup_instructions(wsl_host_ip: str) -> None:
     )
     print(
         "If you see 'INFO  [init] SIH simulator' instead, PX4 is using its built-in "
-        "simulator and will never connect to AirSim -- rebuild with `make px4_sitl none_iris`."
+        "simulator and will never connect to simulator -- rebuild with `make px4_sitl none_iris`."
     )
     print(
-        "Once connected, AirSim will push PX4's MAVLink to 127.0.0.1:14550 (the probe). "
+        "Once connected, Simulator will push PX4's MAVLink to 127.0.0.1:14550 (the probe). "
         "Frame rate ~2 Hz heartbeat is enough to PASS.\n"
     )
 
@@ -572,8 +514,8 @@ def _build_mavlink_launch_plan() -> dict:
 
     config = load_config()
     sim_cfg = config["simulator"]
-    airsim_port = int(sim_cfg.get("airsim_port", 41451))
-    settings_path = _ensure_px4_mavlink_settings(airsim_port)
+    rpc_port = int(sim_cfg.get("rpc_port", 41451))
+    settings_path = _ensure_px4_mavlink_settings(rpc_port)
 
     colosseum = sim_cfg.get("colosseum_path", "")
     project = _resolve_project_path(sim_cfg)
@@ -596,7 +538,7 @@ def _build_mavlink_launch_plan() -> dict:
         "colosseum": str(colosseum),
         "args": args,
         "settings_path": str(settings_path),
-        "airsim_port": airsim_port,
+        "rpc_port": rpc_port,
         "hil_tcp_port": PX4_HIL_TCP_PORT,
     }
 
@@ -610,8 +552,8 @@ def print_mavlink_launch_plan() -> None:
 
 
 def restore_simpleflight_settings() -> bool:
-    """Restore SimpleFlight settings.json from backup if present. Returns True if restored."""
-    settings_path = _airsim_settings_path()
+    """Restore simulator settings.json from backup if present. Returns True if restored."""
+    settings_path = _settings_path_from_config()
     backup_path = settings_path.with_name("settings.simpleflight.bak.json")
     if backup_path.is_file():
         settings_path.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
@@ -624,7 +566,7 @@ def _maybe_restore_simpleflight_from_backup() -> bool:
     # cleanup (Task Manager kill, BSOD). Only restores when the current file
     # still looks like PX4Multirotor, so a freshly-edited SimpleFlight config
     # is never clobbered.
-    settings_path = _airsim_settings_path()
+    settings_path = _settings_path_from_config()
     backup_path = settings_path.with_name("settings.simpleflight.bak.json")
     if not (settings_path.is_file() and backup_path.is_file()):
         return False
@@ -647,8 +589,11 @@ def _maybe_restore_simpleflight_from_backup() -> bool:
     return True
 
 
-def main_restore_simpleflight() -> None:
+def main_restore_settings() -> None:
     print("restored" if restore_simpleflight_settings() else "no-backup")
+
+
+main_restore_simpleflight = main_restore_settings
 
 
 def main_mavlink_all() -> None:
@@ -682,9 +627,9 @@ def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> N
     windowed = sim_cfg.get("windowed", True)
     res_x = sim_cfg.get("res_x", 1280)
     res_y = sim_cfg.get("res_y", 720)
-    airsim_port = int(sim_cfg.get("airsim_port", 41451))
+    rpc_port = int(sim_cfg.get("rpc_port", 41451))
 
-    _ensure_px4_mavlink_settings(airsim_port)
+    _ensure_px4_mavlink_settings(rpc_port)
 
     if colosseum and Path(colosseum).exists():
         if not project:
@@ -693,7 +638,7 @@ def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> N
                 "See README for setup."
             )
         print(f"[mavlink] launching UE with PX4Multirotor settings: {colosseum}")
-        cmd = [colosseum, project, "-game", f"-settings={_airsim_settings_path()}"]
+        cmd = [colosseum, project, "-game", f"-settings={_simulator_settings_path(config)}"]
         if windowed:
             cmd.extend(["-windowed", f"-resx={res_x}", f"-resy={res_y}"])
         extra = sim_cfg.get("extra_ue_args") or []
@@ -704,7 +649,7 @@ def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> N
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
         )
         print(
-            f"[mavlink] waiting (passively) for AirSim HIL TCP listener on "
+            f"[mavlink] waiting (passively) for PX4 HIL TCP listener on "
             f":{PX4_HIL_TCP_PORT}..."
         )
         deadline = time.time() + 120.0
@@ -716,10 +661,10 @@ def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> N
             time.sleep(1.0)
         if not ready:
             raise SystemExit(
-                f"[mavlink] AirSim HIL TCP listener never came up on :{PX4_HIL_TCP_PORT}. "
-                "Check UE logs and that the AirSim plugin is loaded."
+                f"[mavlink] PX4 HIL TCP listener never came up on :{PX4_HIL_TCP_PORT}. "
+                "Check UE logs and that the Colosseum plugin is loaded."
             )
-        print(f"[mavlink] AirSim HIL listener is ready on :{PX4_HIL_TCP_PORT}")
+        print(f"[mavlink] PX4 HIL listener is ready on :{PX4_HIL_TCP_PORT}")
     else:
         print(
             f"[mavlink] colosseum not found at '{colosseum}'; "
@@ -815,11 +760,11 @@ def launch(
         res_x = int(low_end_cfg.get("sim_res_x", 854))
         res_y = int(low_end_cfg.get("sim_res_y", 480))
     host = str(sim_cfg.get("host", "127.0.0.1")).strip() or "127.0.0.1"
-    airsim_port = int(sim_cfg.get("airsim_port", 41451))
+    rpc_port = int(sim_cfg.get("rpc_port", 41451))
     rpc_ready_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
     rpc_tout_label = f"{rpc_ready_timeout_s:.0f}"
     _ensure_camera_settings(
-        airsim_port,
+        rpc_port,
         view_mode,
         corner_chase_pip=corner_chase_pip,
         enable_trace=enable_trace,
@@ -849,7 +794,7 @@ def launch(
         cmd = [colosseum]
         cmd.append(project)
         cmd.append("-game")
-        cmd.append(f"-settings={_airsim_settings_path()}")
+        cmd.append(f"-settings={_simulator_settings_path(config)}")
         if windowed:
             cmd.extend(["-windowed", f"-resx={res_x}", f"-resy={res_y}"])
         extra = sim_cfg.get("extra_ue_args")
@@ -874,14 +819,14 @@ def launch(
         physics_hz = float(sim_cfg.get("physics_update_hz", 0.0) or 0.0)
         print(
             f"[launcher] UE physics timestep is project-defined ({physics_hz:.0f} Hz in config); "
-            "not set via AirSim settings.json. Run: uv run preflight"
+            "not set via simulator settings.json. Run: uv run preflight"
         )
-        wait_label = "MAVLink/AirSim control link" if transport == "mavlink" else "AirSim RPC"
-        print(f"Waiting for {wait_label} on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
+        wait_label = "MAVLink control link" if transport == "mavlink" else "simulator RPC"
+        print(f"Waiting for {wait_label} on {host}:{rpc_port} (timeout {rpc_tout_label}s)...")
         try:
             resolved_transport, resolved_mavlink_endpoint = _wait_for_control_link(
                 host,
-                airsim_port,
+                rpc_port,
                 config,
                 rpc_ready_timeout_s,
                 transport,
@@ -892,15 +837,15 @@ def launch(
         if resolved_transport == "mavlink" and resolved_mavlink_endpoint is not None:
             print(f"MAVLink heartbeat detected on {resolved_mavlink_endpoint}")
         else:
-            print(f"AirSim RPC is ready on {host}:{airsim_port}")
+            print(f"simulator RPC is ready on {host}:{rpc_port}")
     else:
         print(f"Colosseum not found at '{colosseum}', skipping simulator launch.")
-        wait_label = "MAVLink/AirSim control link" if transport == "mavlink" else "AirSim RPC"
-        print(f"Waiting for {wait_label} on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
+        wait_label = "MAVLink control link" if transport == "mavlink" else "simulator RPC"
+        print(f"Waiting for {wait_label} on {host}:{rpc_port} (timeout {rpc_tout_label}s)...")
         try:
             resolved_transport, resolved_mavlink_endpoint = _wait_for_control_link(
                 host,
-                airsim_port,
+                rpc_port,
                 config,
                 rpc_ready_timeout_s,
                 transport,
@@ -911,10 +856,10 @@ def launch(
         if resolved_transport == "mavlink" and resolved_mavlink_endpoint is not None:
             print(f"MAVLink heartbeat detected on {resolved_mavlink_endpoint}")
         else:
-            print(f"AirSim RPC is ready on {host}:{airsim_port}")
+            print(f"simulator RPC is ready on {host}:{rpc_port}")
 
     env = os.environ.copy()
-    env["AIRSIM_PORT"] = str(airsim_port)
+    env["SIMULATOR_RPC_PORT"] = str(rpc_port)
     env["AIGP_CONTROL_TRANSPORT"] = resolved_transport
     if resolved_mavlink_endpoint is not None:
         env["AIGP_MAVLINK_ENDPOINT"] = resolved_mavlink_endpoint

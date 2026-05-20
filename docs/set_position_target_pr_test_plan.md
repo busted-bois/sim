@@ -17,7 +17,7 @@ Expected result: all tests pass with `OK` (integration may show as `skipped` whe
 - [ ] Legacy `moveByVelocityAsync` still emits the same velocity-only semantics through the shared setpoint sender.
 - [ ] `streamSetPositionTargetLocalNedAsync` repeats the same command at `command_rate_hz` for the requested duration.
 - [ ] `build_velocity_type_mask()` and `build_position_type_mask()` match expected bitmask defaults.
-- [ ] `FlightClient` protocol includes submit/stream helpers; `AirSimAdapter` raises `NotImplementedError` when the wrapped client lacks MAVLink.
+- [ ] `FlightClient` protocol includes submit/stream helpers; `PymavlinkFlightClient` implements them.
 
 ## Optional simulator check
 

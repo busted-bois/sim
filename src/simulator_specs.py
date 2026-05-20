@@ -300,7 +300,7 @@ def extract_specification_snapshot(config: dict[str, Any]) -> Path:
         sim_cfg.get("map_asset", "/Game/FlyingCPP/Maps/FlyingExampleMapV2")
     )
     env["CODEX_SIM_SPEC_PAWN_ASSET"] = str(
-        sim_cfg.get("pawn_asset", "/AirSim/Blueprints/BP_FlyingPawn")
+        sim_cfg.get("pawn_asset", "/Game/FlyingCPP/Blueprints/BP_FlyingPawn")
     )
     env["CODEX_SIM_SPEC_GATE_TOKENS"] = str(
         sim_cfg.get("gate_search_tokens", "gate,ring,torus")

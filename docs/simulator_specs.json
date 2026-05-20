@@ -31,7 +31,7 @@
     "async_fixed_timestep_s": 0.008333333
   },
   "drone": {
-    "asset_path": "/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
+    "asset_path": "/Game/FlyingCPP/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C",
     "dimensions_m": [
       0.981694,
       0.981694,

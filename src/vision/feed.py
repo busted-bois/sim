@@ -1,3 +1,5 @@
+"""Vision feed (camera transport not wired)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,7 +33,8 @@ class VisionStats:
 
 class VisionFeed:
     def __init__(self, client=None, config: dict | None = None) -> None:
-        self._enabled = False
+        cfg = config or {}
+        self._enabled = bool(cfg.get("enabled", False)) and client is not None
 
     @property
     def enabled(self) -> bool:

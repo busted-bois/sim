@@ -59,9 +59,18 @@ class _Vector3r:
 
 
 @dataclass(frozen=True, slots=True)
+class _Quaternionr:
+    x_val: float
+    y_val: float
+    z_val: float
+    w_val: float
+
+
+@dataclass(frozen=True, slots=True)
 class _KinematicsEstimated:
     position: _Vector3r
     linear_velocity: _Vector3r
+    orientation: _Quaternionr | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +151,8 @@ class PymavlinkFlightClient:
         timesync_max_stable_rtt_ns: int = 250_000_000,
         timesync_max_offset_jitter_ns: int = 50_000_000,
         attitude_target_throttle_body_z: bool = False,
+        attitude_request_enabled: bool = True,
+        attitude_request_hz: float = 50.0,
         connection_factory: Callable[..., Any] | None = None,
         log_commands: bool = True,
     ) -> None:
@@ -207,6 +218,8 @@ class PymavlinkFlightClient:
         self._guided_mode_last_sent_monotonic_s: float | None = None
         self._motion_epoch_monotonic: float | None = None
         self._attitude_target_throttle_body_z = bool(attitude_target_throttle_body_z)
+        self._attitude_request_enabled = bool(attitude_request_enabled)
+        self._attitude_request_hz = max(1.0, float(attitude_request_hz))
 
     def confirmConnection(self) -> None:
         self._mav = self._connection_factory(
@@ -638,6 +651,11 @@ class PymavlinkFlightClient:
             if message_id is not None:
                 imu_interval_us = int(1e6 / max(1.0, self._highres_imu_request_hz))
                 self._mav.mav.message_interval_send(int(message_id), imu_interval_us)
+        if self._attitude_request_enabled:
+            message_id = getattr(mavutil.mavlink, "MAVLINK_MSG_ID_ATTITUDE", None)
+            if message_id is not None:
+                att_interval_us = int(1e6 / self._attitude_request_hz)
+                self._mav.mav.message_interval_send(int(message_id), att_interval_us)
 
     def _start_telemetry_pump(self) -> None:
         if self._thread is not None:
@@ -657,6 +675,8 @@ class PymavlinkFlightClient:
         message_types = ["LOCAL_POSITION_NED", "HEARTBEAT", "TIMESYNC"]
         if self._highres_imu_enabled:
             message_types.append("HIGHRES_IMU")
+        if self._attitude_request_enabled:
+            message_types.append("ATTITUDE")
         while not self._stop_evt.is_set():
             if self._send_timesync_requests and time.monotonic() >= next_timesync_request_s:
                 self._send_timesync_request()
@@ -691,6 +711,8 @@ class PymavlinkFlightClient:
                     self._handle_timesync(message)
                 elif message_type == "HIGHRES_IMU":
                     self._handle_highres_imu(message)
+                elif message_type == "ATTITUDE":
+                    self._handle_attitude(message)
             except Exception:
                 continue
 
@@ -699,17 +721,44 @@ class PymavlinkFlightClient:
         velocity = _Vector3r(float(message.vx), float(message.vy), float(message.vz))
         previous = self._get_latest_telemetry()
         armed = previous.armed if previous is not None else False
+        orientation = None
+        if previous is not None:
+            orientation = previous.state.kinematics_estimated.orientation
         with self._telemetry_lock:
             self._telemetry = _Telemetry(
                 state=_MultirotorState(
                     kinematics_estimated=_KinematicsEstimated(
                         position=position,
                         linear_velocity=velocity,
+                        orientation=orientation,
                     )
                 ),
                 armed=armed,
             )
             self._state_ready_evt.set()
+
+    def _handle_attitude(self, message: Any) -> None:
+        orientation = _Quaternionr(
+            float(message.q2),
+            float(message.q3),
+            float(message.q4),
+            float(message.q1),
+        )
+        previous = self._get_latest_telemetry()
+        if previous is None:
+            return
+        kin = previous.state.kinematics_estimated
+        with self._telemetry_lock:
+            self._telemetry = _Telemetry(
+                state=_MultirotorState(
+                    kinematics_estimated=_KinematicsEstimated(
+                        position=kin.position,
+                        linear_velocity=kin.linear_velocity,
+                        orientation=orientation,
+                    )
+                ),
+                armed=previous.armed,
+            )
 
     def _handle_heartbeat(self, armed: bool) -> None:
         previous = self._get_latest_telemetry()

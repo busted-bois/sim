@@ -45,7 +45,7 @@ def _normalize_test_profile_overlay(tp: dict[str, Any]) -> dict[str, Any]:
     sim_keys = {
         "map_name",
         "startup_delay_seconds",
-        "airsim_port",
+        "rpc_port",
         "host",
         "project_path",
         "colosseum_path",
@@ -157,7 +157,7 @@ class Config(MutableMapping):
     @property
     def port(self) -> int:
         sim = self._raw.get("simulator", {})
-        return int(sim.get("airsim_port", 41451))
+        return int(sim.get("rpc_port", 41451))
 
     @property
     def algorithm_name(self) -> str:
@@ -181,10 +181,10 @@ def load_config(path: str | Path | None = None) -> Config:
 
 
 def simulator_endpoint(config: Config | dict[str, Any]) -> tuple[str, int]:
-    """AirSim RPC host and port from merged config."""
+    """Simulator RPC host and port from merged config (launcher only)."""
     sim = config.get("simulator", {})
     host = str(sim.get("host", "127.0.0.1")).strip() or "127.0.0.1"
-    port = int(sim.get("airsim_port", 41451))
+    port = int(sim.get("rpc_port", 41451))
     return host, port
 
 

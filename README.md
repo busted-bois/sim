@@ -1,6 +1,6 @@
 # AIGP Drone Challenge
 
-Autonomous drone navigating the Colosseum (UE5/AirSim) simulator for the [AI Grand Prix](https://theaigrandprix.com).
+Autonomous drone navigating the Colosseum (UE5) simulator for the [AI Grand Prix](https://theaigrandprix.com).
 
 ## Quick Start
 
@@ -99,7 +99,7 @@ From a fresh Cursor session, use this exact sequence.
    - This keeps the old third-person (`FlyWithMe`) viewport mode while still running the same drone stack.
 
 11. **Manual mode (if you start simulator yourself)**
-   - Start your AirSim/Unreal environment first and wait until loaded.
+   - Start your Unreal/Colosseum environment first and wait until loaded.
    - Then run only the drone controller:
      ```bash
      uv run main.py
@@ -118,7 +118,7 @@ From a fresh Cursor session, use this exact sequence.
 | **Start** | From repo root: `uv run preflight` (optional), then `uv run sim`. Ensure `.env.local` has `PROJECT_PATH` to your `.uproject`. |
 | **Low-end smooth mode** | Use `uv run sim low-end` to prioritize smoother control on weaker hardware by reducing runtime logging and telemetry load. |
 | **Stop** | In the terminal running the client, press `Ctrl+C`. Then close Unreal. Closing Unreal first may disconnect the client with errors; that is usually harmless. |
-| **Reset** | Restart the Unreal/AirSim session if the drone or API state acts stuck; run `uv run sim` again. |
+| **Reset** | Restart the Unreal session if the drone or MAVLink state acts stuck; run `uv run sim` again. |
 | **Softer landing** | `uv run sim-very-soft` uses the gentle landing profile. |
 | **Landing telemetry** | With `landing.telemetry_log.enabled` true in `sim.config.json`, each run writes `logs/landing_telemetry.csv` with altitude, vertical velocity, command, IMU acceleration/gyro, IMU health status, and IMU sample age during the landing phase for tuning. |
 | **MAVLink IMU validation** | Use `uv run highres-imu-smoke` against an already-running MAVLink endpoint, or `uv run sim-highres-imu-smoke` to launch the simulator first and then probe `HIGHRES_IMU`. |
@@ -128,8 +128,8 @@ From a fresh Cursor session, use this exact sequence.
 | Symptom | Likely cause | Fix |
 | ------- | ------------ | --- |
 | Unreal asks for a project file first | `PROJECT_PATH` missing or wrong | Set `PROJECT_PATH` in `.env.local` or `simulator.project_path`, or run `pwsh scripts/fix_project_path.ps1`. |
-| Connection / RPC errors | Simulator not up or wrong port | Start Unreal; check `simulator.airsim_port` matches AirSim. |
-| Preflight warns “AirSim RPC not reachable” | Normal if UE is not running yet | Start the sim, or set `preflight.require_airsim_reachable` to `false` (default) to only warn. |
+| MAVLink / connection errors | Simulator not up or wrong endpoint | Start Unreal; check `control.mavlink.endpoint` and bridge ports. |
+| Preflight warns simulator RPC not open | Normal if UE is not running yet | Start the sim, or set `preflight.require_simulator_rpc` to `false` (default). |
 | `HIGHRES_IMU` smoke test times out | MAVLink transport not active, wrong endpoint, or autopilot not publishing IMU | Set `control.transport="mavlink"`, verify `control.mavlink.endpoint`, and rerun `uv run highres-imu-smoke` after the vehicle is fully up. |
 
 ## MAVLink HIGHRES_IMU
@@ -180,7 +180,7 @@ uv run mavlink-all   # live; needs WSL mirrored networking
 ## Project Structure
 
 ```
-main.py                          # Entry point — AirSim RPC client
+main.py                          # Entry point — MAVLink flight client
 sim.config.json                  # Runtime config
 src/
   config.py                      # Config loader
@@ -188,8 +188,7 @@ src/
   control/algorithms/            # ← custom algorithms go here
     __init__.py                  # Algorithm base class + registry
     six_directions.py            # Default: 6-direction test pattern
-airsim/                          # Vendored AirSim Python client
-msgpackrpc/                      # Custom msgpack-rpc shim (Python 3.12 compat)
+src/control/mavlink_client.py    # PymavlinkFlightClient (MAVLink control)
 scripts/                         # Install/launch scripts
 ```
 
@@ -218,13 +217,13 @@ class MyAlgo(Algorithm):
 | Section     | Purpose                                                            |
 | ----------- | ------------------------------------------------------------------ |
 | `algorithm` | Name of registered algorithm to run                                |
-| `simulator` | UE5/AirSim paths and ports                                         |
+| `simulator` | UE5 paths, RPC port, MAVLink bridge settings                        |
 | `control`   | `command_rate_hz`, optional `latency_tuning` (`commands_per_frame`, `max_command_rate_hz`), `max_speed_ms`, `max_altitude_m` |
 | `vision`    | FPV feed config (`enabled`, `camera_name`, `pitch_up_degrees`, `fps`, `min_fps`, `fov_degrees`, `compress`, optional `resolution` or `width/height`, startup auto-tune knobs, optional debug frame dumps) |
 | `waypoints` | NED coordinate waypoints                                           |
 | `logging`   | Log level, telemetry logging toggle                                |
 | `landing`   | Landing profile, safety caps, optional CSV telemetry during landing |
-| `preflight` | Optional strict AirSim reachability before flight |
+| `preflight` | Optional strict MAVLink / RPC checks before flight |
 | `safety`    | Algorithm timeout / failsafe                                       |
 
 **`.env.local`** — `PROJECT_PATH` pointing to your UE5 Colosseum project.
@@ -258,7 +257,7 @@ Type masks can be composed with:
 - `build_velocity_type_mask()` (velocity + force bit defaults)
 - `build_position_type_mask()` (position-only defaults)
 
-`FlightClient` (protocol) includes the submit/stream helpers so algorithms can type-check against a single interface; AirSim transport raises `NotImplementedError` for these calls.
+`FlightClient` (protocol) includes submit/stream helpers; `PymavlinkFlightClient` implements them via MAVLink.
 
 `six_directions` supports a MAVLink demo mode via:
 

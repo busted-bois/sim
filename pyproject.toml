@@ -35,6 +35,7 @@ check-mavlink = "src.check_mavlink:main"
 attitude-listen = "src.mavlink.attitude_listen:main"
 sim-mavlink = "src.sim_launch:main_mavlink"
 mavlink-all = "src.sim_launch:main_mavlink_all"
+sim-restore-settings = "src.sim_launch:main_restore_settings"
 sim-restore-simpleflight = "src.sim_launch:main_restore_simpleflight"
 extract-simulator-specs = "src.simulator_specs:main"
 verify-sim-physics-metadata = "src.simulator_specs:main_verify_physics_metadata"
@@ -55,11 +56,8 @@ target-version = "py310"
 line-length = 100
 exclude = [
     ".venv/",
-    "airsim/",
-    "msgpackrpc/",
     "opensrc/",
     ".codex_worktrees/",
-    "simple_airsim/",
     ".claude/",
     ".sisyphus/",
     ".ruff_cache/",

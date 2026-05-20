@@ -3,62 +3,15 @@
 from __future__ import annotations
 
 import errno
-import math
 import os
 import sys
-import threading
 import time
 from typing import TYPE_CHECKING
-
-import airsim
 
 if TYPE_CHECKING:
     from src.config import Config
     from src.control.flight_client import FlightClient
     from src.landing_telemetry import LandingTelemetrySampler
-
-
-def _airsim_quaternion_from_euler(
-    roll_rad: float,
-    pitch_rad: float,
-    yaw_rad: float,
-) -> airsim.Quaternionr:
-    cr = math.cos(roll_rad / 2.0)
-    sr = math.sin(roll_rad / 2.0)
-    cp = math.cos(pitch_rad / 2.0)
-    sp = math.sin(pitch_rad / 2.0)
-    cy = math.cos(yaw_rad / 2.0)
-    sy = math.sin(yaw_rad / 2.0)
-    return airsim.Quaternionr(
-        cr * sp * cy + sr * cp * sy,
-        sr * cp * cy - cr * sp * sy,
-        cr * cp * sy - sr * sp * cy,
-        cr * cp * cy + sr * sp * sy,
-    )
-
-
-def set_front_camera_pose(client: FlightClient, config: Config | dict) -> None:
-    vision_cfg = config.get("vision", {})
-    camera_name = str(vision_cfg.get("camera_name", "0"))
-    cam_cfg = config.get("camera", {})
-    pose_offset = tuple(cam_cfg.get("pose_offset", [0.35, 0.0, -0.05]))
-    pitch_up_degrees = float(
-        cam_cfg.get("pitch_up_degrees", vision_cfg.get("pitch_up_degrees", 20.0))
-    )
-    roll_degrees = float(cam_cfg.get("roll_degrees", 0.0))
-    yaw_degrees = float(cam_cfg.get("yaw_degrees", 0.0))
-    front_pose = airsim.Pose(
-        airsim.Vector3r(pose_offset[0], pose_offset[1], pose_offset[2]),
-        _airsim_quaternion_from_euler(
-            math.radians(roll_degrees),
-            math.radians(pitch_up_degrees),
-            math.radians(yaw_degrees),
-        ),
-    )
-    try:
-        client.simSetCameraPose(camera_name, front_pose)
-    except Exception as exc:
-        print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
 
 
 def apply_trace_style(client: FlightClient, config: Config | dict) -> None:
@@ -96,53 +49,6 @@ def suppress_api_cleanup_warning(exc: BaseException) -> bool:
     return False
 
 
-def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
-    import traceback
-
-    error_holder: dict[str, BaseException] = {}
-
-    def _target() -> None:
-        try:
-            algo.run(client)
-        except BaseException as exc:
-            error_holder["error"] = exc
-
-    worker = threading.Thread(target=_target, name="algorithm_runner", daemon=True)
-    worker.start()
-    started = time.perf_counter()
-    deadline = started + timeout_seconds
-    join_slice_s = 0.25
-    while worker.is_alive():
-        remaining = deadline - time.perf_counter()
-        if remaining <= 0:
-            break
-        worker.join(timeout=min(join_slice_s, remaining))
-    elapsed_s = time.perf_counter() - started
-
-    if worker.is_alive():
-        raise TimeoutError(f"Algorithm timed out after {timeout_seconds:.1f}s")
-
-    if "error" in error_holder:
-        exc = error_holder["error"]
-        print(
-            f"Algorithm thread ended after {elapsed_s:.1f}s with error: "
-            f"{type(exc).__name__}: {exc}",
-            file=sys.stderr,
-        )
-        traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
-        raise RuntimeError(
-            f"Algorithm raised an exception after {elapsed_s:.1f}s"
-        ) from exc
-
-    if elapsed_s < 8.0:
-        print(
-            f"Warning: algorithm reported completion in {elapsed_s:.1f}s -- much shorter than "
-            "a full attitude routine. If the drone barely moved, check that the simulation "
-            "is real-time, and watch for errors above.",
-            file=sys.stderr,
-        )
-
-
 def takeoff_with_settle(
     client: FlightClient, max_attempts: int = 4, label: str = "primitives"
 ) -> None:
@@ -171,11 +77,13 @@ def rotate_yaw(
     duration_s: float,
     label: str = "primitives",
 ) -> None:
+    _ = label
     client.rotateByYawRateAsync(rate_dps, duration_s).join()
 
 
 def hold_position(client: FlightClient, duration_s: float) -> None:
-    client.moveByVelocityAsync(0.0, 0.0, 0.0, duration_s).join()
+    client.submitVelocityLocalNed(0.0, 0.0, 0.0)
+    time.sleep(duration_s)
 
 
 def land_with_telemetry(
@@ -241,42 +149,6 @@ def land_with_telemetry(
         if sampler is not None:
             sampler.stop()
             print(f"[{label}] Landing telemetry saved: {sampler.out_path}")
-
-
-def wait_until_stationary(
-    client: FlightClient,
-    timeout_s: float = 8.0,
-    velocity_eps_ms: float = 0.05,
-    label: str = "primitives",
-) -> None:
-    """Block until drone velocity drops below velocity_eps_ms."""
-    deadline = time.monotonic() + timeout_s
-    last_speed = float("inf")
-    consecutive_quiet = 0
-    while time.monotonic() < deadline:
-        try:
-            v = client.getMultirotorState().kinematics_estimated.linear_velocity
-            speed = (float(v.x_val) ** 2 + float(v.y_val) ** 2 + float(v.z_val) ** 2) ** 0.5
-        except Exception:
-            speed = float("inf")
-        last_speed = speed
-        if speed < velocity_eps_ms:
-            consecutive_quiet += 1
-            if consecutive_quiet >= 2:
-                return
-        else:
-            consecutive_quiet = 0
-            try:
-                client.cancelLastTask()
-                client.moveByVelocityAsync(0.0, 0.0, 0.0, 0.2).join()
-            except Exception:
-                pass
-        time.sleep(0.1)
-    print(
-        f"[{label}] Warning: drone still moving ({last_speed:.2f} m/s) after "
-        f"{timeout_s:.1f}s settle; proceeding anyway",
-        file=sys.stderr,
-    )
 
 
 def _landing_telemetry_if_enabled(

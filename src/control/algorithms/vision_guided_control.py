@@ -14,10 +14,10 @@ import time
 
 import numpy as np
 
-import airsim
 from src.control.algorithms import Algorithm, register
 from src.control.flight_client import FlightClient
 from src.control.primitives import rotate_yaw, takeoff_with_settle
+from src.control.setpoints import apply_velocity_ned
 from src.control.utils import _clamp, _yaw_from_orientation, make_vz_trim
 from src.vision.processing import (
     get_depth_info,
@@ -36,6 +36,13 @@ class VisionGuidedControl(Algorithm):
     config_section = "vision_guided_control"
 
     def run(self, client: FlightClient) -> None:
+        vision_cfg = self._config.get("vision", {})
+        if not bool(vision_cfg.get("enabled", False)) or self._vision_feed is None:
+            print(
+                "[vision_guided_control] vision disabled or unavailable; exiting."
+            )
+            return
+
         cfg = self._config.get("vision_guided_control", {})
         control = self._config.get("control", {})
 
@@ -93,7 +100,7 @@ class VisionGuidedControl(Algorithm):
         takeoff_with_settle(client, max_attempts=1, label="vision_guided_control")
         print("[vision_guided_control] takeoff complete")
 
-        # Camera faces aft by default in AirSim; rotate so forward cruise
+        # Rotate so forward cruise
         # and detection share the same heading (matches opencv_landing).
         rotation = self._config.get("startup_rotation", {})
         rot_rate_dps = float(rotation.get("rate_dps", 60))
@@ -214,13 +221,14 @@ class VisionGuidedControl(Algorithm):
 
                 vx_world = fwd_speed * cos_y - small_strafe * sin_y
                 vy_world = fwd_speed * sin_y + small_strafe * cos_y
-                client.moveByVelocityAsync(
+                apply_velocity_ned(
+                    client,
                     vx_world,
                     vy_world,
                     vz,
                     dt,
-                    yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
-                ).join()
+                    yaw_rate_dps=float(yaw_rate),
+                )
 
                 if steps % max(1, int(rate_hz // 2)) == 0:
                     label = "centered -> hold" if centered else "align"

@@ -6,52 +6,31 @@ import os
 import time
 
 
-def _mavlink_profile_looks_like_simpleflight(config: dict) -> bool:
-    """True when MAVLink profile is configured with SimpleFlight semantics."""
+def _bridge_profile(config: dict) -> dict:
     mav_cfg = config.get("control", {}).get("mavlink", {})
-    profile = mav_cfg.get("airsim_profile", {})
-    vehicle_type = str(profile.get("vehicle_type", "")).strip().lower()
-    firmware_name = str(profile.get("firmware_name", "")).strip().lower()
-    return vehicle_type == "simpleflight" or firmware_name == "simpleflight"
-
-
-def _coerce_transport_with_guardrails(config: dict, requested: str) -> str:
-    normalized = requested.strip().lower()
-    if normalized in {"airsim", "mavlink", "auto"}:
-        if (
-            normalized == "mavlink"
-            and _mavlink_profile_looks_like_simpleflight(config)
-            and os.environ.get("AIGP_ALLOW_MAVLINK_SIMPLEFLIGHT", "").strip() != "1"
-        ):
-            print(
-                'Warning: control.transport="mavlink" with SimpleFlight profile is usually '
-                "RpcLib-only and can block launch waiting for HEARTBEAT. "
-                "Falling back to 'airsim'. Set AIGP_ALLOW_MAVLINK_SIMPLEFLIGHT=1 to force MAVLink."
-            )
-            return "airsim"
-        return normalized
-
-    print(
-        f"Warning: unsupported control.transport={requested!r}; falling back to 'airsim'. "
-        "Supported values: 'airsim', 'mavlink', 'auto'."
-    )
-    return "airsim"
+    profile = mav_cfg.get("bridge_profile")
+    if isinstance(profile, dict):
+        return profile
+    legacy = mav_cfg.get("simulator_bridge_profile")
+    if isinstance(legacy, dict):
+        return legacy
+    return {}
 
 
 def candidate_mavlink_endpoints(config: dict) -> list[str]:
     """Ordered UDP endpoints to probe for HEARTBEAT."""
 
     mav_cfg = config.get("control", {}).get("mavlink", {})
-    airsim_profile = mav_cfg.get("airsim_profile", {})
-    qgc_port = int(airsim_profile.get("qgc_port", 14550))
+    bridge = _bridge_profile(config)
+    qgc_port = int(bridge.get("qgc_port", 14550))
 
     raw_endpoint = str(mav_cfg.get("endpoint", f"udpin:0.0.0.0:{qgc_port}")).strip()
     endpoints: list[str] = [raw_endpoint, f"udpin:0.0.0.0:{qgc_port}"]
 
     occupied_ports = {
-        int(airsim_profile.get("udp_port", 14560)),
-        int(airsim_profile.get("control_port_local", 14540)),
-        int(airsim_profile.get("control_port_remote", 14580)),
+        int(bridge.get("udp_port", 14560)),
+        int(bridge.get("control_port_local", 14540)),
+        int(bridge.get("control_port_remote", 14580)),
     }
 
     raw_candidates = mav_cfg.get("endpoint_candidates", [])
@@ -125,18 +104,62 @@ def first_mavlink_heartbeat_endpoint(config: dict, *, timeout_s: float) -> str |
     return None
 
 
-def resolve_control_transport(config: dict) -> str:
-    """Resolve the effective control transport for this session."""
+def mavlink_endpoint_from_config(config: dict) -> str:
+    mav_cfg = config.get("control", {}).get("mavlink", {})
+    env_endpoint = os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip()
+    if env_endpoint:
+        return env_endpoint
+    return str(mav_cfg.get("endpoint", "udpin:0.0.0.0:14550")).strip()
 
-    env_value = os.environ.get("AIGP_CONTROL_TRANSPORT", "").strip().lower()
-    raw = (
-        env_value
-        if env_value
-        else str(config.get("control", {}).get("transport", "airsim")).strip().lower()
+
+def pymavlink_flight_client_from_config(config: dict):
+    from src.control.mavlink_client import PymavlinkFlightClient
+    from src.mavlink.config import load_attitude_mavlink_config
+
+    control_cfg = config.get("control", {})
+    mav_cfg = control_cfg.get("mavlink", {})
+    attitude_cfg = load_attitude_mavlink_config(config)
+    timesync_cfg = mav_cfg.get("timesync", {})
+    highres_imu_cfg = mav_cfg.get("highres_imu", {})
+    endpoint = mavlink_endpoint_from_config(config)
+    return PymavlinkFlightClient(
+        endpoint=endpoint,
+        command_rate_hz=float(control_cfg.get("command_rate_hz", 50.0)),
+        state_request_hz=float(mav_cfg.get("state_request_hz", 20.0)),
+        guided_custom_mode=int(mav_cfg.get("guided_custom_mode", 4)),
+        takeoff_altitude_m=float(mav_cfg.get("takeoff_altitude_m", 5.0)),
+        land_descent_speed_ms=float(config.get("landing", {}).get("descent_speed_ms", 2.0)),
+        source_system=int(mav_cfg.get("source_system", 255)),
+        source_component=int(mav_cfg.get("source_component", 1)),
+        respond_to_timesync_requests=bool(timesync_cfg.get("respond_to_requests", True)),
+        timesync_log_messages=bool(timesync_cfg.get("log_messages", True)),
+        send_timesync_requests=bool(timesync_cfg.get("send_requests", True)),
+        timesync_request_interval_s=float(timesync_cfg.get("request_interval_seconds", 1.0)),
+        highres_imu_enabled=bool(highres_imu_cfg.get("enabled", True)),
+        highres_imu_request_hz=float(
+            highres_imu_cfg.get("request_hz", mav_cfg.get("state_request_hz", 20.0))
+        ),
+        highres_imu_log_messages=bool(highres_imu_cfg.get("log_messages", False)),
+        highres_imu_max_staleness_ms=float(highres_imu_cfg.get("max_staleness_ms", 1000.0)),
+        timesync_pending_request_limit=int(timesync_cfg.get("pending_request_limit", 64)),
+        timesync_stable_window_size=int(timesync_cfg.get("stable_window_size", 9)),
+        timesync_stable_best_subset_size=int(timesync_cfg.get("stable_best_subset_size", 5)),
+        timesync_min_stable_samples=int(timesync_cfg.get("min_stable_samples", 3)),
+        timesync_max_stable_rtt_ns=int(
+            float(timesync_cfg.get("max_stable_rtt_ms", 250.0)) * 1_000_000
+        ),
+        timesync_max_offset_jitter_ns=int(
+            float(timesync_cfg.get("max_offset_jitter_ms", 50.0)) * 1_000_000
+        ),
+        attitude_target_throttle_body_z=bool(
+            mav_cfg.get("attitude_target", {}).get("throttle_body_z", False)
+        ),
+        attitude_request_enabled=bool(attitude_cfg.get("enabled", True)),
+        attitude_request_hz=float(attitude_cfg.get("request_hz", 50.0)),
     )
-    requested = _coerce_transport_with_guardrails(config, raw)
-    if requested == "auto":
-        if first_mavlink_heartbeat_endpoint(config, timeout_s=2.0) is not None:
-            return "mavlink"
-        return "airsim"
-    return requested
+
+
+def resolve_control_transport(config: dict) -> str:
+    """Flight control always uses MAVLink in this codebase."""
+    _ = config
+    return "mavlink"
