@@ -163,7 +163,6 @@ class YoloExplore(Algorithm):
         while time.monotonic() - t0 < duration_s:
             tick_start = time.monotonic()
 
-            # --- fly-through commit ---
             if flythrough_until_s is not None:
                 if time.monotonic() < flythrough_until_s:
                     cos_y = math.cos(flythrough_yaw_rad)
@@ -203,7 +202,6 @@ class YoloExplore(Algorithm):
                     f"scanning straight {post_flythrough_scan_s:.1f}s)"
                 )
 
-            # --- perception ---
             frame = self.latest_frame()
             yaw_rad = _yaw_from_orientation(
                 client.getMultirotorState().kinematics_estimated.orientation
@@ -238,7 +236,6 @@ class YoloExplore(Algorithm):
                     last_target_nx = target_info[1].nx
                     search_scan_offset = 0.0
 
-            # --- pursuit ---
             if target_info is not None:
                 kind, det = target_info
                 nx, ny, size_frac = det.nx, det.ny, det.size_frac
@@ -322,7 +319,6 @@ class YoloExplore(Algorithm):
                 self._sleep_remaining(tick_start, dt)
                 continue
 
-            # --- post-flythrough scan ---
             if time.monotonic() < scan_until_s:
                 cos_s = math.cos(scan_yaw_rad)
                 sin_s = math.sin(scan_yaw_rad)
@@ -347,7 +343,6 @@ class YoloExplore(Algorithm):
                 self._sleep_remaining(tick_start, dt)
                 continue
 
-            # --- no detection: cruise then scan ---
             time_since_target = time.monotonic() - last_target_seen_s
             if time_since_target > 2.0:
                 if search_scan_offset == 0.0 and last_target_nx != 0.0:
