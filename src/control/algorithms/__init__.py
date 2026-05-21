@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import importlib
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.control.flight_client import FlightClient
-from src.control.highres_imu import HighresImuHealth, HighresImuSample
+from src.control.highres_imu import HighresImuHealth, HighresImuSample, SensorSnapshot
 
 if TYPE_CHECKING:
     from src.config import Config
@@ -49,6 +50,17 @@ class Algorithm:
 
     def highres_imu_health(self, client: FlightClient) -> HighresImuHealth | None:
         return client.getHighresImuHealth()
+
+    def latest_sensor_snapshot(self, client: FlightClient) -> SensorSnapshot:
+        imu = self.latest_highres_imu(client)
+        transport = imu.transport if imu is not None else "unknown"
+        return SensorSnapshot(
+            state=client.getMultirotorState(),
+            highres_imu=imu,
+            highres_imu_health=self.highres_imu_health(client),
+            captured_monotonic_ns=time.monotonic_ns(),
+            transport=transport,
+        )
 
 
 def register(name: str):

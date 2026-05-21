@@ -160,6 +160,21 @@ def _altitude_z_hold_ned(altitude_m: float) -> float:
     return -altitude_m
 
 
+def vz_toward_altitude_hold(
+    z_ned: float,
+    z_hold_ned: float,
+    *,
+    tol_m: float = _ALT_TOL_M,
+    rate_ms: float = 0.5,
+) -> float:
+    err = z_ned - z_hold_ned
+    if err < -tol_m:
+        return rate_ms
+    if err > tol_m:
+        return -rate_ms
+    return 0.0
+
+
 class ExplorationScheduler:
     def __init__(
         self,
@@ -247,12 +262,7 @@ class ExplorationScheduler:
         self._mode = ExplorationMode.ALT_TRANSITION
 
     def _vz_toward_hold(self, z_ned: float) -> float:
-        err = z_ned - self._z_hold_ned
-        if err < -_ALT_TOL_M:
-            return 0.5
-        if err > _ALT_TOL_M:
-            return -0.5
-        return 0.0
+        return vz_toward_altitude_hold(z_ned, self._z_hold_ned)
 
     def _tick_altitude(self, inp: WanderTickInput) -> WanderTickOutput:
         vz = self._vz_toward_hold(inp.z_ned)

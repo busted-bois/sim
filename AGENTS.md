@@ -113,6 +113,10 @@ Auto-discovered from `src/control/algorithms/*.py`:
 
 Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonomous_explore"`.
 
+### Exploration mapping (`autonomous_explore.exploration`)
+
+Leg-based XY coverage, altitude layers, and periodic 360° panoramas. See `docs/exploration.md`. Shared helpers: `src.control.exploration` (`apply_wander_move`, `parse_exploration_settings`). Other vision algorithms can reuse the same block when added.
+
 ## Adding a New Algorithm
 
 1. Create `src/control/algorithms/my_algo.py`
@@ -144,6 +148,7 @@ Key top-level config keys:
 - `"safety"` — `algorithm_timeout_seconds`
 - `"low_end_profile"` — overrides applied when `AIGP_LOW_END=1`
 - `"waypoints"` — NED coordinate list
+- `"autonomous_explore"."exploration"` — mapping scheduler (panorama, legs, altitude layers); see `docs/exploration.md`
 
 ## Ruff Exclusions
 

@@ -12,6 +12,7 @@ from src.control.exploration.scheduler import (
     WanderTickInput,
     parse_exploration_settings,
     vertical_depth_bias_vz,
+    vz_toward_altitude_hold,
 )
 
 
@@ -47,6 +48,11 @@ def _tick(
 
 
 class ExplorationSchedulerTests(unittest.TestCase):
+    def test_vz_toward_altitude_hold(self) -> None:
+        self.assertEqual(vz_toward_altitude_hold(-6.0, -5.0), 0.5)
+        self.assertEqual(vz_toward_altitude_hold(-4.0, -5.0), -0.5)
+        self.assertEqual(vz_toward_altitude_hold(-5.0, -5.0), 0.0)
+
     def test_parse_exploration_settings_defaults_layers(self) -> None:
         s = parse_exploration_settings(None, hold_altitude_m=5.0, max_altitude_m=50.0)
         self.assertEqual(s.altitude_layers_m, (5.0,))

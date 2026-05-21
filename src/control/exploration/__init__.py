@@ -1,3 +1,4 @@
+from src.control.exploration.motion import apply_wander_move
 from src.control.exploration.scheduler import (
     ExplorationScheduler,
     ExplorationSettings,
@@ -5,6 +6,7 @@ from src.control.exploration.scheduler import (
     WanderTickOutput,
     build_wander_tick_input,
     parse_exploration_settings,
+    vz_toward_altitude_hold,
 )
 
 __all__ = [
@@ -12,6 +14,8 @@ __all__ = [
     "ExplorationSettings",
     "WanderTickInput",
     "WanderTickOutput",
+    "apply_wander_move",
     "build_wander_tick_input",
     "parse_exploration_settings",
+    "vz_toward_altitude_hold",
 ]

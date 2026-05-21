@@ -33,12 +33,12 @@ import numpy as np
 
 import airsim
 from src.control.algorithms import Algorithm, register
-from src.control.exploration.scheduler import (
+from src.control.exploration import (
     ExplorationScheduler,
-    WanderTickInput,
-    WanderTickOutput,
+    apply_wander_move,
     build_wander_tick_input,
     parse_exploration_settings,
+    vz_toward_altitude_hold,
 )
 from src.control.flight_client import FlightClient
 from src.control.highres_imu import format_highres_imu_health
@@ -55,26 +55,6 @@ from src.vision.processing import (
 @register("autonomous_explore")
 class AutonomousExplore(Algorithm):
     config_section = "autonomous_explore"
-
-    @staticmethod
-    def _explore_move(
-        client: FlightClient,
-        scheduler: ExplorationScheduler,
-        inp: WanderTickInput,
-        *,
-        cos_yaw: float,
-        sin_yaw: float,
-        dt: float,
-    ) -> WanderTickOutput:
-        out = scheduler.tick(inp)
-        client.moveByVelocityAsync(
-            out.fwd_speed * cos_yaw,
-            out.fwd_speed * sin_yaw,
-            out.vz,
-            dt,
-            yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(out.yaw_rate_deg_s)),
-        ).join()
-        return out
 
     def run(self, client: FlightClient) -> None:
         cfg = self._config.get("autonomous_explore", {})
@@ -274,7 +254,7 @@ class AutonomousExplore(Algorithm):
         while time.monotonic() - t0 < duration_s:
             tick_start = time.monotonic()
             if steps % imu_status_log_every_steps == 0:
-                health = self.highres_imu_health(client)
+                health = self.latest_sensor_snapshot(client).highres_imu_health
                 if health is not None and health.status != "ok":
                     print(
                         "[autonomous_explore] imu_runtime "
@@ -339,13 +319,7 @@ class AutonomousExplore(Algorithm):
             yaw_rad = _yaw_from_orientation(kin.orientation)
             z_ned = float(kin.position.z_val)
             cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
-            err_z = z_ned - explore_sched.z_hold_ned
-            if err_z < -0.3:
-                vz = 0.35
-            elif err_z > 0.3:
-                vz = -0.35
-            else:
-                vz = 0.0
+            vz = vz_toward_altitude_hold(z_ned, explore_sched.z_hold_ned)
 
             # Target pursuit overrides depth-based wander whenever a blue ring
             # or red circle is in view. Blue takes priority — rings are gates
@@ -592,7 +566,7 @@ class AutonomousExplore(Algorithm):
             if depth_map is None:
                 no_frame_streak += 1
                 tick_now = time.monotonic()
-                sched_out = self._explore_move(
+                sched_out = apply_wander_move(
                     client,
                     explore_sched,
                     build_wander_tick_input(
@@ -691,7 +665,7 @@ class AutonomousExplore(Algorithm):
             if band_h >= 2:
                 upper_clear = float(np.percentile(band[:mid, :], clearance_percentile))
                 lower_clear = float(np.percentile(band[mid:, :], clearance_percentile))
-            sched_out = self._explore_move(
+            sched_out = apply_wander_move(
                 client,
                 explore_sched,
                 build_wander_tick_input(
