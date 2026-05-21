@@ -286,7 +286,7 @@ class ExplorationScheduler:
             label = "PANORAMA_360 done"
         else:
             remaining_deg = math.degrees(_TWO_PI - self._panorama_yaw_accum_rad)
-            label = f"PANORAMA_360 ({remaining_deg:.0f}° left)"
+            label = f"PANORAMA_360 ({remaining_deg:.0f} deg left)"
         return WanderTickOutput(
             fwd_speed=self._s.panorama_creep_speed_ms,
             yaw_rate_deg_s=self._s.panorama_yaw_rate_dps,
@@ -309,7 +309,7 @@ class ExplorationScheduler:
             yaw_rate_deg_s=yaw_rate,
             vz=self._vz_toward_hold(inp.z_ned),
             mode=ExplorationMode.LEG_TURN,
-            label=f"LEG_TURN err={err:+.1f}°",
+            label=f"LEG_TURN err={err:+.1f} deg",
             z_hold_ned=self._z_hold_ned,
         )
 
