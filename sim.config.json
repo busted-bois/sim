@@ -220,7 +220,7 @@
     "random_seed": 42
   },
   "control": {
-    "transport": "mavlink",
+    "transport": "airsim",
     "mavlink": {
       "endpoint": "udpin:0.0.0.0:14550",
       "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],

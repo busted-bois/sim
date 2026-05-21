@@ -22,7 +22,7 @@ Inspired by:
 MiDaS small outputs disparity-like inverse depth (high value = close
 obstacle), so column scores are inverted before comparison. Set
 `autonomous_explore.inverse_depth=false` if you swap in a true-depth model.
-Optional `exploration` config adds XY legs, altitude layers, and 360° scans.
+Optional `exploration` config adds XY legs, altitude layers, and periodic 360 scans.
 """
 
 from __future__ import annotations
@@ -239,7 +239,6 @@ class AutonomousExplore(Algorithm):
         # Same as last_blue, but for red targets.
         last_red: tuple[float, float, float, float, float] | None = None
 
-        # --- IMPROVED PURSUIT & SEARCH LOGIC ---
         last_target_seen_s = time.monotonic()
         search_scan_offset = 0.0
         search_direction = 1.0
@@ -403,7 +402,6 @@ class AutonomousExplore(Algorithm):
                                 f"raw_nx={last_red[0]:+.2f} comp_nx={red[0]:+.2f}"
                             )
 
-                # --- PROXIMITY-BASED TARGET ARBITRATION ---
                 # Evaluate all allowed targets and pick the closest (largest r_frac).
                 # Applies a 50% "stickiness" hysteresis to current_target_kind.
                 candidates: list[tuple[str, float, float, float]] = []
@@ -632,7 +630,6 @@ class AutonomousExplore(Algorithm):
             else:
                 norm = (obstacle_score - obstacle_score.min()) / max(1e-6, raw_range)
 
-                # --- TARGET BIASING ---
                 # If we recently saw a target, slightly favor columns in that direction
                 # to prevent the drone from turning away from the gate area because
                 # monocular depth sees the gate rim as an "obstacle".

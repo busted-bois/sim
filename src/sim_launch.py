@@ -292,7 +292,48 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
 
 
 def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
+    import airsim
+
+    deadline = time.monotonic() + max(1.0, float(timeout_s))
+    poll_s = 0.5
+    while time.monotonic() < deadline:
+        if _is_port_open(host, port, timeout_s=0.5):
+            try:
+                client = airsim.MultirotorClient(ip=host, port=port, timeout_value=2)
+                client.confirmConnection()
+                return True
+            except Exception:
+                pass
+        time.sleep(poll_s)
     return False
+
+
+def _settings_use_simpleflight() -> bool:
+    settings_path = _airsim_settings_path()
+    if not settings_path.is_file():
+        return False
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    vehicles = settings.get("Vehicles")
+    if not isinstance(vehicles, dict):
+        return False
+    return any(
+        isinstance(v, dict) and v.get("VehicleType") == "SimpleFlight"
+        for v in vehicles.values()
+    )
+
+
+def _launch_transport(config: dict, *, restored_simpleflight: bool) -> str:
+    from src.mavlink_endpoints import resolve_control_transport
+
+    transport = resolve_control_transport(config)
+    if restored_simpleflight or _settings_use_simpleflight():
+        if transport != "airsim":
+            print("[launcher] SimpleFlight settings - using AirSim RPC transport.")
+        return "airsim"
+    return transport
 
 
 def _wait_for_control_link(
@@ -741,13 +782,14 @@ def launch(
     _load_env_local()
 
     from src.config import load_config
-    from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint, resolve_control_transport
+    from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint
     from src.simulator_specs import assert_specification_snapshot_if_required
 
     config = load_config()
     assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
-    transport = resolve_control_transport(config)
+    restored_simpleflight = _maybe_restore_simpleflight_from_backup()
+    transport = _launch_transport(config, restored_simpleflight=restored_simpleflight)
     resolved_transport = transport
     resolved_mavlink_endpoint: str | None = None
     if transport == "mavlink":
@@ -767,7 +809,6 @@ def launch(
     airsim_port = int(sim_cfg.get("airsim_port", 41451))
     rpc_ready_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
     rpc_tout_label = f"{rpc_ready_timeout_s:.0f}"
-    _maybe_restore_simpleflight_from_backup()
     _ensure_camera_settings(
         airsim_port,
         view_mode,
