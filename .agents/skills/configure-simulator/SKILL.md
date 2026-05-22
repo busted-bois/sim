@@ -47,6 +47,22 @@ Cross-cutting references (load when relevant):
 
 Each combination is the same four-step recipe (prereqs → `sim.config.json` deltas → `settings.json` deltas → launch command) with different values. A single skill keeps the routing logic in one place and lets agents discover any supported combo from a single `description` keyword set. The per-combo specifics live in `references/` and load only on demand — same context cost as separate skills, less drift.
 
+## Where new files go (course / combo / settings)
+
+All bundled content for this skill lives under `.agents/skills/configure-simulator/references/`. Convention:
+
+| What you're adding                                                | Where it goes                                                          |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| A combo that's a config-only variant (e.g. swap the `map_asset`)  | **No new file.** Use [`references/ue54-custom-course.md`](references/ue54-custom-course.md) and pass the course name as a parameter. |
+| A course with unique setup steps (custom physics, lighting, etc.) | `references/courses/<course-name>.md`. Add a row to the matrix above pointing at it. |
+| A new transport (e.g. ROS 2 bridge)                               | `references/transports/<transport>.md`. Add a matrix column.            |
+| A new engine version with a different launcher                    | `references/<engine-tag>-<course>-<transport>.md`. Add matrix rows.    |
+| Cross-cutting reference (e.g. `settings.json` shapes)             | `references/<topic>.md` at the top level of `references/`.             |
+
+**Do not fork this SKILL.md per combo.** The router stays singular; new combos = new rows + new reference files only.
+
+Map assets themselves (`.umap` files) live in the Colosseum `.uproject`'s `Content/` directory, not in this repo. The skill only stores the **instructions** for configuring an existing map — the map asset path goes in `sim.config.json` → `simulator.map_asset`.
+
 If a new combination genuinely needs different prereqs (e.g. a new engine version with a different launcher), add a row to the matrix above and drop a new file in `references/`. Do **not** fork this skill.
 
 ## Argument parsing

@@ -25,11 +25,15 @@ The repo defaults already match this combo. Verify these keys (do not change unl
     "res_x": 1280,
     "res_y": 720
   },
-  "control": { "transport": "rpc" }
+  "control": { "transport": "airsim" }
 }
 ```
 
-If `control.transport` is currently `"mavlink"` (the repo currently ships with it set that way for the jitter test), flip it to `"rpc"` for SimpleFlight runs. The launcher will also detect leftover PX4Multirotor `settings.json` and auto-restore the SimpleFlight backup on `uv run sim`.
+Valid values for `control.transport`: `"airsim"` (SimpleFlight RPC, this combo), `"mavlink"` (PX4), or `"auto"` (probes for a MAVLink HEARTBEAT and falls back to `airsim`). Anything else triggers a warning and coerces to `airsim` — see `src/mavlink_endpoints.py:_coerce_transport_with_guardrails`.
+
+If `control.transport` is currently `"mavlink"` (the repo ships with it set that way for the jitter test), flip it to `"airsim"` for SimpleFlight runs. The launcher will also detect leftover PX4Multirotor `settings.json` and auto-restore the SimpleFlight backup on `uv run sim`.
+
+**Algorithm must be RPC-compatible.** If `"algorithm"` is currently `"mavlink_jitter"` (MAVLink-only), change it to one of: `autonomous_explore` (standard autonomous build), `six_directions` (baseline test), `attitude_four_motion` (4-direction calibration), `vision_guided_control` (red-circle pursuit), or `opencv_landing` (vision-guided landing). The launcher will refuse to run a MAVLink-only algorithm with `transport="airsim"`.
 
 ## `~/Documents/AirSim/settings.json`
 

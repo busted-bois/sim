@@ -43,6 +43,8 @@ MAVLink/PX4 mode is **probe-only** in this repo — it brings UE up with PX4Mult
 }
 ```
 
+**Algorithm pairing.** MAVLink mode in this repo is **probe-only** — `mavlink-all` does not run `main.py`. If you want `main.py` to start, set `"algorithm"` to `"mavlink_jitter"` (MAVLink-specific) and use `uv run sim` directly. For probe-only flows (the recommended path), the algorithm field is unread.
+
 ## `~/Documents/AirSim/settings.json`
 
 Must declare a **PX4Multirotor** vehicle with TCP `4560` for HIL. `uv run sim-mavlink` writes this file for you — do not hand-edit. Full shape in [`airsim-settings.md`](airsim-settings.md).
@@ -72,7 +74,7 @@ The orchestrator backs up your SimpleFlight `settings.json` to `~/Documents/AirS
 uv run sim-restore-simpleflight
 ```
 
-Then change `control.transport` back to `"rpc"` in `sim.config.json` and launch with `uv run sim`.
+Then change `control.transport` back to `"airsim"` in `sim.config.json` and launch with `uv run sim`.
 
 ## Common pitfalls
 
