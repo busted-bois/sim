@@ -52,6 +52,8 @@ class WanderTickInput:
     upper_clearance: float | None = None
     lower_clearance: float | None = None
     defer_panorama: bool = False
+    yaw_rate_bias_deg_s: float = 0.0
+    request_loop_closure_panorama: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +121,8 @@ def build_wander_tick_input(
     upper_clearance: float | None = None,
     lower_clearance: float | None = None,
     defer_panorama: bool = False,
+    yaw_rate_bias_deg_s: float = 0.0,
+    request_loop_closure_panorama: bool = False,
 ) -> WanderTickInput:
     return WanderTickInput(
         now_s=now_s,
@@ -133,6 +137,8 @@ def build_wander_tick_input(
         upper_clearance=upper_clearance,
         lower_clearance=lower_clearance,
         defer_panorama=defer_panorama,
+        yaw_rate_bias_deg_s=yaw_rate_bias_deg_s,
+        request_loop_closure_panorama=request_loop_closure_panorama,
     )
 
 
@@ -219,6 +225,17 @@ class ExplorationScheduler:
                 self._mode = ExplorationMode.WANDER
             else:
                 return self._tick_panorama(inp)
+
+        if (
+            self._s.panorama_enabled
+            and not inp.defer_panorama
+            and self._mode == ExplorationMode.WANDER
+            and inp.request_loop_closure_panorama
+        ):
+            self._mode = ExplorationMode.PANORAMA_360
+            self._panorama_yaw_accum_rad = 0.0
+            self._panorama_prev_yaw_rad = None
+            return self._tick_panorama(inp)
 
         alt_err = abs(inp.z_ned - self._z_hold_ned)
         if alt_err > _ALT_TOL_M:
@@ -337,7 +354,13 @@ class ExplorationScheduler:
                 combined_cos /= norm
                 combined_sin /= norm
             err = yaw_error_deg(math.atan2(combined_sin, combined_cos), inp.yaw_rad)
-            yaw_rate = _clamp(0.6 * inp.yaw_rate_deg_s + 0.4 * err, -90.0, 90.0)
+            yaw_rate = _clamp(
+                0.6 * inp.yaw_rate_deg_s + 0.4 * err + inp.yaw_rate_bias_deg_s,
+                -90.0,
+                90.0,
+            )
+        elif inp.yaw_rate_bias_deg_s != 0.0:
+            yaw_rate = _clamp(inp.yaw_rate_deg_s + inp.yaw_rate_bias_deg_s, -90.0, 90.0)
         vz = inp.base_vz + vertical_depth_bias_vz(
             inp.upper_clearance,
             inp.lower_clearance,

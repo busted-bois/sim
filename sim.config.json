@@ -186,7 +186,17 @@
       "altitude_layer_dwell_s": 18.0,
       "vertical_depth_bias_gain": 0.4,
       "vertical_depth_bias_enabled": true,
-      "legacy_scan_enabled": false
+      "legacy_scan_enabled": false,
+      "slam": {
+        "enabled": true,
+        "grid_cell_m": 1.0,
+        "loop_closure_enabled": true,
+        "loop_closure_radius_m": 2.5,
+        "loop_closure_min_path_m": 8.0,
+        "active_exploration_enabled": true,
+        "active_exploration_gain_deg_s": 12.0,
+        "landmark_enabled": true
+      }
     }
   },
   "vision_guided_control": {

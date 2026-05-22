@@ -35,9 +35,11 @@ import airsim
 from src.control.algorithms import Algorithm, register
 from src.control.exploration import (
     ExplorationScheduler,
+    ExplorationSlam,
     apply_wander_move,
     build_wander_tick_input,
     parse_exploration_settings,
+    parse_slam_settings,
     vz_toward_altitude_hold,
 )
 from src.control.flight_client import FlightClient
@@ -85,11 +87,13 @@ class AutonomousExplore(Algorithm):
         hold_altitude_m = _clamp(float(cfg.get("hold_altitude_m", 5.0)), 1.5, 50.0)
         max_altitude_m = _clamp(float(control.get("max_altitude_m", 50.0)), hold_altitude_m, 50.0)
         z_hold = -hold_altitude_m  # NED: above ground = negative z
+        expl_cfg = cfg.get("exploration") or {}
         explore_settings = parse_exploration_settings(
-            cfg.get("exploration"),
+            expl_cfg,
             hold_altitude_m=hold_altitude_m,
             max_altitude_m=max_altitude_m,
         )
+        slam_settings = parse_slam_settings(expl_cfg.get("slam"))
         face_forward_on_start = bool(cfg.get("face_forward_on_start", True))
 
         pursue_targets = bool(cfg.get("pursue_targets", True))
@@ -171,7 +175,8 @@ class AutonomousExplore(Algorithm):
             f"panorama={explore_settings.panorama_enabled} "
             f"legs={explore_settings.leg_enabled} "
             f"alt_layers={explore_settings.altitude_layers_m} "
-            f"legacy_scan={explore_settings.legacy_scan_enabled}"
+            f"legacy_scan={explore_settings.legacy_scan_enabled} "
+            f"slam={slam_settings.enabled}"
         )
         legacy_scan = explore_settings.legacy_scan_enabled
         imu_health = self.highres_imu_health(client)
@@ -196,14 +201,25 @@ class AutonomousExplore(Algorithm):
         )
         print(f"[autonomous_explore] start heading yaw={spawn_yaw_deg:+.1f}°")
 
+        cam_half_fov_deg = yaw_mapping_half_fov_degrees(self._config.get("vision", {}))
         t0 = time.monotonic()
         spawn_state = client.getMultirotorState().kinematics_estimated
-        spawn_z = float(spawn_state.position.z_val)
+        spawn_pos = spawn_state.position
+        spawn_z = float(spawn_pos.z_val)
+        spawn_yaw_rad = _yaw_from_orientation(spawn_state.orientation)
         explore_sched = ExplorationScheduler(
             explore_settings,
             start_s=t0,
-            initial_yaw_rad=_yaw_from_orientation(spawn_state.orientation),
+            initial_yaw_rad=spawn_yaw_rad,
             initial_z_ned=spawn_z,
+        )
+        half_fov_rad = math.radians(cam_half_fov_deg)
+        explore_slam = ExplorationSlam(
+            slam_settings,
+            spawn_x_m=float(spawn_pos.x_val),
+            spawn_y_m=float(spawn_pos.y_val),
+            spawn_yaw_rad=spawn_yaw_rad,
+            start_s=t0,
         )
         steps = 0
         no_frame_streak = 0
@@ -246,10 +262,6 @@ class AutonomousExplore(Algorithm):
         # Remembers which side the last target was on so we search in that
         # direction first if it's lost.
         last_target_nx = 0.0
-
-        # Half of the configured camera FOV in degrees, used to map yaw delta
-        # back into image-normalized horizontal offset (nx).
-        cam_half_fov_deg = yaw_mapping_half_fov_degrees(self._config.get("vision", {}))
 
         while time.monotonic() - t0 < duration_s:
             tick_start = time.monotonic()
@@ -316,8 +328,10 @@ class AutonomousExplore(Algorithm):
                     depth_map = None
 
             kin = client.getMultirotorState().kinematics_estimated
+            pos = kin.position
             yaw_rad = _yaw_from_orientation(kin.orientation)
-            z_ned = float(kin.position.z_val)
+            z_ned = float(pos.z_val)
+            explore_slam.update_pose(float(pos.x_val), float(pos.y_val), yaw_rad)
             cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
             vz = vz_toward_altitude_hold(z_ned, explore_sched.z_hold_ned)
 
@@ -349,6 +363,7 @@ class AutonomousExplore(Algorithm):
                     last_target_nx = real_blue[0]
                     last_blue = (real_blue[0], real_blue[1], real_blue[2], now_s, yaw_rad)
                     explore_sched.reset_panorama_timer(now_s)
+                    explore_slam.register_landmark("blue", real_blue[0], half_fov_rad=half_fov_rad)
                     blue_lock_until_s = now_s + 2.5
                 blue_lock_engaged = now_s < blue_lock_until_s
 
@@ -357,6 +372,7 @@ class AutonomousExplore(Algorithm):
                     last_target_nx = real_red[0]
                     last_red = (real_red[0], real_red[1], real_red[2], now_s, yaw_rad)
                     explore_sched.reset_panorama_timer(now_s)
+                    explore_slam.register_landmark("red", real_red[0], half_fov_rad=half_fov_rad)
                     red_lock_until_s = now_s + 2.0
                 red_lock_engaged = now_s < red_lock_until_s
 
@@ -566,6 +582,8 @@ class AutonomousExplore(Algorithm):
             if depth_map is None:
                 no_frame_streak += 1
                 tick_now = time.monotonic()
+                slam_yaw_bias = explore_slam.active_exploration_yaw_bias_deg()
+                loop_panorama = explore_slam.consume_loop_closure(tick_now)
                 sched_out = apply_wander_move(
                     client,
                     explore_sched,
@@ -578,6 +596,8 @@ class AutonomousExplore(Algorithm):
                         sin_yaw=sin_y,
                         base_vz=vz,
                         defer_panorama=tick_now - last_target_seen_s < 2.0,
+                        yaw_rate_bias_deg_s=slam_yaw_bias,
+                        request_loop_closure_panorama=loop_panorama,
                     ),
                     cos_yaw=cos_y,
                     sin_yaw=sin_y,
@@ -608,6 +628,12 @@ class AutonomousExplore(Algorithm):
                 col_scores[i] = float(np.percentile(strip, clearance_percentile))
 
             obstacle_score = col_scores if inverse_depth else -col_scores
+            explore_slam.integrate_depth_columns(
+                n_cols,
+                obstacle_score,
+                yaw_rad=yaw_rad,
+                half_fov_rad=half_fov_rad,
+            )
             raw_range = float(obstacle_score.max() - obstacle_score.min())
 
             if raw_range < uniform_range_thresh:
@@ -642,6 +668,8 @@ class AutonomousExplore(Algorithm):
 
             time_since_target = tick_now - last_target_seen_s
             defer_panorama = time_since_target < 2.0
+            slam_yaw_bias = explore_slam.active_exploration_yaw_bias_deg()
+            loop_panorama = explore_slam.consume_loop_closure(tick_now)
 
             if target_info is None and legacy_scan:
                 if time_since_target > 2.0:
@@ -681,6 +709,8 @@ class AutonomousExplore(Algorithm):
                     upper_clearance=upper_clear,
                     lower_clearance=lower_clear,
                     defer_panorama=defer_panorama,
+                    yaw_rate_bias_deg_s=slam_yaw_bias,
+                    request_loop_closure_panorama=loop_panorama,
                 ),
                 cos_yaw=cos_y,
                 sin_yaw=sin_y,
@@ -693,12 +723,14 @@ class AutonomousExplore(Algorithm):
 
             if steps % max(1, int(rate_hz)) == 0:
                 rounded = np.round(col_scores, 1).tolist()
+                slam_st = explore_slam.status()
                 print(
                     f"[autonomous_explore] {state_label} "
                     f"cols={rounded} chosen={chosen}/{n_cols - 1} "
                     f"fwd={fwd_speed:.2f} yaw_rate={yaw_rate:+.1f} "
                     f"center_norm={center_norm:.2f} range={raw_range:.1f} "
-                    f"z_hold={-sched_out.z_hold_ned:.1f}m"
+                    f"z_hold={-sched_out.z_hold_ned:.1f}m "
+                    f"slam_path={slam_st.path_m:.1f}m cells={slam_st.visited_cells}"
                 )
 
             steps += 1
@@ -710,6 +742,12 @@ class AutonomousExplore(Algorithm):
         client.landAsync().join()
 
         # Print metrics
+        slam_final = explore_slam.status()
+        print(
+            f"[autonomous_explore] slam summary path={slam_final.path_m:.1f}m "
+            f"visited_cells={slam_final.visited_cells} landmarks={slam_final.landmark_count} "
+            f"loop_closures={slam_final.loop_closures}"
+        )
         print("\n--- Performance Metrics ---")
         if blue_gate_time is not None:
             print(f"Time to blue gate: {blue_gate_time:.2f}s")

@@ -28,6 +28,7 @@ def _tick(
     upper: float | None = None,
     lower: float | None = None,
     defer_panorama: bool = False,
+    request_loop_closure_panorama: bool = False,
 ):
     return sched.tick(
         WanderTickInput(
@@ -43,6 +44,8 @@ def _tick(
             upper_clearance=upper,
             lower_clearance=lower,
             defer_panorama=defer_panorama,
+            yaw_rate_bias_deg_s=0.0,
+            request_loop_closure_panorama=request_loop_closure_panorama,
         )
     )
 
@@ -110,6 +113,25 @@ class ExplorationSchedulerTests(unittest.TestCase):
                 break
         self.assertIn("done", out.label)
         self.assertEqual(out.mode, ExplorationMode.WANDER)
+
+    def test_loop_closure_panorama_request(self) -> None:
+        sched = ExplorationScheduler(
+            ExplorationSettings(
+                panorama_enabled=True,
+                panorama_interval_s=120.0,
+                altitude_layers_m=(5.0,),
+            ),
+            start_s=0.0,
+            initial_yaw_rad=0.0,
+            initial_z_ned=-5.0,
+        )
+        out = _tick(
+            sched,
+            now_s=1.0,
+            z_ned=-5.0,
+            request_loop_closure_panorama=True,
+        )
+        self.assertEqual(out.mode, ExplorationMode.PANORAMA_360)
 
     def test_defer_panorama_blocks_start(self) -> None:
         settings = ExplorationSettings(
