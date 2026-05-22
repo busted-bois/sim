@@ -18,7 +18,6 @@ class ExplorationSlamTests(unittest.TestCase):
             spawn_x_m=0.0,
             spawn_y_m=0.0,
             spawn_yaw_rad=0.0,
-            start_s=0.0,
         )
         slam.update_pose(6.0, 0.0, 0.0)
         slam.update_pose(6.0, 6.0, math.pi / 2)
@@ -33,7 +32,6 @@ class ExplorationSlamTests(unittest.TestCase):
             spawn_x_m=0.0,
             spawn_y_m=0.0,
             spawn_yaw_rad=0.0,
-            start_s=0.0,
         )
         scores = [2.0, 8.0, 9.0, 8.0, 2.0]
         slam.integrate_depth_columns(5, scores, yaw_rad=0.0, half_fov_rad=math.radians(45.0))
@@ -47,7 +45,6 @@ class ExplorationSlamTests(unittest.TestCase):
             spawn_x_m=0.0,
             spawn_y_m=0.0,
             spawn_yaw_rad=0.0,
-            start_s=0.0,
         )
         slam.integrate_depth_columns(
             5, [1.0, 9.0, 9.5, 9.0, 1.0], yaw_rad=0.0, half_fov_rad=math.radians(45.0)
@@ -59,7 +56,7 @@ class ExplorationSlamTests(unittest.TestCase):
 
     def test_imu_yaw_assist(self) -> None:
         slam = ExplorationSlam(parse_slam_settings({"imu_yaw_assist_gain": 1.0}), **self._spawn())
-        rate = slam.imu_yaw_assist_deg_s(0.1, dt_s=0.1)
+        rate = slam.imu_yaw_assist_deg_s(0.1)
         self.assertGreater(rate, 0.0)
 
     def test_export_map_writes_json(self) -> None:
@@ -75,12 +72,7 @@ class ExplorationSlamTests(unittest.TestCase):
 
     @staticmethod
     def _spawn() -> dict[str, float]:
-        return {
-            "spawn_x_m": 0.0,
-            "spawn_y_m": 0.0,
-            "spawn_yaw_rad": 0.0,
-            "start_s": 0.0,
-        }
+        return {"spawn_x_m": 0.0, "spawn_y_m": 0.0, "spawn_yaw_rad": 0.0}
 
 
 if __name__ == "__main__":

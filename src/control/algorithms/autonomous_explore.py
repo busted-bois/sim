@@ -70,7 +70,7 @@ class AutonomousExplore(Algorithm):
         if depth_lost:
             sample = self.latest_highres_imu(client)
             zgyro = sample.zgyro if sample is not None else None
-            bias += explore_slam.imu_yaw_assist_deg_s(zgyro, dt_s=dt)
+            bias += explore_slam.imu_yaw_assist_deg_s(zgyro)
         return bias
 
     def run(self, client: FlightClient) -> None:
@@ -234,7 +234,6 @@ class AutonomousExplore(Algorithm):
             spawn_x_m=float(spawn_pos.x_val),
             spawn_y_m=float(spawn_pos.y_val),
             spawn_yaw_rad=spawn_yaw_rad,
-            start_s=t0,
         )
         steps = 0
         no_frame_streak = 0
@@ -281,7 +280,7 @@ class AutonomousExplore(Algorithm):
         while time.monotonic() - t0 < duration_s:
             tick_start = time.monotonic()
             if steps % imu_status_log_every_steps == 0:
-                health = self.latest_sensor_snapshot(client).highres_imu_health
+                health = self.highres_imu_health(client)
                 if health is not None and health.status != "ok":
                     print(
                         "[autonomous_explore] imu_runtime "
@@ -649,6 +648,7 @@ class AutonomousExplore(Algorithm):
                 obstacle_score,
                 yaw_rad=yaw_rad,
                 half_fov_rad=half_fov_rad,
+                inverse_depth=inverse_depth,
             )
             raw_range = float(obstacle_score.max() - obstacle_score.min())
 

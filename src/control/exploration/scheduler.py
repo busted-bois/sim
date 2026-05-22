@@ -1,4 +1,4 @@
-"""Leg-based XY coverage, altitude layers, and periodic 360° panorama scans."""
+"""Leg-based XY coverage, altitude layers, and periodic 360 panorama scans."""
 
 from __future__ import annotations
 

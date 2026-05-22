@@ -115,7 +115,7 @@ Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonom
 
 ### Exploration mapping (`autonomous_explore.exploration`)
 
-Leg-based XY coverage, altitude layers, periodic 360° panoramas, and a SLAM-inspired pose/grid/landmark layer (see [SLAM](https://en.wikipedia.org/wiki/Simultaneous_localization_and_mapping)). Details: `docs/exploration.md`. Shared helpers: `src.control.exploration` (`apply_wander_move`, `ExplorationSlam`, `parse_exploration_settings`, `parse_slam_settings`).
+Leg/altitude/panorama mapping plus optional `exploration.slam` (grid, landmarks, loop closure). See `docs/exploration.md` and `src.control.exploration`.
 
 ## Adding a New Algorithm
 

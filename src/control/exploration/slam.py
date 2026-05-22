@@ -42,7 +42,6 @@ class SlamStatus:
     x_m: float
     y_m: float
     path_m: float
-    visited_cells: int
     known_cells: int
     free_cells: int
     occupied_cells: int
@@ -100,7 +99,6 @@ class ExplorationSlam:
         spawn_x_m: float,
         spawn_y_m: float,
         spawn_yaw_rad: float,
-        start_s: float,
     ) -> None:
         self._s = settings
         self._spawn = (spawn_x_m, spawn_y_m)
@@ -153,13 +151,10 @@ class ExplorationSlam:
         self._touch_log_odds(cell, _LOG_ODDS_FREE)
         self._bearing_visits[_bearing_bin(yaw_rad)] += 1
 
-    def _range_from_score(self, score: float, scores: list[float]) -> float:
+    def _range_from_score(self, score: float, scores: list[float], *, inverse_depth: bool) -> float:
         lo, hi = min(scores), max(scores)
         span = max(1e-6, hi - lo)
-        if self._last_inverse_depth:
-            closeness = (score - lo) / span
-        else:
-            closeness = 1.0 - (score - lo) / span
+        closeness = (score - lo) / span if inverse_depth else 1.0 - (score - lo) / span
         return _clamp(
             self._s.landmark_max_range_m * (1.0 - 0.8 * closeness) + 1.5,
             1.5,
@@ -180,6 +175,7 @@ class ExplorationSlam:
         *,
         yaw_rad: float,
         half_fov_rad: float,
+        inverse_depth: bool = True,
     ) -> None:
         if not self._s.enabled or n_cols < 1:
             return
@@ -187,6 +183,7 @@ class ExplorationSlam:
         self._last_scores = scores
         self._last_n_cols = n_cols
         self._last_center_idx = (n_cols - 1) / 2.0
+        self._last_inverse_depth = inverse_depth
         ranked = sorted(scores)
         close_threshold = ranked[min(n_cols - 1, int(0.65 * (n_cols - 1)))]
         center = self._last_center_idx
@@ -195,7 +192,7 @@ class ExplorationSlam:
             offset = (i - center) / max(1.0, center)
             bearing = yaw_rad + offset * half_fov_rad
             self._bearing_visits[_bearing_bin(bearing)] += 1
-            range_m = self._range_from_score(scores[i], scores)
+            range_m = self._range_from_score(scores[i], scores, inverse_depth=inverse_depth)
             steps = max(1, int(range_m / cell_m))
             for s in range(1, steps):
                 frac = s / steps
@@ -222,7 +219,11 @@ class ExplorationSlam:
             return
         if range_m is None and self._last_scores:
             col = self._column_index(nx)
-            range_m = self._range_from_score(self._last_scores[col], self._last_scores)
+            range_m = self._range_from_score(
+                self._last_scores[col],
+                self._last_scores,
+                inverse_depth=self._last_inverse_depth,
+            )
         r = range_m if range_m is not None else self._s.landmark_default_range_m
         bearing = self._yaw + float(nx) * half_fov_rad
         lx = self._x + r * math.cos(bearing)
@@ -230,8 +231,8 @@ class ExplorationSlam:
         self._landmarks.append({"kind": kind, "x_m": lx, "y_m": ly, "range_m": r, "nx": nx})
         self._touch_log_odds(_cell_index(lx, ly, self._s.grid_cell_m), _LOG_ODDS_OCC)
 
-    def imu_yaw_assist_deg_s(self, zgyro_rad_s: float | None, *, dt_s: float) -> float:
-        if not self._s.enabled or zgyro_rad_s is None or dt_s <= 0.0:
+    def imu_yaw_assist_deg_s(self, zgyro_rad_s: float | None) -> float:
+        if not self._s.enabled or zgyro_rad_s is None:
             return 0.0
         return _clamp(
             math.degrees(zgyro_rad_s) * self._s.imu_yaw_assist_gain,
@@ -239,14 +240,16 @@ class ExplorationSlam:
             45.0,
         )
 
+    def _yaw_bias_toward_rad(self, target_yaw_rad: float) -> float:
+        err = (math.degrees(target_yaw_rad - self._yaw) + 180.0) % 360.0 - 180.0
+        g = self._s.active_exploration_gain_deg_s
+        return _clamp(g * (err / 90.0), -g, g)
+
     def _bearing_yaw_bias_deg(self) -> float:
         front = range(_BEARING_BINS // 3, 2 * _BEARING_BINS // 3)
         min_visits = min(self._bearing_visits[i] for i in front)
         target_bin = next(i for i in front if self._bearing_visits[i] == min_visits)
-        target_yaw = math.radians(target_bin * (360.0 / _BEARING_BINS))
-        err = (math.degrees(target_yaw - self._yaw) + 180.0) % 360.0 - 180.0
-        g = self._s.active_exploration_gain_deg_s
-        return _clamp(g * (err / 90.0), -g, g)
+        return self._yaw_bias_toward_rad(math.radians(target_bin * (360.0 / _BEARING_BINS)))
 
     def _frontier_yaw_bias_deg(self) -> float:
         if not self._s.frontier_enabled or not self._log_odds:
@@ -267,10 +270,7 @@ class ExplorationSlam:
                         best = (cx, cy)
         if best is None:
             return 0.0
-        target_yaw = math.atan2(best[1] - self._y, best[0] - self._x)
-        err = (math.degrees(target_yaw - self._yaw) + 180.0) % 360.0 - 180.0
-        g = self._s.active_exploration_gain_deg_s
-        return _clamp(g * (err / 90.0), -g, g)
+        return self._yaw_bias_toward_rad(math.atan2(best[1] - self._y, best[0] - self._x))
 
     def exploration_yaw_bias_deg(self) -> float:
         if not self._s.enabled or not self._s.active_exploration_enabled:
@@ -279,9 +279,6 @@ class ExplorationSlam:
         if abs(frontier) > 0.5:
             return frontier
         return self._bearing_yaw_bias_deg()
-
-    def active_exploration_yaw_bias_deg(self) -> float:
-        return self.exploration_yaw_bias_deg()
 
     def loop_closure_detected(self) -> bool:
         if not self._s.enabled or not self._s.loop_closure_enabled:
@@ -318,7 +315,6 @@ class ExplorationSlam:
             x_m=self._x,
             y_m=self._y,
             path_m=self._path_m,
-            visited_cells=free_n,
             known_cells=known,
             free_cells=free_n,
             occupied_cells=occ_n,
