@@ -133,6 +133,7 @@ def main() -> None:
             timesync_max_offset_jitter_ns=int(
                 float(timesync_cfg.get("max_offset_jitter_ms", 50.0)) * 1_000_000
             ),
+            sim_config=getattr(config, "_raw", config),
         )
         allow_airsim_vision = (
             bool(config.get("vision", {}).get("enabled", False))

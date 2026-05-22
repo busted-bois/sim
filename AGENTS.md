@@ -137,6 +137,13 @@ Leg/altitude/panorama mapping plus optional `exploration.slam` (grid, landmarks,
 
 Helpers on `PymavlinkFlightClient` and `FlightClient` protocol. Checklist: `docs/set_position_target_pr_test_plan.md`.
 
+### Internal NED mapping (`NedEnvironmentMap`)
+
+- Module: `src/control/ned_environment.py` — ingests `LOCAL_POSITION_NED` + `ATTITUDE`, exposes LOCAL/BODY transforms and spawn-relative XY.
+- MAVLink: `PymavlinkFlightClient.get_ned_environment()` (telemetry pump requests ATTITUDE when `control.mavlink.attitude.enabled`).
+- Algorithms: `Algorithm.ned_environment(client)`; AirSim fallback: `NedEnvironmentMap.from_multirotor_state(state, spawn_xy=...)`.
+- Docs: `docs/ned_coordinate_mapping.md`.
+
 ## Algorithm Config Sections in sim.config.json
 
 Each algorithm has its own top-level config key matching its name (e.g. `"autonomous_explore"`, `"attitude_four_motion"`). Read by algorithm constructor via `self._config`.

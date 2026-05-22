@@ -32,6 +32,14 @@ from src.control.highres_imu import (
     merge_highres_imu_sample,
 )
 from src.control.mavlink_timesync import TimesyncOutboundRequest, TimesyncSnapshot, TimesyncStore
+from src.control.ned_environment import (
+    MavlinkNedIngest,
+    NedEnvironmentMap,
+    load_ned_environment_config,
+)
+from src.control.utils import orientation_from_yaw
+from src.mavlink.attitude_bridge import AttitudeTelemetryBridge
+from src.mavlink.integration import attach_attitude_bridge
 
 _logger = logging.getLogger(__name__)
 
@@ -59,9 +67,18 @@ class _Vector3r:
 
 
 @dataclass(frozen=True, slots=True)
+class _Quaternionr:
+    x_val: float
+    y_val: float
+    z_val: float
+    w_val: float
+
+
+@dataclass(frozen=True, slots=True)
 class _KinematicsEstimated:
     position: _Vector3r
     linear_velocity: _Vector3r
+    orientation: _Quaternionr
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +161,7 @@ class PymavlinkFlightClient:
         attitude_target_throttle_body_z: bool = False,
         connection_factory: Callable[..., Any] | None = None,
         log_commands: bool = True,
+        sim_config: dict[str, Any] | None = None,
     ) -> None:
         self._endpoint = endpoint.strip() if endpoint else self._DEFAULT_ENDPOINT
         _parse_udp_endpoint(self._endpoint)
@@ -208,6 +226,33 @@ class PymavlinkFlightClient:
         self._motion_epoch_monotonic: float | None = None
         self._attitude_target_throttle_body_z = bool(attitude_target_throttle_body_z)
 
+        sim_cfg = sim_config or {}
+        ned_settings = load_ned_environment_config(sim_cfg)
+        self._ned_environment = NedEnvironmentMap(ned_settings)
+        self._ned_ingest = MavlinkNedIngest(self._ned_environment)
+        self._attitude_bridge = AttitudeTelemetryBridge.from_sim_config(sim_cfg)
+        attach_attitude_bridge(self, self._attitude_bridge)
+
+    def get_ned_environment(self) -> NedEnvironmentMap:
+        return self._ned_environment
+
+    def _default_orientation(self) -> _Quaternionr:
+        snap = self._ned_environment.snapshot()
+        if snap.has_attitude and snap.attitude is not None:
+            q = orientation_from_yaw(snap.attitude.yaw)
+            return _Quaternionr(q.x_val, q.y_val, q.z_val, q.w_val)
+        return _Quaternionr(0.0, 0.0, 0.0, 1.0)
+
+    def _kinematics_from_ned(self) -> _KinematicsEstimated:
+        snap = self._ned_environment.snapshot()
+        pos = snap.position
+        vel = snap.velocity
+        return _KinematicsEstimated(
+            position=_Vector3r(pos.x, pos.y, pos.z),
+            linear_velocity=_Vector3r(vel.vx, vel.vy, vel.vz),
+            orientation=self._default_orientation(),
+        )
+
     def confirmConnection(self) -> None:
         self._mav = self._connection_factory(
             self._endpoint,
@@ -233,15 +278,9 @@ class PymavlinkFlightClient:
             )
 
         armed = (int(heartbeat.base_mode) & int(mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)) != 0
-        zero = _Vector3r(0.0, 0.0, 0.0)
         with self._telemetry_lock:
             self._telemetry = _Telemetry(
-                state=_MultirotorState(
-                    kinematics_estimated=_KinematicsEstimated(
-                        position=zero,
-                        linear_velocity=zero,
-                    )
-                ),
+                state=_MultirotorState(kinematics_estimated=self._kinematics_from_ned()),
                 armed=armed,
             )
         self._state_ready_evt.set()
@@ -300,10 +339,7 @@ class PymavlinkFlightClient:
             self._state_ready_evt.wait(timeout=self._heartbeat_timeout_s)
             telemetry = self._get_latest_telemetry()
             if telemetry is None:
-                zero = _Vector3r(0.0, 0.0, 0.0)
-                return _MultirotorState(
-                    kinematics_estimated=_KinematicsEstimated(position=zero, linear_velocity=zero)
-                )
+                return _MultirotorState(kinematics_estimated=self._kinematics_from_ned())
         return telemetry.state
 
     def cancelLastTask(self) -> None:
@@ -633,6 +669,8 @@ class PymavlinkFlightClient:
             if message_id is None:
                 continue
             self._mav.mav.message_interval_send(int(message_id), interval_us)
+        if self._attitude_bridge.enabled:
+            self._attitude_bridge.request_interval(self._mav.mav)
         if self._highres_imu_enabled:
             message_id = getattr(mavutil.mavlink, "MAVLINK_MSG_ID_HIGHRES_IMU", None)
             if message_id is not None:
@@ -655,6 +693,8 @@ class PymavlinkFlightClient:
         armed_bit = mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
         next_timesync_request_s = time.monotonic()
         message_types = ["LOCAL_POSITION_NED", "HEARTBEAT", "TIMESYNC"]
+        if self._attitude_bridge.enabled:
+            message_types.append("ATTITUDE")
         if self._highres_imu_enabled:
             message_types.append("HIGHRES_IMU")
         while not self._stop_evt.is_set():
@@ -679,6 +719,8 @@ class PymavlinkFlightClient:
                             message.y,
                             message.z,
                         )
+                elif message_type == "ATTITUDE":
+                    self._handle_attitude(message)
                 elif message_type == "HEARTBEAT":
                     armed = (int(message.base_mode) & int(armed_bit)) != 0
                     self._handle_heartbeat(armed)
@@ -694,19 +736,25 @@ class PymavlinkFlightClient:
             except Exception:
                 continue
 
-    def _handle_local_position(self, message: Any) -> None:
-        position = _Vector3r(float(message.x), float(message.y), float(message.z))
-        velocity = _Vector3r(float(message.vx), float(message.vy), float(message.vz))
+    def _handle_attitude(self, message: Any) -> None:
+        self._attitude_bridge.on_message(message)
+        self._ned_ingest.on_attitude(message)
         previous = self._get_latest_telemetry()
         armed = previous.armed if previous is not None else False
         with self._telemetry_lock:
             self._telemetry = _Telemetry(
-                state=_MultirotorState(
-                    kinematics_estimated=_KinematicsEstimated(
-                        position=position,
-                        linear_velocity=velocity,
-                    )
-                ),
+                state=_MultirotorState(kinematics_estimated=self._kinematics_from_ned()),
+                armed=armed,
+            )
+            self._state_ready_evt.set()
+
+    def _handle_local_position(self, message: Any) -> None:
+        self._ned_ingest.on_local_position_ned(message)
+        previous = self._get_latest_telemetry()
+        armed = previous.armed if previous is not None else False
+        with self._telemetry_lock:
+            self._telemetry = _Telemetry(
+                state=_MultirotorState(kinematics_estimated=self._kinematics_from_ned()),
                 armed=armed,
             )
             self._state_ready_evt.set()

@@ -319,6 +319,11 @@
         "request_hz": 50,
         "max_staleness_ms": 500,
         "log_messages": false
+      },
+      "ned_environment": {
+        "enabled": true,
+        "use_full_attitude": false,
+        "spawn_relative_enabled": true
       }
     }
   },

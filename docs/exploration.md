@@ -27,3 +27,5 @@ Leg-based XY coverage, altitude layers, periodic 360° panoramas, and optional `
 ## Reuse
 
 `src.control.exploration`: `ExplorationScheduler`, `ExplorationSlam`, `apply_wander_move`, `parse_exploration_settings`, `parse_slam_settings`.
+
+SLAM pose/grid uses LOCAL NED XY; prefer `NedEnvironmentMap.spawn_relative_xy()` and `heading_yaw_rad` when on MAVLink (`docs/ned_coordinate_mapping.md`).

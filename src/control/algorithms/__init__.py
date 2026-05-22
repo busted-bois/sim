@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.control.flight_client import FlightClient
 from src.control.highres_imu import HighresImuHealth, HighresImuSample, SensorSnapshot
+from src.control.ned_environment import NedEnvironmentMap
 
 if TYPE_CHECKING:
     from src.config import Config
@@ -61,6 +62,12 @@ class Algorithm:
             captured_monotonic_ns=time.monotonic_ns(),
             transport=transport,
         )
+
+    def ned_environment(self, client: FlightClient) -> NedEnvironmentMap | None:
+        getter = getattr(client, "get_ned_environment", None)
+        if getter is None:
+            return None
+        return getter()
 
 
 def register(name: str):
