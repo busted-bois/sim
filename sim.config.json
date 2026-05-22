@@ -318,12 +318,15 @@
         "enabled": true,
         "request_hz": 50,
         "max_staleness_ms": 500,
-        "log_messages": false
+        "log_messages": false,
+        "require_stream": false
       },
       "ned_environment": {
         "enabled": true,
         "use_full_attitude": false,
-        "spawn_relative_enabled": true
+        "spawn_relative_enabled": true,
+        "max_position_staleness_ms": 500,
+        "max_attitude_staleness_ms": 500
       }
     }
   },

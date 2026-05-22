@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from src.control.command_rate import CommandRateGate, CommandRateGateStats, SkippedAsyncResult
 from src.control.highres_imu import HighresImuHealth, HighresImuSample
+
+if TYPE_CHECKING:
+    from src.control.ned_environment import NedEnvironmentHealth, NedEnvironmentMap
 
 SetPositionTargetFrame = Literal["local_ned", "body_ned"]
 SET_POSITION_FRAME_LOCAL_NED: SetPositionTargetFrame = "local_ned"
@@ -134,6 +137,8 @@ class FlightClient(Protocol):
     def landAsync(self) -> Any: ...
     def goHomeAsync(self) -> Any: ...
     def getMultirotorState(self) -> Any: ...
+    def get_ned_environment(self) -> NedEnvironmentMap: ...
+    def get_ned_environment_health(self) -> NedEnvironmentHealth | None: ...
     def cancelLastTask(self) -> None: ...
     def reset(self) -> None: ...
 
@@ -188,13 +193,22 @@ class FlightClient(Protocol):
 
 
 class AirSimAdapter:
-    def __init__(self, client: Any, *, command_rate_hz: float | None = None) -> None:
+    def __init__(
+        self,
+        client: Any,
+        *,
+        command_rate_hz: float | None = None,
+        sim_config: dict[str, Any] | None = None,
+    ) -> None:
         self._client = client
         self._command_rate_gate = (
             None
             if command_rate_hz is None
             else CommandRateGate(command_rate_hz, label="AirSim motion commands")
         )
+        from src.control.ned_environment import NedEnvironmentMap, load_ned_environment_config
+
+        self._ned_environment = NedEnvironmentMap(load_ned_environment_config(sim_config or {}))
 
     def _motion_command_allowed(self) -> bool:
         if self._command_rate_gate is None:
@@ -224,6 +238,13 @@ class AirSimAdapter:
 
     def getMultirotorState(self) -> Any:
         return self._client.getMultirotorState()
+
+    def get_ned_environment(self):
+        self._ned_environment.refresh_from_multirotor_state(self.getMultirotorState())
+        return self._ned_environment
+
+    def get_ned_environment_health(self):
+        return self._ned_environment.get_health()
 
     def cancelLastTask(self) -> None:
         return self._client.cancelLastTask()

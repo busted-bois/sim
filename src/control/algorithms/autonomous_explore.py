@@ -209,19 +209,28 @@ class AutonomousExplore(Algorithm):
         # Diagnostic: log the heading the explore loop is about to start with
         # so you can tell at a glance whether face_forward_on_start has the
         # drone pointed the way you expect.
-        spawn_yaw_deg = math.degrees(
-            _yaw_from_orientation(
+        explore_ned = self.ned_environment(client)
+        if explore_ned is None:
+            from src.control.ned_environment import NedEnvironmentMap
+
+            explore_ned = NedEnvironmentMap.from_multirotor_state(client.getMultirotorState())
+        spawn_snap = explore_ned.snapshot()
+        spawn_yaw_rad = explore_ned.heading_yaw_rad
+        if spawn_yaw_rad is None:
+            spawn_yaw_rad = _yaw_from_orientation(
                 client.getMultirotorState().kinematics_estimated.orientation
             )
-        )
+        spawn_yaw_deg = math.degrees(spawn_yaw_rad)
         print(f"[autonomous_explore] start heading yaw={spawn_yaw_deg:+.1f}°")
 
         cam_half_fov_deg = yaw_mapping_half_fov_degrees(self._config.get("vision", {}))
         t0 = time.monotonic()
-        spawn_state = client.getMultirotorState().kinematics_estimated
-        spawn_pos = spawn_state.position
-        spawn_z = float(spawn_pos.z_val)
-        spawn_yaw_rad = _yaw_from_orientation(spawn_state.orientation)
+        spawn_z = float(spawn_snap.position.z)
+        explore_ned.set_spawn_origin(
+            spawn_snap.position.x,
+            spawn_snap.position.y,
+            spawn_z,
+        )
         explore_sched = ExplorationScheduler(
             explore_settings,
             start_s=t0,
@@ -231,8 +240,8 @@ class AutonomousExplore(Algorithm):
         half_fov_rad = math.radians(cam_half_fov_deg)
         explore_slam = ExplorationSlam(
             slam_settings,
-            spawn_x_m=float(spawn_pos.x_val),
-            spawn_y_m=float(spawn_pos.y_val),
+            spawn_x_m=float(spawn_snap.position.x),
+            spawn_y_m=float(spawn_snap.position.y),
             spawn_yaw_rad=spawn_yaw_rad,
         )
         steps = 0
@@ -286,6 +295,12 @@ class AutonomousExplore(Algorithm):
                         "[autonomous_explore] imu_runtime "
                         f"{format_highres_imu_health(health)}"
                     )
+                ned_health = self.ned_environment_health(client)
+                if ned_health is not None and ned_health.status not in ("ok", "disabled"):
+                    print(
+                        "[autonomous_explore] ned_runtime "
+                        f"status={ned_health.status} reason={ned_health.reason}"
+                    )
 
             # If we're committed to flying through a ring, ignore the camera
             # entirely and drive forward on the locked heading. The ring will
@@ -295,9 +310,8 @@ class AutonomousExplore(Algorithm):
                 if time.monotonic() < flythrough_until_s:
                     cos_y = math.cos(flythrough_yaw_rad)
                     sin_y = math.sin(flythrough_yaw_rad)
-                    z = float(
-                        client.getMultirotorState().kinematics_estimated.position.z_val
-                    )
+                    fly_ned = self.ned_environment(client) or explore_ned
+                    z = float(fly_ned.snapshot().position.z)
                     err = z - flythrough_z_target
                     vz_ft = 0.35 if err < -0.3 else (-0.35 if err > 0.3 else 0.0)
                     client.moveByVelocityAsync(
@@ -341,11 +355,19 @@ class AutonomousExplore(Algorithm):
                         print(f"[autonomous_explore] depth error: {exc}")
                     depth_map = None
 
-            kin = client.getMultirotorState().kinematics_estimated
-            pos = kin.position
-            yaw_rad = _yaw_from_orientation(kin.orientation)
-            z_ned = float(pos.z_val)
-            explore_slam.update_pose(float(pos.x_val), float(pos.y_val), yaw_rad)
+            tick_ned = self.ned_environment(client) or explore_ned
+            tick_snap = tick_ned.snapshot()
+            yaw_rad = tick_ned.heading_yaw_rad
+            if yaw_rad is None:
+                yaw_rad = _yaw_from_orientation(
+                    client.getMultirotorState().kinematics_estimated.orientation
+                )
+            z_ned = float(tick_snap.position.z)
+            explore_slam.update_pose(
+                float(tick_snap.position.x),
+                float(tick_snap.position.y),
+                yaw_rad,
+            )
             cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
             vz = vz_toward_altitude_hold(z_ned, explore_sched.z_hold_ned)
 
@@ -483,9 +505,7 @@ class AutonomousExplore(Algorithm):
                         # Aligned + close → commit to fly-through.
                         flythrough_until_s = time.monotonic() + flythrough_duration_s
                         flythrough_yaw_rad = yaw_rad
-                        flythrough_z_target = float(
-                            client.getMultirotorState().kinematics_estimated.position.z_val
-                        )
+                        flythrough_z_target = float(tick_snap.position.z)
                         print(
                             f"[autonomous_explore] blue_ring aligned + close "
                             f"(r_frac={r_frac:.2f} nx={nx:+.2f} ny={ny:+.2f}); "

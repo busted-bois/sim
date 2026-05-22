@@ -149,6 +149,7 @@ def main() -> None:
         client = AirSimAdapter(
             airsim_client,
             command_rate_hz=float(config.get("control", {}).get("command_rate_hz", 50.0)),
+            sim_config=getattr(config, "_raw", config),
         )
         vision_feed = VisionFeed(airsim_client, config.get("vision", {}))
 

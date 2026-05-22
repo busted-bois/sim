@@ -34,10 +34,11 @@ from src.control.highres_imu import (
 from src.control.mavlink_timesync import TimesyncOutboundRequest, TimesyncSnapshot, TimesyncStore
 from src.control.ned_environment import (
     MavlinkNedIngest,
+    NedEnvironmentHealth,
     NedEnvironmentMap,
     load_ned_environment_config,
 )
-from src.control.utils import orientation_from_yaw
+from src.control.utils import Quaternionr, orientation_from_rpy, orientation_from_yaw
 from src.mavlink.attitude_bridge import AttitudeTelemetryBridge
 from src.mavlink.integration import attach_attitude_bridge
 
@@ -67,18 +68,10 @@ class _Vector3r:
 
 
 @dataclass(frozen=True, slots=True)
-class _Quaternionr:
-    x_val: float
-    y_val: float
-    z_val: float
-    w_val: float
-
-
-@dataclass(frozen=True, slots=True)
 class _KinematicsEstimated:
     position: _Vector3r
     linear_velocity: _Vector3r
-    orientation: _Quaternionr
+    orientation: Quaternionr
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,12 +229,15 @@ class PymavlinkFlightClient:
     def get_ned_environment(self) -> NedEnvironmentMap:
         return self._ned_environment
 
-    def _default_orientation(self) -> _Quaternionr:
+    def get_ned_environment_health(self) -> NedEnvironmentHealth:
+        return self._ned_environment.get_health()
+
+    def _default_orientation(self) -> Quaternionr:
         snap = self._ned_environment.snapshot()
         if snap.has_attitude and snap.attitude is not None:
-            q = orientation_from_yaw(snap.attitude.yaw)
-            return _Quaternionr(q.x_val, q.y_val, q.z_val, q.w_val)
-        return _Quaternionr(0.0, 0.0, 0.0, 1.0)
+            att = snap.attitude
+            return orientation_from_rpy(att.roll, att.pitch, att.yaw)
+        return orientation_from_yaw(0.0)
 
     def _kinematics_from_ned(self) -> _KinematicsEstimated:
         snap = self._ned_environment.snapshot()
@@ -670,7 +666,7 @@ class PymavlinkFlightClient:
                 continue
             self._mav.mav.message_interval_send(int(message_id), interval_us)
         if self._attitude_bridge.enabled:
-            self._attitude_bridge.request_interval(self._mav.mav)
+            self._attitude_bridge.request_interval(self._mav)
         if self._highres_imu_enabled:
             message_id = getattr(mavutil.mavlink, "MAVLINK_MSG_ID_HIGHRES_IMU", None)
             if message_id is not None:

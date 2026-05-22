@@ -141,7 +141,10 @@ Helpers on `PymavlinkFlightClient` and `FlightClient` protocol. Checklist: `docs
 
 - Module: `src/control/ned_environment.py` — ingests `LOCAL_POSITION_NED` + `ATTITUDE`, exposes LOCAL/BODY transforms and spawn-relative XY.
 - MAVLink: `PymavlinkFlightClient.get_ned_environment()` (telemetry pump requests ATTITUDE when `control.mavlink.attitude.enabled`).
-- Algorithms: `Algorithm.ned_environment(client)`; AirSim fallback: `NedEnvironmentMap.from_multirotor_state(state, spawn_xy=...)`.
+- Algorithms: `Algorithm.ned_environment(client)`, `ned_environment_health(client)`; `SensorSnapshot.ned` in `latest_sensor_snapshot()`.
+- AirSim: `AirSimAdapter.get_ned_environment()` refreshes from RPC each call.
+- Setpoint helper: `plan_body_velocity()`; debug: `NedEnvironmentMap.export_snapshot_json()`.
+- Preflight (MAVLink): warns if ATTITUDE stream missing (`control.mavlink.attitude.require_stream` to hard-fail).
 - Docs: `docs/ned_coordinate_mapping.md`.
 
 ## Algorithm Config Sections in sim.config.json

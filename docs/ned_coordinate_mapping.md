@@ -40,13 +40,27 @@ Set `control.mavlink.ned_environment.use_full_attitude: true` for full roll/pitc
 ```json
 "control": {
   "mavlink": {
+    "attitude": {
+      "enabled": true,
+      "require_stream": false
+    },
     "ned_environment": {
       "enabled": true,
       "use_full_attitude": false,
-      "spawn_relative_enabled": true
+      "spawn_relative_enabled": true,
+      "max_position_staleness_ms": 500,
+      "max_attitude_staleness_ms": 500
     }
   }
 }
 ```
+
+### Health and export
+
+- `NedEnvironmentMap.get_health()` — position/attitude freshness (for algorithms and preflight).
+- `export_snapshot_json(path)` — debug dump under `logs/` when needed.
+- `plan_body_velocity(mapper, vx, vy, vz)` — BODY command with LOCAL equivalent.
+
+AirSim (`AirSimAdapter.get_ned_environment()`) refreshes from RPC each call so SimpleFlight and MAVLink share the same API.
 
 Exploration SLAM grids use spawn-relative LOCAL NED XY; see [`exploration.md`](exploration.md).

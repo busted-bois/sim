@@ -55,12 +55,15 @@ class Algorithm:
     def latest_sensor_snapshot(self, client: FlightClient) -> SensorSnapshot:
         imu = self.latest_highres_imu(client)
         transport = imu.transport if imu is not None else "unknown"
+        ned = self.ned_environment(client)
         return SensorSnapshot(
             state=client.getMultirotorState(),
             highres_imu=imu,
             highres_imu_health=self.highres_imu_health(client),
             captured_monotonic_ns=time.monotonic_ns(),
             transport=transport,
+            ned=ned.snapshot() if ned is not None else None,
+            ned_health=self.ned_environment_health(client),
         )
 
     def ned_environment(self, client: FlightClient) -> NedEnvironmentMap | None:
@@ -68,6 +71,13 @@ class Algorithm:
         if getter is None:
             return None
         return getter()
+
+    def ned_environment_health(self, client: FlightClient):
+        getter = getattr(client, "get_ned_environment_health", None)
+        if getter is not None:
+            return getter()
+        ned = self.ned_environment(client)
+        return ned.get_health() if ned is not None else None
 
 
 def register(name: str):

@@ -108,6 +108,8 @@ class SensorSnapshot:
     highres_imu_health: HighresImuHealth | None
     captured_monotonic_ns: int
     transport: str
+    ned: object | None = None
+    ned_health: object | None = None
 
     def imu_age_ms(self) -> float | None:
         if self.highres_imu is None:
