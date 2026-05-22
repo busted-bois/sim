@@ -58,6 +58,21 @@ from src.vision.processing import (
 class AutonomousExplore(Algorithm):
     config_section = "autonomous_explore"
 
+    def _slam_yaw_bias(
+        self,
+        explore_slam: ExplorationSlam,
+        client: FlightClient,
+        *,
+        dt: float,
+        depth_lost: bool,
+    ) -> float:
+        bias = explore_slam.exploration_yaw_bias_deg()
+        if depth_lost:
+            sample = self.latest_highres_imu(client)
+            zgyro = sample.zgyro if sample is not None else None
+            bias += explore_slam.imu_yaw_assist_deg_s(zgyro, dt_s=dt)
+        return bias
+
     def run(self, client: FlightClient) -> None:
         cfg = self._config.get("autonomous_explore", {})
         control = self._config.get("control", {})
@@ -582,7 +597,6 @@ class AutonomousExplore(Algorithm):
             if depth_map is None:
                 no_frame_streak += 1
                 tick_now = time.monotonic()
-                slam_yaw_bias = explore_slam.active_exploration_yaw_bias_deg()
                 loop_panorama = explore_slam.consume_loop_closure(tick_now)
                 sched_out = apply_wander_move(
                     client,
@@ -596,7 +610,9 @@ class AutonomousExplore(Algorithm):
                         sin_yaw=sin_y,
                         base_vz=vz,
                         defer_panorama=tick_now - last_target_seen_s < 2.0,
-                        yaw_rate_bias_deg_s=slam_yaw_bias,
+                        yaw_rate_bias_deg_s=self._slam_yaw_bias(
+                            explore_slam, client, dt=dt, depth_lost=True
+                        ),
                         request_loop_closure_panorama=loop_panorama,
                     ),
                     cos_yaw=cos_y,
@@ -668,7 +684,6 @@ class AutonomousExplore(Algorithm):
 
             time_since_target = tick_now - last_target_seen_s
             defer_panorama = time_since_target < 2.0
-            slam_yaw_bias = explore_slam.active_exploration_yaw_bias_deg()
             loop_panorama = explore_slam.consume_loop_closure(tick_now)
 
             if target_info is None and legacy_scan:
@@ -709,7 +724,9 @@ class AutonomousExplore(Algorithm):
                     upper_clearance=upper_clear,
                     lower_clearance=lower_clear,
                     defer_panorama=defer_panorama,
-                    yaw_rate_bias_deg_s=slam_yaw_bias,
+                    yaw_rate_bias_deg_s=self._slam_yaw_bias(
+                        explore_slam, client, dt=dt, depth_lost=False
+                    ),
                     request_loop_closure_panorama=loop_panorama,
                 ),
                 cos_yaw=cos_y,
@@ -730,7 +747,8 @@ class AutonomousExplore(Algorithm):
                     f"fwd={fwd_speed:.2f} yaw_rate={yaw_rate:+.1f} "
                     f"center_norm={center_norm:.2f} range={raw_range:.1f} "
                     f"z_hold={-sched_out.z_hold_ned:.1f}m "
-                    f"slam_path={slam_st.path_m:.1f}m cells={slam_st.visited_cells}"
+                    f"slam_path={slam_st.path_m:.1f}m free={slam_st.free_cells} "
+                    f"frontier={slam_st.frontier_cells}"
                 )
 
             steps += 1
@@ -745,9 +763,14 @@ class AutonomousExplore(Algorithm):
         slam_final = explore_slam.status()
         print(
             f"[autonomous_explore] slam summary path={slam_final.path_m:.1f}m "
-            f"visited_cells={slam_final.visited_cells} landmarks={slam_final.landmark_count} "
-            f"loop_closures={slam_final.loop_closures}"
+            f"known={slam_final.known_cells} free={slam_final.free_cells} "
+            f"occupied={slam_final.occupied_cells} frontier={slam_final.frontier_cells} "
+            f"landmarks={slam_final.landmark_count} loops={slam_final.loop_closures} "
+            f"coverage={slam_final.coverage_ratio:.0%}"
         )
+        map_path = explore_slam.export_map()
+        if map_path is not None:
+            print(f"[autonomous_explore] exploration map saved: {map_path}")
         print("\n--- Performance Metrics ---")
         if blue_gate_time is not None:
             print(f"Time to blue gate: {blue_gate_time:.2f}s")

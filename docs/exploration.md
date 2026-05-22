@@ -33,11 +33,17 @@ Config lives under `autonomous_explore.exploration` in `sim.config.json`.
 | `active_exploration_enabled` | `true` | Bias yaw toward least-visited bearings |
 | `active_exploration_gain_deg_s` | `12` | Max yaw bias from active exploration |
 | `landmark_enabled` | `true` | Register blue/red detections in map frame |
+| `log_odds_enabled` | `true` | Probabilistic free/occupied grid cells |
+| `frontier_enabled` | `true` | Steer toward unknown cells adjacent to free space |
+| `imu_yaw_assist_gain` | `0.85` | Gyro yaw-rate assist when depth is lost |
+| `export_path` | `logs/exploration_map.json` | End-of-run map JSON (path, cells, landmarks) |
 
 **Localization:** AirSim NED position + yaw each tick.  
-**Mapping:** visited cells, obstacle cells from depth columns, visual landmarks (gates/targets).  
+**Mapping:** log-odds grid (free/occupied), depth-ray updates, visual landmarks with depth-based range.  
 **Loop closure:** return near spawn after sufficient path → extra `PANORAMA_360`.  
-**Active exploration:** prefer bearings with fewer prior visits (entropy-style coverage).
+**Active exploration:** frontier cells first, then least-visited bearings.  
+**IMU assist:** `zgyro` bias on wander when MiDaS depth is unavailable.  
+**Export:** `logs/exploration_map.json` with path, cells, landmarks, metrics.
 
 ## Runtime behavior
 
