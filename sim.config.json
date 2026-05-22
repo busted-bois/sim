@@ -1,5 +1,5 @@
 {
-  "algorithm": "mavlink_jitter",
+  "algorithm": "autonomous_explore",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -25,7 +25,7 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-"pitch_up_degrees": -20,
+    "pitch_up_degrees": -20,
     "fps": 30,
     "min_fps": 30,
     "fov_degrees": 90,
@@ -140,7 +140,7 @@
     "max_speed_ms": 2.5,
     "cruise_speed_ms": 1.5,
     "rate_hz": 6.0,
-    "duration_s": 60.0,
+    "duration_s": 180.0,
     "num_columns": 5,
     "eye_band_top_frac": 0.30,
     "eye_band_bottom_frac": 0.75,
@@ -172,7 +172,38 @@
     "flythrough_align_max_nx": 0.18,
     "flythrough_align_max_ny": 0.15,
     "lineup_yaw_gain_mult": 1.6,
-    "red_only_after_gate": true
+    "red_only_after_gate": true,
+    "exploration": {
+      "panorama_enabled": true,
+      "panorama_interval_s": 15.0,
+      "panorama_yaw_rate_dps": 45.0,
+      "panorama_creep_speed_ms": 0.4,
+      "leg_enabled": true,
+      "leg_duration_s": 10.0,
+      "leg_turn_deg": 90.0,
+      "leg_turn_rate_dps": 35.0,
+      "altitude_layers_m": [3.5, 5.0, 6.5],
+      "altitude_layer_dwell_s": 18.0,
+      "vertical_depth_bias_gain": 0.4,
+      "vertical_depth_bias_enabled": true,
+      "legacy_scan_enabled": false,
+      "slam": {
+        "enabled": true,
+        "grid_cell_m": 1.0,
+        "log_odds_enabled": true,
+        "frontier_enabled": true,
+        "loop_closure_enabled": true,
+        "loop_closure_radius_m": 2.5,
+        "loop_closure_min_path_m": 8.0,
+        "active_exploration_enabled": true,
+        "active_exploration_gain_deg_s": 12.0,
+        "landmark_enabled": true,
+        "landmark_max_range_m": 12.0,
+        "imu_yaw_assist_gain": 0.85,
+        "export_enabled": true,
+        "export_path": "logs/exploration_map.json"
+      }
+    }
   },
   "vision_guided_control": {
     "detector": "red_circle",
@@ -205,7 +236,7 @@
     "random_seed": 42
   },
   "control": {
-    "transport": "mavlink",
+    "transport": "airsim",
     "mavlink": {
       "endpoint": "udpin:0.0.0.0:14550",
       "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],
