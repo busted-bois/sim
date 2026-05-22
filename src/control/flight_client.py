@@ -153,6 +153,7 @@ class FlightClient(Protocol):
 
     def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None: ...
     def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None: ...
+    def submitVelocityLocalForward(self, speed_ms: float, vz: float = 0.0) -> None: ...
     def submitPositionLocalNed(self, x: float, y: float, z: float) -> None: ...
     def streamSetPositionTargetLocalNedAsync(
         self, command: SetPositionTargetLocalNedCommand, duration: float
@@ -272,6 +273,14 @@ class AirSimAdapter:
 
     def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
         self._forward_optional("submitVelocityBodyNed", vx, vy, vz)
+
+    def submitVelocityLocalForward(self, speed_ms: float, vz: float = 0.0) -> None:
+        from src.control.ned_environment import local_velocity_forward
+
+        self._ned_environment.refresh_from_multirotor_state(self.getMultirotorState())
+        yaw = self._ned_environment.heading_yaw_rad or 0.0
+        vel = local_velocity_forward(self._ned_environment, speed_ms, vz, yaw_rad=yaw)
+        self.moveByVelocityAsync(vel.vx, vel.vy, vel.vz, 0.02).join()
 
     def submitPositionLocalNed(self, x: float, y: float, z: float) -> None:
         self._forward_optional("submitPositionLocalNed", x, y, z)

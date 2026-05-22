@@ -11,6 +11,7 @@ from src.control.ned_environment import (
     NedEnvironmentSettings,
     NedTransformError,
     NedVector3,
+    local_velocity_forward,
     plan_body_velocity,
 )
 from src.control.utils import orientation_from_rpy, rpy_from_orientation
@@ -133,6 +134,13 @@ class NedEnvironmentMapTests(unittest.TestCase):
         self.assertAlmostEqual(roll, 0.1, places=3)
         self.assertAlmostEqual(pitch, -0.2, places=3)
         self.assertAlmostEqual(yaw, 0.7, places=3)
+
+    def test_local_velocity_forward_uses_mapper_when_ready(self) -> None:
+        mapper = NedEnvironmentMap()
+        mapper.update_attitude(roll=0.0, pitch=0.0, yaw=math.pi / 2)
+        vel = local_velocity_forward(mapper, 1.0, 0.0, yaw_rad=0.0)
+        self.assertAlmostEqual(vel.vx, 0.0, places=3)
+        self.assertAlmostEqual(vel.vy, 1.0, places=3)
 
     def test_snapshot_transform_ready_flag(self) -> None:
         mapper = NedEnvironmentMap()

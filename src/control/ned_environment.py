@@ -87,8 +87,6 @@ class NedEnvironmentHealth:
 
 @dataclass(frozen=True, slots=True)
 class BodyVelocitySetpoint:
-    """Body-frame command with precomputed LOCAL_NED equivalent."""
-
     body: NedVelocity
     local: NedVelocity
 
@@ -154,8 +152,35 @@ def _transpose3(matrix: tuple[tuple[float, ...], ...]) -> tuple[tuple[float, ...
     )
 
 
+def format_ned_environment_health(health: NedEnvironmentHealth) -> str:
+    return (
+        f"status={health.status} reason={health.reason!r} "
+        f"transform_ready={health.transform_ready} "
+        f"pos_age_ms={health.position_age_ms} att_age_ms={health.attitude_age_ms}"
+    )
+
+
+def ned_export_payload(mapper: NedEnvironmentMap) -> dict[str, Any]:
+    return {"snapshot": asdict(mapper.snapshot()), "health": asdict(mapper.get_health())}
+
+
+def local_velocity_forward(
+    ned: NedEnvironmentMap,
+    speed_ms: float,
+    vz: float,
+    *,
+    yaw_rad: float,
+) -> NedVelocity:
+    if ned.snapshot().transform_ready:
+        return ned.body_forward_velocity_ms(speed_ms, vz)
+    return NedVelocity(
+        speed_ms * math.cos(yaw_rad),
+        speed_ms * math.sin(yaw_rad),
+        vz,
+    )
+
+
 class NedEnvironmentMap:
-    """Canonical vehicle state in MAV_FRAME_LOCAL_NED with BODY_NED transforms."""
 
     def __init__(self, settings: NedEnvironmentSettings | None = None) -> None:
         self._settings = settings or NedEnvironmentSettings()
@@ -291,7 +316,7 @@ class NedEnvironmentMap:
         if not self._settings.enabled:
             return NedEnvironmentHealth(
                 status="disabled",
-                reason="NED environment mapping disabled in config",
+                reason="disabled in config",
                 has_position=has_position,
                 has_attitude=has_attitude,
                 transform_ready=False,
@@ -301,7 +326,7 @@ class NedEnvironmentMap:
         if not has_position:
             return NedEnvironmentHealth(
                 status="missing",
-                reason="no LOCAL_POSITION_NED sample received yet",
+                reason="no position sample",
                 has_position=False,
                 has_attitude=has_attitude,
                 transform_ready=False,
@@ -333,7 +358,7 @@ class NedEnvironmentMap:
             )
         return NedEnvironmentHealth(
             status="ok",
-            reason="LOCAL_NED pose and ATTITUDE are fresh",
+            reason="ok",
             has_position=True,
             has_attitude=has_attitude,
             transform_ready=has_attitude,
@@ -356,9 +381,7 @@ class NedEnvironmentMap:
     def _require_attitude(self) -> NedAttitude:
         with self._lock:
             if self._attitude is None:
-                raise NedTransformError(
-                    "BODY_NED transform requires ATTITUDE; no attitude sample received yet."
-                )
+                raise NedTransformError("transform requires ATTITUDE")
             return self._attitude
 
     def transform_vector(
@@ -423,7 +446,6 @@ class NedEnvironmentMap:
         spawn_xy: tuple[float, float] | None = None,
         spawn_z: float | None = None,
     ) -> NedEnvironmentMap:
-        """Build mapper snapshot from AirSim-style getMultirotorState() kinematics."""
         mapper = cls(settings)
         mapper.refresh_from_multirotor_state(state)
         if spawn_xy is not None:
@@ -437,7 +459,6 @@ def plan_body_velocity(
     vy_body: float,
     vz_body: float,
 ) -> BodyVelocitySetpoint:
-    """Map a BODY_NED velocity command to its LOCAL_NED equivalent."""
     local = mapper.body_velocity_to_local(vx_body, vy_body, vz_body)
     return BodyVelocitySetpoint(
         body=NedVelocity(vx_body, vy_body, vz_body),
@@ -446,8 +467,6 @@ def plan_body_velocity(
 
 
 class MavlinkNedIngest:
-    """Feed pymavlink LOCAL_POSITION_NED and ATTITUDE into NedEnvironmentMap."""
-
     def __init__(self, mapper: NedEnvironmentMap) -> None:
         self._mapper = mapper
 

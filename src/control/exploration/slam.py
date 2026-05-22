@@ -324,7 +324,12 @@ class ExplorationSlam:
             loop_closures=self._loop_closures,
         )
 
-    def export_map(self, path: str | Path | None = None) -> Path | None:
+    def export_map(
+        self,
+        path: str | Path | None = None,
+        *,
+        ned: dict[str, Any] | None = None,
+    ) -> Path | None:
         if not self._s.enabled or not self._s.export_enabled:
             return None
         out = Path(path or self._s.export_path)
@@ -349,5 +354,7 @@ class ExplorationSlam:
                 "loop_closures": st.loop_closures,
             },
         }
+        if ned is not None:
+            payload["ned"] = ned
         out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return out

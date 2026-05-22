@@ -44,6 +44,12 @@ from src.control.exploration import (
 )
 from src.control.flight_client import FlightClient
 from src.control.highres_imu import format_highres_imu_health
+from src.control.ned_environment import (
+    NedEnvironmentMap,
+    format_ned_environment_health,
+    local_velocity_forward,
+    ned_export_payload,
+)
 from src.control.primitives import rotate_yaw, takeoff_with_settle
 from src.control.utils import _clamp, _yaw_from_orientation
 from src.vision.intrinsics import yaw_mapping_half_fov_degrees
@@ -206,13 +212,8 @@ class AutonomousExplore(Algorithm):
             rot_rate_dps = float(rot_cfg.get("rate_dps", 60))
             rot_duration_s = float(rot_cfg.get("duration_s", 3.0))
             rotate_yaw(client, rot_rate_dps, rot_duration_s, label="autonomous_explore")
-        # Diagnostic: log the heading the explore loop is about to start with
-        # so you can tell at a glance whether face_forward_on_start has the
-        # drone pointed the way you expect.
         explore_ned = self.ned_environment(client)
         if explore_ned is None:
-            from src.control.ned_environment import NedEnvironmentMap
-
             explore_ned = NedEnvironmentMap.from_multirotor_state(client.getMultirotorState())
         spawn_snap = explore_ned.snapshot()
         spawn_yaw_rad = explore_ned.heading_yaw_rad
@@ -297,10 +298,8 @@ class AutonomousExplore(Algorithm):
                     )
                 ned_health = self.ned_environment_health(client)
                 if ned_health is not None and ned_health.status not in ("ok", "disabled"):
-                    print(
-                        "[autonomous_explore] ned_runtime "
-                        f"status={ned_health.status} reason={ned_health.reason}"
-                    )
+                    ned_log = format_ned_environment_health(ned_health)
+                    print(f"[autonomous_explore] ned_runtime {ned_log}")
 
             # If we're committed to flying through a ring, ignore the camera
             # entirely and drive forward on the locked heading. The ring will
@@ -524,10 +523,13 @@ class AutonomousExplore(Algorithm):
                     # Vertical correction during lineup
                     vz_lineup = _clamp(target_v_gain * ny, -1.0, 1.0)
 
+                    lineup_vel = local_velocity_forward(
+                        tick_ned, lineup_v, vz_lineup, yaw_rad=yaw_rad
+                    )
                     client.moveByVelocityAsync(
-                        lineup_v * cos_y,
-                        lineup_v * sin_y,
-                        vz_lineup,
+                        lineup_vel.vx,
+                        lineup_vel.vy,
+                        lineup_vel.vz,
                         dt,
                         yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
                     ).join()
@@ -563,12 +565,13 @@ class AutonomousExplore(Algorithm):
                 # Vertical centering during approach
                 vz_pursue = _clamp(target_v_gain * ny, -1.2, 1.2)
 
-                vx_world = fwd_speed * cos_y
-                vy_world = fwd_speed * sin_y
+                pursue_vel = local_velocity_forward(
+                    tick_ned, fwd_speed, vz_pursue, yaw_rad=yaw_rad
+                )
                 client.moveByVelocityAsync(
-                    vx_world,
-                    vy_world,
-                    vz_pursue,
+                    pursue_vel.vx,
+                    pursue_vel.vy,
+                    pursue_vel.vz,
                     dt,
                     yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate)),
                 ).join()
@@ -589,17 +592,20 @@ class AutonomousExplore(Algorithm):
             # above runs first, so as soon as red is detected this loop
             # naturally exits scan mode and pursues.
             if time.monotonic() < scan_until_s:
-                cos_s = math.cos(scan_yaw_rad)
-                sin_s = math.sin(scan_yaw_rad)
                 yaw_err_deg = math.degrees(
                     (scan_yaw_rad - yaw_rad + math.pi) % (2 * math.pi) - math.pi
                 )
-                # Gentle drift correction back to locked heading.
                 yaw_rate_scan = _clamp(2.0 * yaw_err_deg, -25.0, 25.0)
-                client.moveByVelocityAsync(
-                    post_flythrough_scan_speed_ms * cos_s,
-                    post_flythrough_scan_speed_ms * sin_s,
+                scan_vel = local_velocity_forward(
+                    tick_ned,
+                    post_flythrough_scan_speed_ms,
                     vz,
+                    yaw_rad=scan_yaw_rad,
+                )
+                client.moveByVelocityAsync(
+                    scan_vel.vx,
+                    scan_vel.vy,
+                    scan_vel.vz,
                     dt,
                     yaw_mode=airsim.YawMode(is_rate=True, yaw_or_rate=float(yaw_rate_scan)),
                 ).join()
@@ -637,6 +643,7 @@ class AutonomousExplore(Algorithm):
                     cos_yaw=cos_y,
                     sin_yaw=sin_y,
                     dt=dt,
+                    ned=tick_ned,
                 )
                 if steps % max(1, int(rate_hz)) == 0:
                     print(
@@ -752,6 +759,7 @@ class AutonomousExplore(Algorithm):
                 cos_yaw=cos_y,
                 sin_yaw=sin_y,
                 dt=dt,
+                ned=tick_ned,
             )
             fwd_speed = sched_out.fwd_speed
             yaw_rate = sched_out.yaw_rate_deg_s
@@ -788,7 +796,7 @@ class AutonomousExplore(Algorithm):
             f"landmarks={slam_final.landmark_count} loops={slam_final.loop_closures} "
             f"coverage={slam_final.coverage_ratio:.0%}"
         )
-        map_path = explore_slam.export_map()
+        map_path = explore_slam.export_map(ned=ned_export_payload(explore_ned))
         if map_path is not None:
             print(f"[autonomous_explore] exploration map saved: {map_path}")
         print("\n--- Performance Metrics ---")

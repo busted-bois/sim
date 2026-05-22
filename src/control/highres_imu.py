@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.control.ned_environment import NedEnvironmentHealth, VehicleNedSnapshot
 
 HIGHRES_IMU_UPDATED_XACC = 1 << 0
 HIGHRES_IMU_UPDATED_YACC = 1 << 1
@@ -108,8 +112,8 @@ class SensorSnapshot:
     highres_imu_health: HighresImuHealth | None
     captured_monotonic_ns: int
     transport: str
-    ned: object | None = None
-    ned_health: object | None = None
+    ned: VehicleNedSnapshot | None = None
+    ned_health: NedEnvironmentHealth | None = None
 
     def imu_age_ms(self) -> float | None:
         if self.highres_imu is None:

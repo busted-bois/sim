@@ -397,6 +397,13 @@ class PymavlinkFlightClient:
             )
         )
 
+    def submitVelocityLocalForward(self, speed_ms: float, vz: float = 0.0) -> None:
+        from src.control.ned_environment import local_velocity_forward
+
+        yaw = self._ned_environment.heading_yaw_rad or 0.0
+        vel = local_velocity_forward(self._ned_environment, speed_ms, vz, yaw_rad=yaw)
+        self.submitVelocityLocalNed(vel.vx, vel.vy, vel.vz)
+
     def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
         if self._log_commands:
             _logger.info(

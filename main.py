@@ -58,6 +58,16 @@ def _log_timesync_status(client, label: str) -> None:
     )
 
 
+def _log_ned_environment_status(client, label: str) -> None:
+    health_getter = getattr(client, "get_ned_environment_health", None)
+    if not callable(health_getter):
+        return
+    from src.control.ned_environment import format_ned_environment_health
+
+    health = health_getter()
+    print(f"[{label}] NED {format_ned_environment_health(health)}")
+
+
 def _log_highres_imu_status(client, label: str) -> None:
     health_getter = getattr(client, "getHighresImuHealth", None)
     sample_getter = getattr(client, "getHighresImu", None)
@@ -172,6 +182,8 @@ def main() -> None:
             apply_trace_style(airsim_client, config)
         _log_timesync_status(client, "startup")
         _log_highres_imu_status(client, "startup")
+        if transport == "mavlink":
+            _log_ned_environment_status(client, "startup")
 
         try:
             if vision_feed is not None:
