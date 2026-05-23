@@ -34,7 +34,8 @@ class SlamExplorationSettings:
     landmark_max_range_m: float = 12.0
     imu_yaw_assist_gain: float = 0.85
     export_enabled: bool = True
-    export_path: str = "logs/exploration_map.json"
+    export_path: str = "logs/slam/exploration_map_{timestamp}.json"
+    include_ned_payload: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,8 @@ def parse_slam_settings(raw: dict[str, Any] | None) -> SlamExplorationSettings:
         landmark_max_range_m=_clamp(float(slam.get("landmark_max_range_m", 12.0)), 2.0, 40.0),
         imu_yaw_assist_gain=_clamp(float(slam.get("imu_yaw_assist_gain", 0.85)), 0.0, 2.0),
         export_enabled=bool(slam.get("export_enabled", True)),
-        export_path=str(slam.get("export_path", "logs/exploration_map.json")),
+        export_path=str(slam.get("export_path", "logs/slam/exploration_map_{timestamp}.json")),
+        include_ned_payload=bool(slam.get("include_ned_payload", False)),
     )
 
 
@@ -354,7 +356,7 @@ class ExplorationSlam:
                 "loop_closures": st.loop_closures,
             },
         }
-        if ned is not None:
+        if ned is not None and self._s.include_ned_payload:
             payload["ned"] = ned
         out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return out

@@ -17,9 +17,12 @@ from src.control.primitives import (
     suppress_api_cleanup_warning,
     wait_until_stationary,
 )
+from src.internal_mapping import internal_mapping_logger_from_config
+from src.log_paths import resolve_log_csv_path
 from src.mavlink_endpoints import resolve_control_transport
 from src.position_hud import PositionOnScreenHud, position_hud_config_from_dict
-from src.position_trace import position_trace_store_from_config
+from src.position_trace import RpcPositionSnapshotProvider, position_trace_store_from_config
+from src.session_logs import print_session_log_plan, warn_missing_session_logs
 from src.simulator_specs import assert_specification_snapshot_if_required
 from src.tracking import local_tracker_from_config
 from src.vision import VisionFeed, vision_feed_from_config
@@ -93,36 +96,6 @@ def main() -> None:
     assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
     transport = resolve_control_transport(config)
-    # #region agent log
-    try:
-        import json as _json
-        from pathlib import Path as _Path
-        import time as _time
-
-        _mav = config.get("control", {}).get("mavlink", {})
-        _payload = {
-            "sessionId": "8be999",
-            "runId": "pre-fix",
-            "hypothesisId": "H2",
-            "location": "main.py:main",
-            "message": "flight client transport",
-            "data": {
-                "transport": transport,
-                "position_trace_enabled": bool(
-                    _mav.get("position_trace", {}).get("enabled", False)
-                ),
-                "position_hud_enabled": bool(_mav.get("position_hud", {}).get("enabled", False)),
-                "position_hud_data_source": str(_mav.get("position_hud", {}).get("data_source", "")),
-            },
-            "timestamp": int(_time.time() * 1000),
-        }
-        with (_Path(__file__).resolve().parent / "debug-8be999.log").open(
-            "a", encoding="utf-8"
-        ) as _handle:
-            _handle.write(_json.dumps(_payload) + "\n")
-    except OSError:
-        pass
-    # #endregion
     host, port = simulator_endpoint(config)
     profile = os.environ.get("AIGP_PROFILE", "").strip()
     map_name = str(sim_cfg.get("map_name", "")).strip()
@@ -141,6 +114,15 @@ def main() -> None:
     position_hud: PositionOnScreenHud | None = None
     airsim_client: airsim.MultirotorClient | None = None
     vision_feed: VisionFeed | None = None
+
+    landing_tel_cfg = config.get("landing", {}).get("telemetry_log", {})
+    landing_csv_path = None
+    if bool(landing_tel_cfg.get("enabled", False)):
+        landing_csv_path = resolve_log_csv_path(
+            str(landing_tel_cfg.get("path", "logs/landing_telemetry.csv")),
+            ROOT,
+            default="logs/landing_telemetry.csv",
+        )
 
     if transport == "mavlink":
         position_trace = position_trace_store_from_config(config, ROOT)
@@ -217,6 +199,29 @@ def main() -> None:
         )
         vision_feed = VisionFeed(airsim_client, config.get("vision", {}))
 
+    explore_cfg = config.get("autonomous_explore", {}).get("exploration", {})
+    explore_slam_cfg = explore_cfg.get("slam", {})
+    internal_mapping_logger = internal_mapping_logger_from_config(config, ROOT, client)
+    slam_export_path = str(
+        explore_slam_cfg.get("export_path", "logs/slam/exploration_map_{timestamp}.json")
+    )
+    slam_export_enabled = bool(explore_slam_cfg.get("export_enabled", True))
+    internal_mapping_enabled = internal_mapping_logger is not None
+    internal_mapping_path = (
+        str(internal_mapping_logger.out_path) if internal_mapping_logger is not None else None
+    )
+    print_session_log_plan(
+        transport=transport,
+        env_transport=os.environ.get("AIGP_CONTROL_TRANSPORT", ""),
+        landing_csv_path=landing_csv_path,
+        position_trace_path=position_trace.out_path if position_trace else None,
+        local_tracker_path=local_tracker.csv_path if local_tracker else None,
+        slam_export_path=slam_export_path,
+        slam_export_enabled=slam_export_enabled,
+        internal_mapping_enabled=internal_mapping_enabled,
+        internal_mapping_path=internal_mapping_path,
+    )
+
     try:
         client.confirmConnection()
         if transport == "airsim":
@@ -229,60 +234,47 @@ def main() -> None:
         if transport == "airsim":
             wait_until_stationary(client)
         set_front_camera_pose(client, config)
-        if transport == "mavlink" and hud_cfg.enabled:
-            hud_provider = None
-            if hud_cfg.data_source == "tracking":
-                if local_tracker is None:
+        hud_provider = None
+        if hud_cfg.enabled:
+            if transport == "mavlink":
+                if hud_cfg.data_source == "tracking":
+                    if local_tracker is None:
+                        print(
+                            "Warning: position_hud.data_source=tracking requires "
+                            "control.mavlink.tracking.enabled; HUD will stay idle.",
+                            file=sys.stderr,
+                        )
+                    elif hasattr(client, "getTrackingSnapshot"):
+                        hud_provider = client.getTrackingSnapshot
+                elif position_trace is not None:
+                    hud_provider = client.getPositionTraceSnapshot
+                else:
                     print(
-                        "Warning: position_hud.data_source=tracking requires "
-                        "control.mavlink.tracking.enabled; HUD will stay idle.",
+                        "Warning: position_hud.enabled requires position trace or tracking; "
+                        "enable control.mavlink.tracking (data_source=tracking) or "
+                        "position_trace (data_source=trace).",
                         file=sys.stderr,
                     )
-                elif hasattr(client, "getTrackingSnapshot"):
-                    hud_provider = client.getTrackingSnapshot
-            elif position_trace is not None:
-                hud_provider = client.getPositionTraceSnapshot
+            elif hud_cfg.data_source == "trace":
+                hud_provider = RpcPositionSnapshotProvider(client)
             else:
                 print(
-                    "Warning: position_hud.enabled requires position trace or tracking; "
-                    "enable control.mavlink.tracking (data_source=tracking) or "
-                    "position_trace (data_source=trace).",
+                    "Warning: position_hud.data_source=tracking requires MAVLink transport; "
+                    "use data_source=trace for AirSim RPC.",
                     file=sys.stderr,
                 )
-            if hud_provider is not None:
-                position_hud = PositionOnScreenHud(
-                    host=host,
-                    port=port,
-                    snapshot_provider=hud_provider,
-                    config=hud_cfg,
-                )
-                position_hud.start()
-                print(
-                    f"On-screen HUD started ({hud_cfg.data_source}, "
-                    f"{hud_cfg.update_hz:.0f} Hz via AirSim RPC)."
-                )
-                # #region agent log
-                try:
-                    import json as _json
-                    from pathlib import Path as _Path
-                    import time as _time
-
-                    _payload = {
-                        "sessionId": "8be999",
-                        "runId": "pre-fix",
-                        "hypothesisId": "H2",
-                        "location": "main.py:hud_start",
-                        "message": "position HUD started",
-                        "data": {"data_source": hud_cfg.data_source},
-                        "timestamp": int(_time.time() * 1000),
-                    }
-                    with (_Path(__file__).resolve().parent / "debug-8be999.log").open(
-                        "a", encoding="utf-8"
-                    ) as _handle:
-                        _handle.write(_json.dumps(_payload) + "\n")
-                except OSError:
-                    pass
-                # #endregion
+        if hud_provider is not None:
+            position_hud = PositionOnScreenHud(
+                host=host,
+                port=port,
+                snapshot_provider=hud_provider,
+                config=hud_cfg,
+            )
+            position_hud.start()
+            print(
+                f"On-screen HUD started ({hud_cfg.data_source}, "
+                f"{hud_cfg.update_hz:.0f} Hz via AirSim RPC)."
+            )
         apply_trace_style(client, config)
         if airsim_client is not None and airsim_client is not client:
             airsim_client.confirmConnection()
@@ -305,6 +297,9 @@ def main() -> None:
                 f"[tracking] status={health.status} reason={health.reason!r} "
                 f"csv={local_tracker.csv_path}"
             )
+        if internal_mapping_logger is not None:
+            internal_mapping_logger.start()
+            print(f"[startup] internal_mapping CSV: {internal_mapping_logger.out_path}")
 
         try:
             algo_name = config.algorithm_name
@@ -328,6 +323,12 @@ def main() -> None:
             print("Attempting hover and landing for safe recovery...")
             land_with_telemetry(client, config, label="main")
     finally:
+        if internal_mapping_logger is not None:
+            internal_mapping_logger.stop()
+            print(
+                f"[shutdown] internal_mapping path={internal_mapping_logger.out_path} "
+                f"rows={internal_mapping_logger.row_count}"
+            )
         if position_hud is not None:
             position_hud.stop()
             print(
@@ -374,6 +375,16 @@ def main() -> None:
         closer = getattr(client, "close", None)
         if callable(closer):
             closer()
+
+        warn_missing_session_logs(
+            transport=transport,
+            landing_csv_path=landing_csv_path,
+            position_trace_path=position_trace.out_path if position_trace else None,
+            internal_mapping_path=(
+                internal_mapping_logger.out_path if internal_mapping_logger is not None else None
+            ),
+            logs_dir=ROOT / "logs",
+        )
 
     if os.environ.get("AIGP_PAUSE_BEFORE_EXIT", "").strip() == "1":
         input("AIGP_PAUSE_BEFORE_EXIT=1 - press Enter to exit the flight client...")

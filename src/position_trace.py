@@ -10,10 +10,13 @@ from __future__ import annotations
 import csv
 import math
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from src.log_paths import resolve_log_csv_path
 
 PositionRow = tuple[float, int, float, float, float, float, float, float, float]
 
@@ -56,10 +59,7 @@ class PositionTraceSnapshot:
 
 
 def resolve_position_trace_path(raw_path: str, project_root: Path) -> Path:
-    out_path = Path(raw_path.strip() or "logs/position_trace.csv")
-    if not out_path.is_absolute():
-        out_path = project_root / out_path
-    return out_path
+    return resolve_log_csv_path(raw_path, project_root, default="logs/position_trace.csv")
 
 
 def position_trace_store_from_config(
@@ -84,6 +84,67 @@ def position_trace_store_from_config(
         plausible_step_slack=max(1.0, float(trace_cfg.get("plausible_step_slack", 1.5))),
         allow_discontinuities=bool(trace_cfg.get("allow_discontinuities", False)),
     )
+
+
+_EMPTY_TRACE_HEALTH = PositionTraceHealth(
+    accepted_count=0,
+    rejected_count=0,
+    stream_rate_hz=None,
+    first_t_s=None,
+    last_t_s=None,
+    max_step_m=None,
+    last_reject_reason=None,
+)
+
+
+class RpcPositionSnapshotProvider:
+    """HUD snapshot from ``getMultirotorState`` when transport is AirSim RPC (not MAVLink)."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self._t0: float | None = None
+        self._accepted_count = 0
+
+    def __call__(self) -> PositionTraceSnapshot:
+        try:
+            state = self._client.getMultirotorState()
+            k = state.kinematics_estimated
+            p = k.position
+            v = k.linear_velocity
+            x_m = float(p.x_val)
+            y_m = float(p.y_val)
+            z_m = float(p.z_val)
+            if not _is_finite(x_m, y_m, z_m):
+                return PositionTraceSnapshot(health=_EMPTY_TRACE_HEALTH, latest=None)
+            now = time.monotonic()
+            if self._t0 is None:
+                self._t0 = now
+            t_s = now - self._t0
+            boot_ms = int(getattr(state, "timestamp", 0) or 0)
+            row: PositionRow = (
+                t_s,
+                boot_ms,
+                x_m,
+                y_m,
+                z_m,
+                float(v.x_val),
+                float(v.y_val),
+                float(v.z_val),
+                max(0.0, -z_m),
+            )
+            self._accepted_count += 1
+            health = PositionTraceHealth(
+                accepted_count=self._accepted_count,
+                rejected_count=0,
+                stream_rate_hz=None,
+                first_t_s=0.0,
+                last_t_s=t_s,
+                max_step_m=None,
+                last_reject_reason=None,
+            )
+            return PositionTraceSnapshot(health=health, latest=row)
+        except Exception:
+            return PositionTraceSnapshot(health=_EMPTY_TRACE_HEALTH, latest=None)
 
 
 class PositionTraceStore:

@@ -23,6 +23,11 @@ jobs:
       - name: Run unit tests
         run: uv run python -m unittest discover -s tests -v
 
+      - name: Preflight static checks
+        env:
+          AIGP_PREFLIGHT_STATIC_ONLY: "1"
+        run: uv run preflight
+
       - name: Verify simulator physics metadata in snapshot
         run: uv run verify-sim-physics-metadata
 

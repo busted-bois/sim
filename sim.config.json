@@ -61,7 +61,7 @@
     "final_land_altitude_m": 1.0,
     "telemetry_log": {
       "enabled": true,
-      "path": "logs/landing_telemetry.csv",
+      "path": "logs/landing_telemetry_{timestamp}.csv",
       "sample_hz": 20
     }
   },
@@ -69,8 +69,15 @@
     "algorithm_timeout_seconds": 180
   },
   "preflight": {
+    "run_before_sim": true,
     "require_airsim_reachable": false,
-    "require_mavlink_reachable": false
+    "require_mavlink_reachable": false,
+    "mavlink": {
+      "ensure_wsl": true,
+      "ensure_px4_binary": true,
+      "ensure_wsl_mirrored": true,
+      "stop_stale_px4": true
+    }
   },
   "test_profile": {
     "name": "baseline_repeatable",
@@ -207,7 +214,13 @@
         "landmark_max_range_m": 12.0,
         "imu_yaw_assist_gain": 0.85,
         "export_enabled": true,
-        "export_path": "logs/exploration_map.json"
+        "export_path": "logs/slam/exploration_map_{timestamp}.json",
+        "include_ned_payload": false
+      },
+      "internal_mapping": {
+        "enabled": true,
+        "path": "logs/internal_mapping_{timestamp}.csv",
+        "sample_hz": 20.0
       }
     }
   },
@@ -259,7 +272,7 @@
         "local_position_blend": 0.2,
         "vision_correction": true,
         "log_csv": true,
-        "path": "logs/tracking_state.csv",
+        "path": "logs/tracking_state_{timestamp}.csv",
         "max_speed_ms": 10.0
       },
       "highres_imu": {
@@ -301,7 +314,7 @@
       },
       "position_trace": {
         "enabled": true,
-        "path": "logs/position_trace.csv",
+        "path": "logs/position_trace_{timestamp}.csv",
         "relative_origin": true,
         "max_samples": 0,
         "plausible_step_slack": 1.5,
@@ -313,6 +326,12 @@
         "update_hz": 15,
         "message_label": "AIGP pos",
         "severity": 0
+      },
+      "px4_wsl": {
+        "auto_start": true,
+        "hil_ready_timeout_seconds": 120,
+        "connect_timeout_seconds": 90,
+        "wsl_distro": ""
       },
       "airsim_profile": {
         "vehicle_name": "Drone1",

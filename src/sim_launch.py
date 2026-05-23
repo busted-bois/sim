@@ -6,51 +6,12 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-_DEBUG_LOG_PATH = ROOT / "debug-8be999.log"
-
-
-def _agent_debug_log(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict | None = None,
-    *,
-    run_id: str = "pre-fix",
-) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "8be999",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
-    except OSError:
-        pass
-    # #endregion
-
-
-def _wants_mavlink_session(config: dict) -> bool:
-    """True when config/env requests MAVLink or position-trace HUD features."""
-    control = config.get("control", {})
-    env_transport = os.environ.get("AIGP_CONTROL_TRANSPORT", "").strip().lower()
-    raw = env_transport or str(control.get("transport", "airsim")).strip().lower()
-    if raw in {"mavlink", "auto"}:
-        return True
-    mav = control.get("mavlink", {})
-    trace = mav.get("position_trace", {})
-    hud = mav.get("position_hud", {})
-    return bool(trace.get("enabled")) or bool(hud.get("enabled"))
 
 
 @dataclass
@@ -59,6 +20,7 @@ class _LaunchHandles:
 
     ue: subprocess.Popen | None = None
     main: subprocess.Popen | None = None
+    px4: subprocess.Popen | None = None
     cleanup_done: bool = False
 
 
@@ -92,6 +54,7 @@ def _cleanup_on_interrupt() -> None:
                 _handles.ue.wait(timeout=5.0)
             except subprocess.TimeoutExpired:
                 pass
+    _stop_px4_wsl_process()
 
 
 def _sigint_handler(_signum: int, _frame) -> None:
@@ -559,6 +522,151 @@ def _ensure_px4_mavlink_settings(airsim_port: int) -> Path:
     return settings_path
 
 
+def _wait_for_hil_tcp_listener(timeout_s: float) -> bool:
+    deadline = time.time() + max(5.0, float(timeout_s))
+    while time.time() < deadline:
+        if _is_tcp_listening_passive(PX4_HIL_TCP_PORT):
+            print(f"[launcher] AirSim HIL TCP :{PX4_HIL_TCP_PORT} is listening.")
+            return True
+        time.sleep(1.0)
+    return False
+
+
+def _stop_px4_wsl_process() -> None:
+    if _handles.px4 is not None and _handles.px4.poll() is None:
+        try:
+            _handles.px4.terminate()
+            _handles.px4.wait(timeout=5.0)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                _handles.px4.kill()
+            except OSError:
+                pass
+        _handles.px4 = None
+    from src.mavlink_prereq import stop_stale_px4_wsl
+
+    stop_stale_px4_wsl({})
+
+
+def _start_px4_wsl(config: dict) -> subprocess.Popen[str] | None:
+    from src.mavlink_prereq import launch_px4_script_path, wsl_cmd_prefix, wsl_run_checked
+
+    script = launch_px4_script_path()
+    if not script.is_file():
+        print(f"[launcher] PX4 launch script missing: {script}", file=sys.stderr)
+        return None
+    try:
+        wslpath = wsl_run_checked(
+            [*wsl_cmd_prefix(config), "-e", "wslpath", "-u", str(script)],
+            timeout_s=15.0,
+        )
+        script_wsl = wslpath.stdout.strip()
+        if wslpath.returncode != 0 or not script_wsl:
+            print(
+                "[launcher] Could not resolve WSL path for launch_px4_wsl.sh. "
+                "Is WSL installed?",
+                file=sys.stderr,
+            )
+            return None
+        cmd = [*wsl_cmd_prefix(config), "-e", "bash", script_wsl]
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        _handles.px4 = proc
+        return proc
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"[launcher] Failed to start PX4 in WSL: {exc}", file=sys.stderr)
+        return None
+
+
+def _wait_for_px4_airsim_connected(proc: subprocess.Popen[str], timeout_s: float) -> bool:
+    connected = threading.Event()
+    conn_line: list[str] = []
+
+    def _reader() -> None:
+        if proc.stdout is None:
+            return
+        try:
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if line:
+                    print(f"[launcher] [px4] {line}")
+                if "Simulator connected on TCP port" in raw:
+                    conn_line.append(line)
+                    connected.set()
+                    return
+        except OSError:
+            pass
+
+    thread = threading.Thread(target=_reader, name="px4_wsl_stdout", daemon=True)
+    thread.start()
+    if connected.wait(timeout=max(5.0, float(timeout_s))):
+        return True
+    if proc.poll() is not None:
+        print(
+            f"[launcher] PX4-SITL exited early (code {proc.returncode}).",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "[launcher] Timed out waiting for PX4 to connect to AirSim on TCP :4560.",
+            file=sys.stderr,
+        )
+    return False
+
+
+def _bootstrap_px4_wsl_for_mavlink(config: dict) -> None:
+    """Start PX4-SITL in WSL after UE HIL listener is up (Windows one-command flow)."""
+    from src.mavlink_prereq import PX4_BUILD_HINT, wsl_available
+
+    if os.environ.get("AIGP_SKIP_PX4_AUTOSTART", "").strip() == "1":
+        print("[launcher] AIGP_SKIP_PX4_AUTOSTART=1 — start PX4-SITL manually in WSL.")
+        return
+    mav_cfg = config.get("control", {}).get("mavlink", {})
+    px4_cfg = mav_cfg.get("px4_wsl", {})
+    if not bool(px4_cfg.get("auto_start", True)):
+        return
+    if sys.platform != "win32":
+        print(
+            "[launcher] PX4 WSL autostart is Windows-only; start PX4-SITL manually, then re-run.",
+            file=sys.stderr,
+        )
+        return
+    from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint
+
+    if first_mavlink_heartbeat_endpoint(config, timeout_s=1.0) is not None:
+        print("[launcher] MAVLink heartbeat already present — skipping PX4 autostart.")
+        return
+    ok, detail = wsl_available(config)
+    if not ok:
+        raise SystemExit(
+            f"[launcher] WSL is required for PX4 autostart but is unavailable: {detail}"
+        )
+    from src.mavlink_prereq import px4_wsl_binary_ready
+
+    if not px4_wsl_binary_ready(config):
+        raise SystemExit(
+            "[launcher] PX4 binary not found in WSL at "
+            "~/PX4-Autopilot/build/px4_sitl_default/bin/px4.\n"
+            f"Build once: {PX4_BUILD_HINT}"
+        )
+    connect_timeout_s = max(30.0, float(px4_cfg.get("connect_timeout_seconds", 90.0)))
+    print("[launcher] Starting PX4-SITL in WSL (PX4_SIM_HOST_ADDR=127.0.0.1)...")
+    proc = _start_px4_wsl(config)
+    if proc is None:
+        raise SystemExit("[launcher] Failed to spawn PX4-SITL in WSL.")
+    if not _wait_for_px4_airsim_connected(proc, connect_timeout_s):
+        raise SystemExit(
+            "[launcher] PX4 did not connect to AirSim. Ensure WSL mirrored networking "
+            "(see scripts/dev-mavlink.ps1 -EnableMirrored) and that UE HIL :4560 is up."
+        )
+    print("[launcher] PX4 connected to AirSim; waiting for MAVLink HEARTBEAT on UDP 14550...")
+
+
 def _is_tcp_listening_passive(port: int) -> bool:
     """Check if any process is LISTENING on a TCP port WITHOUT opening a connection.
 
@@ -687,7 +795,9 @@ def _maybe_restore_simpleflight_from_backup(config: dict | None = None) -> bool:
     # cleanup (Task Manager kill, BSOD). Only restores when the current file
     # still looks like PX4Multirotor, so a freshly-edited SimpleFlight config
     # is never clobbered. Skip when MAVLink / position-trace HUD is requested.
-    if config is not None and _wants_mavlink_session(config):
+    from src.mavlink_prereq import wants_mavlink_session
+
+    if config is not None and wants_mavlink_session(config):
         return False
     settings_path = _airsim_settings_path()
     backup_path = settings_path.with_name("settings.simpleflight.bak.json")
@@ -862,26 +972,16 @@ def launch(
     config = load_config()
     assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
-    wants_mavlink = _wants_mavlink_session(config)
     restored_simpleflight = _maybe_restore_simpleflight_from_backup(config)
     transport = _launch_transport(config, restored_simpleflight=restored_simpleflight)
     resolved_transport = transport
     resolved_mavlink_endpoint: str | None = None
     if transport == "mavlink":
+        from src.mavlink_prereq import ensure_mavlink_prerequisites
+
+        ensure_mavlink_prerequisites(config)
         resolved_mavlink_endpoint = first_mavlink_heartbeat_endpoint(config, timeout_s=2.0)
     hil_already_up = transport == "mavlink" and _is_tcp_listening_passive(PX4_HIL_TCP_PORT)
-    _agent_debug_log(
-        "H1",
-        "sim_launch.launch:entry",
-        "launcher session resolved",
-        {
-            "wants_mavlink": wants_mavlink,
-            "restored_simpleflight": restored_simpleflight,
-            "transport": transport,
-            "mavlink_endpoint": resolved_mavlink_endpoint,
-            "hil_tcp_4560_listening": hil_already_up,
-        },
-    )
 
     colosseum = sim_cfg.get("colosseum_path", "")
     project = _resolve_project_path(sim_cfg)
@@ -889,9 +989,8 @@ def launch(
         print(f"Using PROJECT_PATH={project}")
     if transport == "mavlink":
         print(
-            "[launcher] MAVLink transport: AirSim will use PX4Multirotor. "
-            "Start PX4-SITL in WSL while UE loads (see 'uv run sim-mavlink' for the command). "
-            "Use only 'uv run sim' — do not also run 'uv run sim-mavlink' (that opens a second UE)."
+            "[launcher] MAVLink one-command flow: UE + auto PX4-SITL (WSL) + main.py. "
+            "Position trace/HUD when enabled. Do not run 'uv run sim-mavlink' in parallel."
         )
     windowed = sim_cfg.get("windowed", True)
     res_x = sim_cfg.get("res_x", 1280)
@@ -926,6 +1025,8 @@ def launch(
             "a second Colosseum instance. Stop 'uv run sim-mavlink' if it is still running, "
             "then use this 'uv run sim' session only."
         )
+        if transport == "mavlink" and resolved_mavlink_endpoint is None:
+            _bootstrap_px4_wsl_for_mavlink(config)
         wait_label = "MAVLink/AirSim control link"
         print(f"Waiting for {wait_label} on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
         try:
@@ -986,6 +1087,23 @@ def launch(
             f"[launcher] UE physics timestep is project-defined ({physics_hz:.0f} Hz in config); "
             "not set via AirSim settings.json. Run: uv run preflight"
         )
+        if transport == "mavlink":
+            hil_timeout_s = max(
+                30.0,
+                float(
+                    config.get("control", {})
+                    .get("mavlink", {})
+                    .get("px4_wsl", {})
+                    .get("hil_ready_timeout_seconds", 120.0)
+                ),
+            )
+            if not _wait_for_hil_tcp_listener(hil_timeout_s):
+                raise SystemExit(
+                    f"[launcher] AirSim HIL TCP :{PX4_HIL_TCP_PORT} did not start within "
+                    f"{hil_timeout_s:.0f}s. Check UE/AirSim logs."
+                )
+            if resolved_mavlink_endpoint is None:
+                _bootstrap_px4_wsl_for_mavlink(config)
         wait_label = "MAVLink/AirSim control link" if transport == "mavlink" else "AirSim RPC"
         print(f"Waiting for {wait_label} on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
         try:
@@ -1005,6 +1123,8 @@ def launch(
             print(f"AirSim RPC is ready on {host}:{airsim_port}")
     else:
         print(f"Colosseum not found at '{colosseum}', skipping simulator launch.")
+        if transport == "mavlink" and resolved_mavlink_endpoint is None:
+            _bootstrap_px4_wsl_for_mavlink(config)
         wait_label = "MAVLink/AirSim control link" if transport == "mavlink" else "AirSim RPC"
         print(f"Waiting for {wait_label} on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
         try:
@@ -1030,16 +1150,6 @@ def launch(
         env["AIGP_MAVLINK_ENDPOINT"] = resolved_mavlink_endpoint
     else:
         env.pop("AIGP_MAVLINK_ENDPOINT", None)
-    _agent_debug_log(
-        "H2",
-        "sim_launch.launch:main_env",
-        "starting main.py child",
-        {
-            "resolved_transport": resolved_transport,
-            "mavlink_endpoint": resolved_mavlink_endpoint,
-            "launched_ue": _handles.ue is not None,
-        },
-    )
     if landing_profile:
         env["AIGP_LANDING_PROFILE"] = landing_profile
     if low_end:

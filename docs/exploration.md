@@ -22,10 +22,15 @@ Leg-based XY coverage, altitude layers, periodic 360° panoramas, and optional `
 | `frontier_enabled` | `true` | Steer toward unknown cells |
 | `loop_closure_*` | see config | Revisit spawn → panorama |
 | `imu_yaw_assist_gain` | `0.85` | Gyro assist when depth missing |
-| `export_path` | `logs/exploration_map.json` | End-of-run map JSON |
+| `export_path` | `logs/slam/exploration_map_{timestamp}.json` | End-of-run SLAM map JSON |
+| `include_ned_payload` | `false` | When false, SLAM export does not embed internal NED mapping |
+
+## Internal mapping (`exploration.internal_mapping`)
+
+Separate from SLAM. Implemented in `src/internal_mapping.py`: threaded CSV of NED pose/velocity from `getMultirotorState()` (~20 Hz). Path default `logs/internal_mapping_{timestamp}.csv`. Not coupled to `exploration.slam`.
 
 ## Reuse
 
 `src.control.exploration`: `ExplorationScheduler`, `ExplorationSlam`, `apply_wander_move`, `parse_exploration_settings`, `parse_slam_settings`.
 
-SLAM pose/grid uses LOCAL NED XY from `NedEnvironmentMap` (`heading_yaw_rad`, spawn-relative XY on MAVLink arm). See `docs/ned_coordinate_mapping.md`.
+SLAM pose uses **AirSim RPC** `getMultirotorState()` (not `NedEnvironmentMap`). Scheduler / fly-through still use `NedEnvironmentMap` when available. See `docs/ned_coordinate_mapping.md` for MAVLink internal mapping.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -215,10 +216,19 @@ def official_conformant_vision_errors(
     return errors
 
 
-def run_preflight() -> int:
+def _preflight_static_only(argv: list[str] | None = None) -> bool:
+    if os.environ.get("AIGP_PREFLIGHT_STATIC_ONLY", "").strip() == "1":
+        return True
+    args = argv if argv is not None else sys.argv[1:]
+    return "--static-only" in args
+
+
+def run_preflight(*, static_only: bool | None = None) -> int:
     _load_env_local()
     config = load_config()
     transport = resolve_control_transport(config)
+    if static_only is None:
+        static_only = _preflight_static_only()
 
     errors: list[str] = []
     warnings: list[str] = []
@@ -369,6 +379,14 @@ def run_preflight() -> int:
         warnings.append("Simulator specification snapshot not found; dimension checks were skipped")
 
     if transport == "mavlink":
+        from src.mavlink_prereq import run_static_mavlink_checks
+
+        static_errors, static_warnings, static_passes = run_static_mavlink_checks(config)
+        passes.extend(static_passes)
+        warnings.extend(static_warnings)
+        errors.extend(static_errors)
+
+    if transport == "mavlink" and not static_only:
         heartbeat_ok, detail, endpoints = _mavlink_heartbeat(config)
         require_reachable = bool(
             config.get("preflight", {}).get("require_mavlink_reachable", False)
@@ -428,7 +446,7 @@ def run_preflight() -> int:
                     errors.append(message)
                 else:
                     warnings.append(f"{message} (warning only before simulator launch)")
-    else:
+    elif not static_only:
         host, port = simulator_endpoint(config)
         require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))
         if _airsim_reachable(host, port):
@@ -459,6 +477,14 @@ def run_preflight() -> int:
 
 def main() -> None:
     raise SystemExit(run_preflight())
+
+
+def main_prerun() -> None:
+    """Static MAVLink/config checks without waiting for a running simulator."""
+    rc = run_preflight(static_only=True)
+    if rc == 0:
+        print("Prerun result: OK — next: uv run sim")
+    raise SystemExit(rc)
 
 
 if __name__ == "__main__":

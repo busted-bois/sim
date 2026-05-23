@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import airsim
@@ -280,17 +281,18 @@ def wait_until_stationary(
 def _landing_telemetry_if_enabled(
     client: FlightClient, landing_cfg: dict, label: str = "primitives"
 ) -> LandingTelemetrySampler | None:
-    from pathlib import Path
-
     from src.landing_telemetry import LandingTelemetrySampler
+    from src.log_paths import resolve_log_csv_path
 
     tel_cfg = landing_cfg.get("telemetry_log", {})
     if not tel_cfg.get("enabled", False):
         return None
-    raw_path = str(tel_cfg.get("path", "logs/landing_telemetry.csv")).strip()
-    out_path = Path(raw_path)
-    if not out_path.is_absolute():
-        out_path = Path(__file__).resolve().parent.parent.parent / out_path
+    project_root = Path(__file__).resolve().parent.parent.parent
+    out_path = resolve_log_csv_path(
+        str(tel_cfg.get("path", "logs/landing_telemetry.csv")),
+        project_root,
+        default="logs/landing_telemetry.csv",
+    )
     sample_hz = float(tel_cfg.get("sample_hz", 20.0))
     sampler = LandingTelemetrySampler(client, out_path, sample_hz)
     sampler.set_command("start")

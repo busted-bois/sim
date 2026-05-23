@@ -26,12 +26,14 @@ obstacle), so column scores are inverted before comparison. Set
 
 from __future__ import annotations
 
+import atexit
 import math
 import time
 
 import numpy as np
 
 import airsim
+from src.config import resolve_config_path
 from src.control.algorithms import Algorithm, register
 from src.control.exploration import (
     ExplorationScheduler,
@@ -48,16 +50,29 @@ from src.control.ned_environment import (
     NedEnvironmentMap,
     format_ned_environment_health,
     local_velocity_forward,
-    ned_export_payload,
 )
 from src.control.primitives import rotate_yaw, takeoff_with_settle
 from src.control.utils import _clamp, _yaw_from_orientation
+from src.log_paths import resolve_log_csv_path
 from src.vision.intrinsics import yaw_mapping_half_fov_degrees
 from src.vision.processing import (
     blue_ring_info_normalized,
     get_depth_info,
     red_target_info_normalized,
 )
+
+_PROJECT_ROOT = resolve_config_path().parent
+
+
+def _rpc_pose_xy_yaw(client: FlightClient) -> tuple[float, float, float]:
+    """SLAM pose from AirSim RPC (not NedEnvironmentMap / internal mapping)."""
+    state = client.getMultirotorState().kinematics_estimated
+    yaw_rad = _yaw_from_orientation(state.orientation)
+    return (
+        float(state.position.x_val),
+        float(state.position.y_val),
+        yaw_rad,
+    )
 
 
 @register("autonomous_explore")
@@ -239,12 +254,34 @@ class AutonomousExplore(Algorithm):
             initial_z_ned=spawn_z,
         )
         half_fov_rad = math.radians(cam_half_fov_deg)
+        slam_spawn_x, slam_spawn_y, slam_spawn_yaw = _rpc_pose_xy_yaw(client)
         explore_slam = ExplorationSlam(
             slam_settings,
-            spawn_x_m=float(spawn_snap.position.x),
-            spawn_y_m=float(spawn_snap.position.y),
-            spawn_yaw_rad=spawn_yaw_rad,
+            spawn_x_m=slam_spawn_x,
+            spawn_y_m=slam_spawn_y,
+            spawn_yaw_rad=slam_spawn_yaw,
         )
+        slam_export_path = resolve_log_csv_path(
+            slam_settings.export_path,
+            _PROJECT_ROOT,
+            default="logs/slam/exploration_map_{timestamp}.json",
+        )
+        slam_map_exported = False
+
+        def _export_slam_map_on_process_exit() -> None:
+            if slam_map_exported:
+                return
+            if not slam_settings.enabled or not slam_settings.export_enabled:
+                return
+            if explore_slam.status().path_m <= 0.0:
+                return
+            map_path = explore_slam.export_map(slam_export_path)
+            if map_path is not None:
+                print(f"[autonomous_explore] SLAM map saved (early exit): {map_path}")
+
+        if slam_settings.enabled and slam_settings.export_enabled:
+            atexit.register(_export_slam_map_on_process_exit)
+
         steps = 0
         no_frame_streak = 0
         # Timers for metrics
@@ -356,17 +393,9 @@ class AutonomousExplore(Algorithm):
 
             tick_ned = self.ned_environment(client) or explore_ned
             tick_snap = tick_ned.snapshot()
-            yaw_rad = tick_ned.heading_yaw_rad
-            if yaw_rad is None:
-                yaw_rad = _yaw_from_orientation(
-                    client.getMultirotorState().kinematics_estimated.orientation
-                )
+            slam_x, slam_y, yaw_rad = _rpc_pose_xy_yaw(client)
             z_ned = float(tick_snap.position.z)
-            explore_slam.update_pose(
-                float(tick_snap.position.x),
-                float(tick_snap.position.y),
-                yaw_rad,
-            )
+            explore_slam.update_pose(slam_x, slam_y, yaw_rad)
             cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
             vz = vz_toward_altitude_hold(z_ned, explore_sched.z_hold_ned)
 
@@ -796,9 +825,10 @@ class AutonomousExplore(Algorithm):
             f"landmarks={slam_final.landmark_count} loops={slam_final.loop_closures} "
             f"coverage={slam_final.coverage_ratio:.0%}"
         )
-        map_path = explore_slam.export_map(ned=ned_export_payload(explore_ned))
+        map_path = explore_slam.export_map(slam_export_path)
+        slam_map_exported = map_path is not None
         if map_path is not None:
-            print(f"[autonomous_explore] exploration map saved: {map_path}")
+            print(f"[autonomous_explore] SLAM map saved: {map_path}")
         print("\n--- Performance Metrics ---")
         if blue_gate_time is not None:
             print(f"Time to blue gate: {blue_gate_time:.2f}s")

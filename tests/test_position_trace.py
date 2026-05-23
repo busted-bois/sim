@@ -136,5 +136,45 @@ class PositionTraceStoreTests(unittest.TestCase):
         self.assertGreaterEqual(health.accepted_count, 1)
 
 
+class RpcPositionSnapshotProviderTests(unittest.TestCase):
+    def test_builds_trace_snapshot_from_multirotor_state(self) -> None:
+        from dataclasses import dataclass
+
+        from src.position_trace import RpcPositionSnapshotProvider
+
+        @dataclass
+        class _Vec:
+            x_val: float
+            y_val: float
+            z_val: float
+
+        @dataclass
+        class _Kin:
+            position: _Vec
+            linear_velocity: _Vec
+
+        @dataclass
+        class _State:
+            timestamp: int
+            kinematics_estimated: _Kin
+
+        class _Client:
+            def getMultirotorState(self) -> _State:
+                return _State(
+                    timestamp=42,
+                    kinematics_estimated=_Kin(
+                        position=_Vec(1.0, -2.0, -5.0),
+                        linear_velocity=_Vec(0.1, 0.2, 0.0),
+                    ),
+                )
+
+        provider = RpcPositionSnapshotProvider(_Client())
+        snap = provider()
+        self.assertIsNotNone(snap.latest)
+        assert snap.latest is not None
+        self.assertAlmostEqual(snap.latest[2], 1.0)
+        self.assertAlmostEqual(snap.latest[8], 5.0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from src.control.highres_imu import HighresImuSample
+from src.log_paths import resolve_log_csv_path
 from src.tracking.imu_propagator import ImuPropagator
 from src.tracking.origin import OriginManager
 from src.tracking.snapshot import TrackingSnapshot
@@ -51,10 +52,7 @@ class TrackingConfig:
 
 
 def resolve_tracking_csv_path(raw_path: str, project_root: Path) -> Path:
-    out = Path(raw_path.strip() or "logs/tracking_state.csv")
-    if not out.is_absolute():
-        out = project_root / out
-    return out
+    return resolve_log_csv_path(raw_path, project_root, default="logs/tracking_state.csv")
 
 
 def local_tracker_from_config(config: dict[str, Any], project_root: Path) -> LocalTracker | None:

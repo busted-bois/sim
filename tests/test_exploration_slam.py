@@ -70,8 +70,20 @@ class ExplorationSlamTests(unittest.TestCase):
             self.assertEqual(len(data["landmarks"]), 1)
             self.assertIn("metrics", data)
 
-    def test_export_map_includes_ned_payload(self) -> None:
+    def test_export_map_omits_ned_payload_by_default(self) -> None:
         slam = ExplorationSlam(parse_slam_settings({"export_enabled": True}), **self._spawn())
+        ned_extra = {"snapshot": {"has_position": True}, "health": {"status": "ok"}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = slam.export_map(Path(tmp) / "map.json", ned=ned_extra)
+            assert path is not None
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotIn("ned", data)
+
+    def test_export_map_includes_ned_payload_when_enabled(self) -> None:
+        slam = ExplorationSlam(
+            parse_slam_settings({"export_enabled": True, "include_ned_payload": True}),
+            **self._spawn(),
+        )
         ned_extra = {"snapshot": {"has_position": True}, "health": {"status": "ok"}}
         with tempfile.TemporaryDirectory() as tmp:
             path = slam.export_map(Path(tmp) / "map.json", ned=ned_extra)
