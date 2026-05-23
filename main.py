@@ -6,6 +6,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 from src.config import apply_low_end_overrides, load_config, simulator_endpoint  # noqa: E402
+from src.control.airsim_client import AirSimFlightClient  # noqa: E402
 from src.control.algorithms import get_algorithm, list_algorithms  # noqa: E402
 from src.control.highres_imu import format_highres_imu_health  # noqa: E402
 from src.control.mavlink_client import PymavlinkFlightClient  # noqa: E402
@@ -15,7 +16,11 @@ from src.control.primitives import (  # noqa: E402
     run_algorithm_with_timeout,
     suppress_api_cleanup_warning,
 )
+from src.position_hud import PositionOnScreenHud, position_hud_config_from_dict  # noqa: E402
+from src.position_trace import position_trace_store_from_config  # noqa: E402
 from src.simulator_specs import assert_specification_snapshot_if_required  # noqa: E402
+from src.tracking import local_tracker_from_config  # noqa: E402
+from src.vision.feed import vision_feed_from_config  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 
@@ -80,10 +85,13 @@ def main() -> None:
     host, port = simulator_endpoint(config)
     profile = os.environ.get("AIGP_PROFILE", "").strip()
     map_name = str(sim_cfg.get("map_name", "")).strip()
+    transport = os.environ.get("AIGP_CONTROL_TRANSPORT", "").strip().lower() or str(
+        config.get("control", {}).get("transport", "airsim")
+    ).strip().lower()
     print(
         "Flight session: "
         f"algorithm={config.algorithm_name!r} "
-        f"transport='mavlink' rpc={host}:{port}"
+        f"transport={transport!r} rpc={host}:{port}"
         + (f" profile={profile!r}" if profile else "")
         + (f" map={map_name!r}" if map_name else "")
     )
@@ -95,54 +103,121 @@ def main() -> None:
         mav_cfg.get("endpoint", "udpin:0.0.0.0:14550")
     ).strip()
 
-    client = PymavlinkFlightClient(
-        endpoint=endpoint,
-        command_rate_hz=float(config.get("control", {}).get("command_rate_hz", 50.0)),
-        state_request_hz=float(mav_cfg.get("state_request_hz", 20.0)),
-        guided_custom_mode=int(mav_cfg.get("guided_custom_mode", 4)),
-        takeoff_altitude_m=float(mav_cfg.get("takeoff_altitude_m", 5.0)),
-        land_descent_speed_ms=float(config.get("landing", {}).get("descent_speed_ms", 2.0)),
-        source_system=int(mav_cfg.get("source_system", 255)),
-        source_component=int(mav_cfg.get("source_component", 1)),
-        respond_to_timesync_requests=bool(timesync_cfg.get("respond_to_requests", True)),
-        timesync_log_messages=bool(timesync_cfg.get("log_messages", True)),
-        send_timesync_requests=bool(timesync_cfg.get("send_requests", True)),
-        timesync_request_interval_s=float(timesync_cfg.get("request_interval_seconds", 1.0)),
-        highres_imu_enabled=bool(highres_imu_cfg.get("enabled", True)),
-        highres_imu_request_hz=float(
-            highres_imu_cfg.get("request_hz", mav_cfg.get("state_request_hz", 20.0))
-        ),
-        highres_imu_log_messages=bool(highres_imu_cfg.get("log_messages", False)),
-        highres_imu_max_staleness_ms=float(
-            highres_imu_cfg.get("max_staleness_ms", 1000.0)
-        ),
-        timesync_pending_request_limit=int(timesync_cfg.get("pending_request_limit", 64)),
-        timesync_stable_window_size=int(timesync_cfg.get("stable_window_size", 9)),
-        timesync_stable_best_subset_size=int(timesync_cfg.get("stable_best_subset_size", 5)),
-        timesync_min_stable_samples=int(timesync_cfg.get("min_stable_samples", 3)),
-        timesync_max_stable_rtt_ns=int(
-            float(timesync_cfg.get("max_stable_rtt_ms", 250.0)) * 1_000_000
-        ),
-        timesync_max_offset_jitter_ns=int(
-            float(timesync_cfg.get("max_offset_jitter_ms", 50.0)) * 1_000_000
-        ),
-        attitude_target_throttle_body_z=bool(
-            mav_cfg.get("attitude_target", {}).get("throttle_body_z", False)
-        ),
-    )
+    if transport == "mavlink":
+        position_trace = position_trace_store_from_config(config, ROOT)
+        local_tracker = local_tracker_from_config(config, ROOT)
+    else:
+        position_trace = None
+        local_tracker = None
+    hud_cfg = position_hud_config_from_dict(mav_cfg.get("position_hud", {}))
+    position_hud: PositionOnScreenHud | None = None
+    vision_feed = None
+
+    if transport == "airsim":
+        client = AirSimFlightClient(host=host, port=port)
+    else:
+        tracker_cb = None
+        if local_tracker is not None:
+
+            def tracker_cb(image_rgb, sim_time_ns: int) -> None:
+                local_tracker.on_video_frame(image_rgb, sim_time_ns)
+
+        vision_feed = vision_feed_from_config(config, tracker_callback=tracker_cb)
+        client = PymavlinkFlightClient(
+            endpoint=endpoint,
+            command_rate_hz=float(config.get("control", {}).get("command_rate_hz", 50.0)),
+            state_request_hz=float(mav_cfg.get("state_request_hz", 20.0)),
+            position_trace=position_trace,
+            local_tracker=local_tracker,
+            guided_custom_mode=int(mav_cfg.get("guided_custom_mode", 4)),
+            takeoff_altitude_m=float(mav_cfg.get("takeoff_altitude_m", 5.0)),
+            land_descent_speed_ms=float(config.get("landing", {}).get("descent_speed_ms", 2.0)),
+            source_system=int(mav_cfg.get("source_system", 255)),
+            source_component=int(mav_cfg.get("source_component", 1)),
+            respond_to_timesync_requests=bool(timesync_cfg.get("respond_to_requests", True)),
+            timesync_log_messages=bool(timesync_cfg.get("log_messages", True)),
+            send_timesync_requests=bool(timesync_cfg.get("send_requests", True)),
+            timesync_request_interval_s=float(timesync_cfg.get("request_interval_seconds", 1.0)),
+            highres_imu_enabled=bool(highres_imu_cfg.get("enabled", True)),
+            highres_imu_request_hz=float(
+                highres_imu_cfg.get("request_hz", mav_cfg.get("state_request_hz", 20.0))
+            ),
+            highres_imu_log_messages=bool(highres_imu_cfg.get("log_messages", False)),
+            highres_imu_max_staleness_ms=float(
+                highres_imu_cfg.get("max_staleness_ms", 1000.0)
+            ),
+            timesync_pending_request_limit=int(timesync_cfg.get("pending_request_limit", 64)),
+            timesync_stable_window_size=int(timesync_cfg.get("stable_window_size", 9)),
+            timesync_stable_best_subset_size=int(timesync_cfg.get("stable_best_subset_size", 5)),
+            timesync_min_stable_samples=int(timesync_cfg.get("min_stable_samples", 3)),
+            timesync_max_stable_rtt_ns=int(
+                float(timesync_cfg.get("max_stable_rtt_ms", 250.0)) * 1_000_000
+            ),
+            timesync_max_offset_jitter_ns=int(
+                float(timesync_cfg.get("max_offset_jitter_ms", 50.0)) * 1_000_000
+            ),
+            attitude_target_throttle_body_z=bool(
+                mav_cfg.get("attitude_target", {}).get("throttle_body_z", False)
+            ),
+        )
 
     try:
         client.confirmConnection()
         client.enableApiControl(True)
         client.armDisarm(True)
+        if hud_cfg.enabled:
+            hud_provider = None
+            if hud_cfg.data_source == "tracking":
+                if local_tracker is None:
+                    print(
+                        "Warning: position_hud.data_source=tracking requires "
+                        "control.mavlink.tracking.enabled; HUD will stay idle.",
+                        file=sys.stderr,
+                    )
+                elif hasattr(client, "getTrackingSnapshot"):
+                    hud_provider = client.getTrackingSnapshot
+            elif position_trace is not None:
+                hud_provider = client.getPositionTraceSnapshot
+            else:
+                print(
+                    "Warning: position_hud.enabled requires position trace or tracking; "
+                    "enable control.mavlink.tracking (data_source=tracking) or "
+                    "position_trace (data_source=trace).",
+                    file=sys.stderr,
+                )
+            if hud_provider is not None:
+                position_hud = PositionOnScreenHud(
+                    host=host,
+                    port=port,
+                    snapshot_provider=hud_provider,
+                    config=hud_cfg,
+                )
+                position_hud.start()
+                print(
+                    f"On-screen HUD started ({hud_cfg.data_source}, "
+                    f"{hud_cfg.update_hz:.0f} Hz via AirSim RPC)."
+                )
         apply_trace_style(client, config)
         _log_timesync_status(client, "startup")
         _log_highres_imu_status(client, "startup")
+        if vision_feed is not None and vision_feed.enabled:
+            vision_feed.start()
+            print(
+                f"UDP vision feed started (port "
+                f"{config.get('vision', {}).get('udp_video', {}).get('port', 5600)})"
+            )
+        if local_tracker is not None:
+            health = local_tracker.health()
+            print(
+                f"[tracking] status={health.status} reason={health.reason!r} "
+                f"csv={local_tracker.csv_path}"
+            )
 
         try:
             algo_name = config.algorithm_name
             algo = get_algorithm(algo_name, config)
-            algo.set_vision_feed(None)
+            feed = vision_feed if vision_feed is not None and vision_feed.enabled else None
+            algo.set_vision_feed(feed)
             safety_cfg = config.get("safety", {})
             algo_timeout_seconds = max(
                 5.0, float(safety_cfg.get("algorithm_timeout_seconds", 180.0))
@@ -159,8 +234,36 @@ def main() -> None:
             print("Attempting hover and landing for safe recovery...")
             land_with_telemetry(client, config, label="main")
     finally:
+        if position_hud is not None:
+            position_hud.stop()
+            print(
+                f"[shutdown] position_hud updates={position_hud.update_count} "
+                f"rpc_errors={position_hud.rpc_error_count}"
+            )
         _log_timesync_status(client, "shutdown")
         _log_highres_imu_status(client, "shutdown")
+        if vision_feed is not None and vision_feed.enabled:
+            vision_feed.stop()
+            stats = vision_feed.get_stats()
+            print(
+                f"[shutdown] vision_feed successes={stats.capture_successes} "
+                f"udp_frames={stats.udp_frames} udp_packets={stats.udp_packets}"
+            )
+        if position_trace is not None:
+            trace_health = position_trace.health()
+            print(
+                f"[shutdown] position_trace accepted={trace_health.accepted_count} "
+                f"rejected={trace_health.rejected_count} path={position_trace.out_path}"
+            )
+        if local_tracker is not None:
+            local_tracker.flush()
+            health = local_tracker.health()
+            print(
+                f"[shutdown] tracking imu_samples={health.imu_sample_count} "
+                f"imu_rate_hz={health.imu_rate_hz} "
+                f"vision_corrections={health.vision_correction_count} "
+                f"path={local_tracker.csv_path}"
+            )
         try:
             client.armDisarm(False)
             client.enableApiControl(False)

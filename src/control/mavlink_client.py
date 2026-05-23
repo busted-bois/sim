@@ -32,6 +32,7 @@ from src.control.highres_imu import (
     merge_highres_imu_sample,
 )
 from src.control.mavlink_timesync import TimesyncOutboundRequest, TimesyncSnapshot, TimesyncStore
+from src.position_trace import PositionTraceSnapshot, PositionTraceStore
 
 _logger = logging.getLogger(__name__)
 
@@ -144,6 +145,8 @@ class PymavlinkFlightClient:
         attitude_target_throttle_body_z: bool = False,
         connection_factory: Callable[..., Any] | None = None,
         log_commands: bool = True,
+        position_trace: PositionTraceStore | None = None,
+        local_tracker: Any | None = None,
     ) -> None:
         self._endpoint = endpoint.strip() if endpoint else self._DEFAULT_ENDPOINT
         _parse_udp_endpoint(self._endpoint)
@@ -207,6 +210,8 @@ class PymavlinkFlightClient:
         self._guided_mode_last_sent_monotonic_s: float | None = None
         self._motion_epoch_monotonic: float | None = None
         self._attitude_target_throttle_body_z = bool(attitude_target_throttle_body_z)
+        self._position_trace = position_trace
+        self._local_tracker = local_tracker
 
     def confirmConnection(self) -> None:
         self._mav = self._connection_factory(
@@ -550,11 +555,20 @@ class PymavlinkFlightClient:
             max_staleness_ms=self._highres_imu_max_staleness_ms,
         )
 
+    def getPositionTraceSnapshot(self) -> PositionTraceSnapshot | None:
+        if self._position_trace is None:
+            return None
+        return self._position_trace.snapshot()
+
     def close(self) -> None:
         self._stop_evt.set()
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
+        if self._position_trace is not None:
+            self._position_trace.flush()
+        if self._local_tracker is not None:
+            self._local_tracker.flush()
         if self._mav is not None:
             try:
                 self._mav.close()
@@ -628,7 +642,7 @@ class PymavlinkFlightClient:
     def _request_message_intervals(self) -> None:
         assert self._mav is not None and self._target_system is not None
         interval_us = int(1e6 / max(1.0, self._state_request_hz))
-        for message_name in ("LOCAL_POSITION_NED", "HEARTBEAT"):
+        for message_name in ("LOCAL_POSITION_NED", "HEARTBEAT", "ATTITUDE"):
             message_id = getattr(mavutil.mavlink, f"MAVLINK_MSG_ID_{message_name}", None)
             if message_id is None:
                 continue
@@ -654,7 +668,7 @@ class PymavlinkFlightClient:
         assert self._mav is not None
         armed_bit = mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
         next_timesync_request_s = time.monotonic()
-        message_types = ["LOCAL_POSITION_NED", "HEARTBEAT", "TIMESYNC"]
+        message_types = ["LOCAL_POSITION_NED", "HEARTBEAT", "TIMESYNC", "ATTITUDE"]
         if self._highres_imu_enabled:
             message_types.append("HIGHRES_IMU")
         while not self._stop_evt.is_set():
@@ -691,8 +705,18 @@ class PymavlinkFlightClient:
                     self._handle_timesync(message)
                 elif message_type == "HIGHRES_IMU":
                     self._handle_highres_imu(message)
+                elif message_type == "ATTITUDE":
+                    self._handle_attitude(message)
             except Exception:
                 continue
+
+    def _handle_attitude(self, message: Any) -> None:
+        if self._local_tracker is None:
+            return
+        roll = float(getattr(message, "roll", 0.0))
+        pitch = float(getattr(message, "pitch", 0.0))
+        yaw = float(getattr(message, "yaw", 0.0))
+        self._local_tracker.on_attitude(roll, pitch, yaw)
 
     def _handle_local_position(self, message: Any) -> None:
         position = _Vector3r(float(message.x), float(message.y), float(message.z))
@@ -710,8 +734,32 @@ class PymavlinkFlightClient:
                 armed=armed,
             )
             self._state_ready_evt.set()
+        if self._position_trace is not None:
+            self._position_trace.record(
+                int(getattr(message, "time_boot_ms", 0)),
+                float(message.x),
+                float(message.y),
+                float(message.z),
+                float(message.vx),
+                float(message.vy),
+                float(message.vz),
+                time.monotonic_ns(),
+            )
+        if self._local_tracker is not None:
+            self._local_tracker.on_local_position(
+                time_boot_ms=int(getattr(message, "time_boot_ms", 0)),
+                x=float(message.x),
+                y=float(message.y),
+                z=float(message.z),
+                vx=float(message.vx),
+                vy=float(message.vy),
+                vz=float(message.vz),
+                armed=armed,
+            )
 
     def _handle_heartbeat(self, armed: bool) -> None:
+        if self._local_tracker is not None:
+            self._local_tracker.on_heartbeat_armed(armed)
         previous = self._get_latest_telemetry()
         if previous is None:
             return
@@ -785,6 +833,13 @@ class PymavlinkFlightClient:
             self._highres_imu_last_monotonic_ns = received_ns
         if self._highres_imu_log_messages:
             print(f"[mavlink] HIGHRES_IMU {format_highres_imu_health(self.getHighresImuHealth())}")
+        if self._local_tracker is not None:
+            self._local_tracker.on_highres_imu(sample)
+
+    def getTrackingSnapshot(self):
+        if self._local_tracker is None:
+            return None
+        return self._local_tracker.latest_snapshot()
 
     def _send_timesync_request(self) -> None:
         if self._mav is None:

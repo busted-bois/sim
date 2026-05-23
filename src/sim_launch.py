@@ -292,6 +292,24 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
 
 
 def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
+    deadline = time.time() + max(0.5, float(timeout_s))
+    last_error = ""
+    attempts = 0
+    while time.time() < deadline:
+        attempts += 1
+        port_open = _is_port_open(host, port, timeout_s=0.5)
+        if not port_open:
+            time.sleep(0.5)
+            continue
+        try:
+            import airsim
+
+            client = airsim.MultirotorClient(ip=host, port=port, timeout_value=3)
+            client.confirmConnection()
+            return True
+        except Exception as exc:
+            last_error = str(exc)
+        time.sleep(0.5)
     return False
 
 
@@ -302,7 +320,7 @@ def _wait_for_control_link(
     wait_timeout_s: float,
     transport: str,
 ) -> tuple[str, str | None]:
-    from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint
+    from src.mavlink_endpoints import candidate_mavlink_endpoints, first_mavlink_heartbeat_endpoint
 
     requested = str(transport).strip().lower()
     timeout_s = max(15.0, float(wait_timeout_s))
@@ -315,29 +333,50 @@ def _wait_for_control_link(
         )
 
     strict = os.environ.get("AIGP_MAVLINK_STRICT", "").strip() == "1"
-    mav_phase_s = min(30.0, max(8.0, timeout_s * 0.25))
-    resolved = first_mavlink_heartbeat_endpoint(config, timeout_s=mav_phase_s)
-    if resolved is not None:
-        return "mavlink", resolved
+    deadline = time.time() + timeout_s
+    cycle = 0
+    printed_mav_fallback = False
+    rpc_ready = False
+    while time.time() < deadline:
+        cycle += 1
+        remaining = max(0.1, deadline - time.time())
+        resolved = first_mavlink_heartbeat_endpoint(
+            config,
+            timeout_s=min(2.0, remaining),
+        )
+        if resolved is not None:
+            return "mavlink", resolved
+
+        remaining = max(0.1, deadline - time.time())
+        if not rpc_ready:
+            rpc_ready = _wait_for_airsim_rpc(host, airsim_port, min(2.0, remaining))
+        if rpc_ready:
+            if strict:
+                raise SystemExit(
+                    "AIGP_MAVLINK_STRICT=1: AirSim RPC is ready but "
+                    "MAVLink HEARTBEAT was not detected."
+                )
+            if not printed_mav_fallback:
+                print(
+                    "No MAVLink HEARTBEAT detected yet. "
+                    f"AirSim RPC on {host}:{airsim_port} is up; continuing to probe MAVLink "
+                    f"for up to {timeout_s:.0f}s total. "
+                    "For PX4Multirotor, start PX4-SITL (uv run sim-mavlink) or set "
+                    "control.transport to 'auto' or 'airsim' for SimpleFlight."
+                )
+                printed_mav_fallback = True
+
+        time.sleep(0.25)
 
     if strict:
         raise SystemExit(
             f"AIGP_MAVLINK_STRICT=1: no MAVLink HEARTBEAT within {timeout_s:.0f}s. "
             "Check MAVLink wiring in the simulator."
         )
-
-    rest_s = max(10.0, timeout_s - mav_phase_s)
-    print(
-        "No MAVLink HEARTBEAT detected yet. "
-        f"Trying AirSim RPC for up to {rest_s:.0f}s. "
-        'Set AIGP_MAVLINK_STRICT=1 to require MAVLink.'
-    )
-    if _wait_for_airsim_rpc(host, airsim_port, rest_s):
-        print("AirSim RPC is ready; using AirSim transport for this session.")
-        return "airsim", None
-
     raise SystemExit(
-        f"Neither MAVLink HEARTBEAT nor AirSim RPC became ready within {timeout_s:.0f}s."
+        f"Neither MAVLink HEARTBEAT nor AirSim RPC became ready within {timeout_s:.0f}s. "
+        "If using PX4Multirotor, start PX4-SITL (see: uv run sim-mavlink). "
+        "For SimpleFlight without PX4, set control.transport to 'airsim' in sim.config.json."
     )
 
 
@@ -362,12 +401,23 @@ def _load_env_local() -> None:
 
 
 def _resolve_project_path(sim_cfg: dict) -> str:
+    def _valid(path: str) -> bool:
+        return bool(path) and Path(path).is_file()
+
     project = os.environ.get("PROJECT_PATH", "").strip()
-    if project:
+    if project and not _valid(project):
+        print(
+            f"Warning: PROJECT_PATH points to missing file: {project!r}. "
+            "Attempting auto-repair...",
+            file=sys.stderr,
+        )
+        project = ""
+
+    if _valid(project):
         return project
 
     config_project = str(sim_cfg.get("project_path", "")).strip()
-    if config_project:
+    if _valid(config_project):
         os.environ["PROJECT_PATH"] = config_project
         return config_project
 
@@ -385,7 +435,7 @@ def _resolve_project_path(sim_cfg: dict) -> str:
         )
         _load_env_local()
         project = os.environ.get("PROJECT_PATH", "").strip()
-        if project:
+        if _valid(project):
             return project
 
     return ""
@@ -755,6 +805,13 @@ def launch(
 
     colosseum = sim_cfg.get("colosseum_path", "")
     project = _resolve_project_path(sim_cfg)
+    if project:
+        print(f"Using PROJECT_PATH={project}")
+    if transport == "mavlink":
+        print(
+            "[launcher] MAVLink transport: AirSim will use PX4Multirotor. "
+            "Start PX4-SITL (uv run sim-mavlink) or ensure MAVLink HEARTBEAT on UDP 14550."
+        )
     windowed = sim_cfg.get("windowed", True)
     res_x = sim_cfg.get("res_x", 1280)
     res_y = sim_cfg.get("res_y", 720)

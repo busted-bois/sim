@@ -49,6 +49,22 @@ def _has_nested_key(data: Any, key_path: str) -> bool:
     return isinstance(current, Mapping) and parts[-1] in current
 
 
+def _udp_video_port_probe(port: int, *, timeout_s: float = 0.5) -> tuple[bool, str]:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind(("0.0.0.0", int(port)))
+        sock.settimeout(timeout_s)
+        try:
+            data, addr = sock.recvfrom(2048)
+            return True, f"{len(data)} bytes from {addr[0]}:{addr[1]}"
+        except TimeoutError:
+            return False, "no UDP packets within probe window"
+    except OSError as exc:
+        return False, str(exc)
+    finally:
+        sock.close()
+
+
 def _airsim_reachable(host: str, port: int) -> bool:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1.5)
@@ -341,6 +357,20 @@ def run_preflight() -> int:
                     errors.append(message)
                 else:
                     warnings.append(f"{message} (warning only before simulator launch)")
+        tracking_cfg = config.get("control", {}).get("mavlink", {}).get("tracking", {})
+        if bool(tracking_cfg.get("enabled", False)):
+            passes.append("MAVLink internal tracking is enabled in config")
+        udp_cfg = config.get("vision", {}).get("udp_video", {})
+        if bool(udp_cfg.get("enabled", False)):
+            port = int(udp_cfg.get("port", 5600))
+            udp_ok, udp_detail = _udp_video_port_probe(port)
+            if udp_ok:
+                passes.append(f"UDP video port {port} received packets ({udp_detail})")
+            else:
+                warnings.append(
+                    f"UDP video enabled on port {port} but no packets yet ({udp_detail}). "
+                    "Start the simulator video stream before flight."
+                )
     else:
         host, port = simulator_endpoint(config)
         require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))

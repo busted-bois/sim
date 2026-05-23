@@ -52,6 +52,7 @@ uv run timesync-smoke                   # Probe TIMESYNC against running MAVLink
 uv run sim-timesync-smoke               # Launch sim first, then probe TIMESYNC
 uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream
 uv run sim-attitude-smoke               # Same via sim_launch (AirSim settings + UE if configured)
+uv run tracking-smoke                   # LocalTracker + MAVLink (needs PX4-SITL / sim-mavlink)
 ```
 
 **MAVLink commands are probe-only.** `sim-mavlink`, `sim-mavlink probe`, and `mavlink-all` switch AirSim to PX4Multirotor mode and verify the MAVLink bridge — they do **not** run `main.py`. Bare `uv run sim` (SimpleFlight + RPC) is the path for autonomous flight.
@@ -76,6 +77,9 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 ### Output Artifacts
 
 - `logs/landing_telemetry.csv` — landing telemetry (when `landing.telemetry_log.enabled=true`).
+- `logs/position_trace.csv` — MAVLink `LOCAL_POSITION_NED` path (when `control.mavlink.position_trace.enabled=true`).
+- `logs/tracking_state.csv` — fused LOCAL_NED tracker (when `control.mavlink.tracking.enabled=true`; use with `uv run sim-mavlink`).
+- On-screen position/time — AirSim `simPrintLogMessage` when `control.mavlink.position_hud.enabled=true`. `data_source: "tracking"` shows fused `LocalTracker` state (MAVLink + display RPC); `data_source: "trace"` uses `position_trace` (auto-enables trace store when HUD on).
 - `logs/latency_tuning_recommendation.json` — autotuner results.
 - `logs/vision_frames/` — debug frame dumps (when `vision.save_debug_frames=true`).
 
@@ -88,6 +92,10 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `src/sim_launch.py` — Launcher. Entry point for `uv run sim`, `uv run sim-very-soft`, `uv run sim-low-end`, `uv run calibrate`, `uv run sim-attitude-smoke`, `uv run sim-timesync-smoke`.
 - `src/preflight.py` — Preflight safety check. Entry point for `uv run preflight`.
 - `src/landing_telemetry.py` — Optional CSV samples during landing.
+- `src/position_trace.py` — MAVLink `LOCAL_POSITION_NED` trace (estimator fixes, CSV on shutdown).
+- `src/tracking/` — Arm-gated LOCAL_NED origin, HIGHRES_IMU propagation, UDP vision sync, `TrackingSnapshot` API.
+- `src/vision/udp_video.py` — UDP port 5600 chunked JPEG reassembly (`sim_time_ns` header).
+- `src/position_hud.py` — On-screen HUD via AirSim `simPrintLogMessage` (display-only RPC; `position_hud.data_source` trace or tracking).
 - `src/control/` — Flight client abstraction (`flight_client.py`), AirSim adapter, MAVLink client (`mavlink_client.py`), primitives, command rate, IMU, timesync.
 - `src/control/algorithms/` — Pluggable flight algorithms via `@register("name")` decorator. Auto-discovered from `*.py` in the directory.
 - `src/vision/` — Vision subsystem: `feed.py` (FPV capture), `intrinsics.py` (pinhole K), `depth_perception.py` (MiDaS ONNX), `processing.py`.

@@ -100,8 +100,10 @@ def first_mavlink_heartbeat_endpoint(config: dict, *, timeout_s: float) -> str |
     endpoints = candidate_mavlink_endpoints(config)
     deadline = time.time() + max(0.1, float(timeout_s))
     last_exc: str | None = None
+    probe_round = 0
 
     while time.time() < deadline:
+        probe_round += 1
         for endpoint in endpoints:
             connection = None
             try:

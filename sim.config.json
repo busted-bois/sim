@@ -1,5 +1,5 @@
 {
-  "algorithm": "mavlink_jitter",
+  "algorithm": "attitude_four_motion",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -24,8 +24,14 @@
   },
   "vision": {
     "enabled": true,
+    "udp_video": {
+      "enabled": true,
+      "port": 5600,
+      "host": "0.0.0.0",
+      "frame_timeout_ms": 200
+    },
     "camera_name": "0",
-"pitch_up_degrees": -20,
+    "pitch_up_degrees": 20,
     "fps": 30,
     "min_fps": 30,
     "fov_degrees": 90,
@@ -215,9 +221,19 @@
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,
+      "tracking": {
+        "enabled": true,
+        "origin_on_arm": true,
+        "imu_propagation": true,
+        "local_position_blend": 0.2,
+        "vision_correction": true,
+        "log_csv": true,
+        "path": "logs/tracking_state.csv",
+        "max_speed_ms": 10.0
+      },
       "highres_imu": {
         "enabled": true,
-        "request_hz": 50.0,
+        "request_hz": 120.0,
         "require_stream": false,
         "log_messages": false,
         "max_staleness_ms": 1000.0,
@@ -251,6 +267,21 @@
         "smoke_test": {
           "duration_seconds": 0.35
         }
+      },
+      "position_trace": {
+        "enabled": false,
+        "path": "logs/position_trace.csv",
+        "relative_origin": true,
+        "max_samples": 0,
+        "plausible_step_slack": 1.5,
+        "allow_discontinuities": false
+      },
+      "position_hud": {
+        "enabled": true,
+        "data_source": "tracking",
+        "update_hz": 15,
+        "message_label": "AIGP track",
+        "severity": 0
       },
       "airsim_profile": {
         "vehicle_name": "Drone1",
