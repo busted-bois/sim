@@ -221,8 +221,10 @@ class PymavlinkFlightClient:
         self._guided_mode_last_sent_monotonic_s: float | None = None
         self._motion_epoch_monotonic: float | None = None
         self._attitude_target_throttle_body_z = bool(attitude_target_throttle_body_z)
+        self._local_position_log_counter = 0
         self._position_trace = position_trace
         self._local_tracker = local_tracker
+        self._armed_previous = False
 
         sim_cfg = sim_config or {}
         ned_settings = load_ned_environment_config(sim_cfg)
@@ -737,12 +739,14 @@ class PymavlinkFlightClient:
                 if message_type == "LOCAL_POSITION_NED":
                     self._handle_local_position(message)
                     if self._log_commands:
-                        _logger.info(
-                            "[MAVLink >>] LOCAL_POSITION_NED x=%.2f y=%.2f z=%.2f",
-                            message.x,
-                            message.y,
-                            message.z,
-                        )
+                        self._local_position_log_counter += 1
+                        if self._local_position_log_counter % 20 == 0:
+                            _logger.info(
+                                "[MAVLink >>] LOCAL_POSITION_NED x=%.2f y=%.2f z=%.2f",
+                                message.x,
+                                message.y,
+                                message.z,
+                            )
                 elif message_type == "ATTITUDE":
                     self._handle_attitude(message)
                 elif message_type == "HEARTBEAT":
@@ -805,6 +809,15 @@ class PymavlinkFlightClient:
     def _handle_heartbeat(self, armed: bool) -> None:
         if self._local_tracker is not None:
             self._local_tracker.on_heartbeat_armed(armed)
+        if armed and not self._armed_previous:
+            snap = self._ned_environment.snapshot()
+            if snap.has_position and self._ned_environment.settings.spawn_relative_enabled:
+                self._ned_environment.set_spawn_origin(
+                    snap.position.x,
+                    snap.position.y,
+                    snap.position.z,
+                )
+        self._armed_previous = armed
         previous = self._get_latest_telemetry()
         if previous is None:
             return

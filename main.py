@@ -8,6 +8,7 @@ from src.control.algorithms import get_algorithm, list_algorithms
 from src.control.flight_client import AirSimAdapter
 from src.control.highres_imu import format_highres_imu_health
 from src.control.mavlink_client import PymavlinkFlightClient
+from src.control.ned_environment import format_ned_environment_health
 from src.control.primitives import (
     apply_trace_style,
     land_with_telemetry,
@@ -65,8 +66,6 @@ def _log_ned_environment_status(client, label: str) -> None:
     health_getter = getattr(client, "get_ned_environment_health", None)
     if not callable(health_getter):
         return
-    from src.control.ned_environment import format_ned_environment_health
-
     health = health_getter()
     print(f"[{label}] NED {format_ned_environment_health(health)}")
 

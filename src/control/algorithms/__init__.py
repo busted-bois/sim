@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.control.flight_client import FlightClient
 from src.control.highres_imu import HighresImuHealth, HighresImuSample, SensorSnapshot
-from src.control.ned_environment import NedEnvironmentMap
+from src.control.ned_environment import NedEnvironmentHealth, NedEnvironmentMap
 
 if TYPE_CHECKING:
     from src.config import Config
@@ -72,9 +72,9 @@ class Algorithm:
             return None
         return getter()
 
-    def ned_environment_health(self, client: FlightClient):
+    def ned_environment_health(self, client: FlightClient) -> NedEnvironmentHealth | None:
         getter = getattr(client, "get_ned_environment_health", None)
-        if getter is not None:
+        if callable(getter):
             return getter()
         ned = self.ned_environment(client)
         return ned.get_health() if ned is not None else None

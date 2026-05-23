@@ -53,6 +53,7 @@ uv run sim-timesync-smoke               # Launch sim first, then probe TIMESYNC
 uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream
 uv run sim-attitude-smoke               # Same via sim_launch (AirSim settings + UE if configured)
 uv run tracking-smoke                   # LocalTracker + MAVLink (needs PX4-SITL / sim-mavlink)
+uv run integration-smoke                # unittest + exploration-smoke + attitude integration (offline)
 ```
 
 **MAVLink commands are probe-only.** `sim-mavlink`, `sim-mavlink probe`, and `mavlink-all` switch AirSim to PX4Multirotor mode and verify the MAVLink bridge — they do **not** run `main.py`. Bare `uv run sim` (SimpleFlight + RPC) is the path for autonomous flight.

@@ -45,6 +45,7 @@ attitude-smoke = "src.attitude_smoke:main"
 sim-attitude-smoke = "src.sim_launch:main_attitude_smoke"
 tracking-smoke = "src.tracking_smoke:main"
 exploration-smoke = "scripts.smoke_exploration:main"
+integration-smoke = "src.integration_smoke:main"
 
 [dependency-groups]
 dev = [

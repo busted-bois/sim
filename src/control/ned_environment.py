@@ -11,7 +11,6 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
-# MAV_FRAME_LOCAL_NED / MAV_FRAME_BODY_NED per mavlink.io common messages.
 MAV_FRAME_LOCAL_NED = 1
 MAV_FRAME_BODY_NED = 8
 
@@ -78,12 +77,6 @@ class NedEnvironmentHealth:
     position_age_ms: float | None
     attitude_age_ms: float | None
 
-    def is_healthy(self) -> bool:
-        return self.status == "ok"
-
-    def is_stale(self) -> bool:
-        return self.status == "stale"
-
 
 @dataclass(frozen=True, slots=True)
 class BodyVelocitySetpoint:
@@ -103,16 +96,9 @@ def parse_ned_environment_settings(raw: dict[str, Any] | None) -> NedEnvironment
 
 
 def load_ned_environment_config(config: dict[str, Any]) -> NedEnvironmentSettings:
-    control = config.get("control")
-    if not isinstance(control, dict):
-        return NedEnvironmentSettings()
-    mavlink = control.get("mavlink")
-    if not isinstance(mavlink, dict):
-        return NedEnvironmentSettings()
-    ned = mavlink.get("ned_environment")
-    if not isinstance(ned, dict):
-        return NedEnvironmentSettings()
-    return parse_ned_environment_settings(ned)
+    control = config.get("control") or {}
+    mavlink = control.get("mavlink") or {}
+    return parse_ned_environment_settings(mavlink.get("ned_environment"))
 
 
 def _rotate_yaw_only(vec: NedVector3, yaw_rad: float, *, inverse: bool) -> NedVector3:
@@ -171,7 +157,8 @@ def local_velocity_forward(
     *,
     yaw_rad: float,
 ) -> NedVelocity:
-    if ned.snapshot().transform_ready:
+    snap = ned.snapshot()
+    if snap.transform_ready:
         return ned.body_forward_velocity_ms(speed_ms, vz)
     return NedVelocity(
         speed_ms * math.cos(yaw_rad),
@@ -252,7 +239,6 @@ class NedEnvironmentMap:
             self._spawn_origin = NedVector3(float(x_m), float(y_m), z)
 
     def refresh_from_multirotor_state(self, state: Any) -> None:
-        """Update pose from AirSim RPC without clearing spawn origin."""
         kin = state.kinematics_estimated
         pos = kin.position
         vel = kin.linear_velocity
