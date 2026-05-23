@@ -20,8 +20,12 @@ from src.control.primitives import (
 from src.internal_mapping import internal_mapping_logger_from_config
 from src.log_paths import resolve_log_csv_path
 from src.mavlink_endpoints import resolve_control_transport
-from src.position_hud import PositionOnScreenHud, position_hud_config_from_dict
-from src.position_trace import RpcPositionSnapshotProvider, position_trace_store_from_config
+from src.position_hud import (
+    PositionOnScreenHud,
+    RpcTrackingHudProvider,
+    position_hud_config_from_dict,
+)
+from src.position_trace import position_trace_store_from_config
 from src.session_logs import print_session_log_plan, warn_missing_session_logs
 from src.simulator_specs import assert_specification_snapshot_if_required
 from src.tracking import local_tracker_from_config
@@ -108,7 +112,9 @@ def main() -> None:
     )
 
     mav_cfg = config.get("control", {}).get("mavlink", {})
-    hud_cfg = position_hud_config_from_dict(mav_cfg.get("position_hud", {}))
+    hud_cfg = position_hud_config_from_dict(
+        mav_cfg.get("position_hud", {}), config=config, transport=transport
+    )
     position_trace = None
     local_tracker = None
     position_hud: PositionOnScreenHud | None = None
@@ -255,14 +261,47 @@ def main() -> None:
                         "position_trace (data_source=trace).",
                         file=sys.stderr,
                     )
-            elif hud_cfg.data_source == "trace":
-                hud_provider = RpcPositionSnapshotProvider(client)
+            elif hud_cfg.data_source == "trace" or transport != "mavlink":
+                if hud_cfg.data_source == "tracking" and transport != "mavlink":
+                    print(
+                        "Warning: position_hud.data_source=tracking requires MAVLink; "
+                        "using AirSim RPC position HUD.",
+                        file=sys.stderr,
+                    )
+                hud_provider = RpcTrackingHudProvider(client)
             else:
                 print(
                     "Warning: position_hud.data_source=tracking requires MAVLink transport; "
                     "use data_source=trace for AirSim RPC.",
                     file=sys.stderr,
                 )
+        # #region agent log
+        try:
+            import json
+            import time
+            from pathlib import Path as _Path
+
+            _payload = {
+                "sessionId": "f6d05d",
+                "hypothesisId": "A",
+                "location": "main.py:hud_wiring",
+                "message": "hud provider resolved",
+                "data": {
+                    "transport": transport,
+                    "data_source": hud_cfg.data_source,
+                    "hud_enabled": hud_cfg.enabled,
+                    "hud_provider_set": hud_provider is not None,
+                    "local_tracker_set": local_tracker is not None,
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+            with (_Path(__file__).resolve().parent / "debug-f6d05d.log").open(
+                "a", encoding="utf-8"
+            ) as _fh:
+                _fh.write(json.dumps(_payload, default=str) + "\n")
+        except OSError:
+            pass
+        # #endregion
         if hud_provider is not None:
             position_hud = PositionOnScreenHud(
                 host=host,

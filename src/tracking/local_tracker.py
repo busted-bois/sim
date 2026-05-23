@@ -104,7 +104,7 @@ class LocalTracker:
         self._propagator = ImuPropagator(
             max_speed_ms=config.max_speed_ms,
         )
-        self._vision = VisionCorrector()
+        self._vision = VisionCorrector(pitch_up_degrees=config.pitch_up_degrees)
         self._history = SimTimeHistory()
         self._armed = False
         self._imu_count = 0

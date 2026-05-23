@@ -27,10 +27,20 @@ Leg-based XY coverage, altitude layers, periodic 360° panoramas, and optional `
 
 ## Internal mapping (`exploration.internal_mapping`)
 
-Separate from SLAM. Implemented in `src/internal_mapping.py`: threaded CSV of NED pose/velocity from `getMultirotorState()` (~20 Hz). Path default `logs/internal_mapping_{timestamp}.csv`. Not coupled to `exploration.slam`.
+Separate from SLAM. Implemented in `src/internal_mapping.py`: threaded CSV of fused NED pose/velocity (~20 Hz).
+
+| Key | Default | Role |
+|-----|---------|------|
+| `enabled` | `false` | Start background CSV logger |
+| `path` | `logs/internal_mapping_{timestamp}.csv` | Output path |
+| `sample_hz` | `20` | Sample rate |
+| `data_source` | `tracking` when MAVLink tracking enabled, else `rpc` | `tracking` uses `getTrackingSnapshot()` with NED/RPC fallback |
+| `log_imu` | `false` | Append raw HIGHRES_IMU columns (`xacc`…`zgyro`) |
+
+CSV columns include `roll_rad`, `pitch_rad`, `tracking_status`, `imu_rate_hz`, and optional raw IMU fields. Not coupled to `exploration.slam`.
 
 ## Reuse
 
 `src.control.exploration`: `ExplorationScheduler`, `ExplorationSlam`, `apply_wander_move`, `parse_exploration_settings`, `parse_slam_settings`.
 
-SLAM pose uses **AirSim RPC** `getMultirotorState()` (not `NedEnvironmentMap`). Scheduler / fly-through still use `NedEnvironmentMap` when available. See `docs/ned_coordinate_mapping.md` for MAVLink internal mapping.
+SLAM pose uses **fused tracking** (`getTrackingSnapshot()` → ATTITUDE + HIGHRES_IMU + LOCAL_POSITION_NED) with NED/RPC fallback. Depth and landmark bearings use full attitude plus the 20° camera mount via `src.tracking.camera`. Scheduler / fly-through still use `NedEnvironmentMap` when available. See `docs/ned_coordinate_mapping.md`.

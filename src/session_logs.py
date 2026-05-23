@@ -24,7 +24,10 @@ def print_session_log_plan(
         transport_line += f" (env AIGP_CONTROL_TRANSPORT={env_transport!r})"
     print(transport_line)
     if internal_mapping_enabled and internal_mapping_path:
-        print(f"  internal_mapping CSV (RPC NED pose log, not SLAM): {internal_mapping_path}")
+        print(
+            f"  internal_mapping CSV (fused tracking or RPC fallback, not SLAM): "
+            f"{internal_mapping_path}"
+        )
     else:
         print("  internal_mapping CSV: disabled (exploration.internal_mapping.enabled=false)")
     if transport != "mavlink":

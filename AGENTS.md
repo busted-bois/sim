@@ -88,8 +88,9 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 
 - `logs/landing_telemetry.csv` — landing telemetry (when `landing.telemetry_log.enabled=true`).
 - `logs/position_trace.csv` — MAVLink `LOCAL_POSITION_NED` path (when `control.mavlink.position_trace.enabled=true`).
-- `logs/tracking_state.csv` — fused LOCAL_NED tracker (when `control.mavlink.tracking.enabled=true`; use with `uv run sim-mavlink`).
-- On-screen position/time — AirSim `simPrintLogMessage` when `control.mavlink.position_hud.enabled=true`. `data_source: "tracking"` shows fused `LocalTracker` state (MAVLink + display RPC); `data_source: "trace"` uses `position_trace` (auto-enables trace store when HUD on).
+- `logs/tracking_state.csv` — fused LOCAL_NED tracker (when `control.mavlink.tracking.enabled=true`; ATTITUDE + HIGHRES_IMU + LOCAL_POSITION_NED).
+- `logs/internal_mapping_{timestamp}.csv` — exploration pose log (`exploration.internal_mapping`; fused tracking by default).
+- On-screen position/time — AirSim `simPrintLogMessage` when `control.mavlink.position_hud.enabled=true`. Use `data_source: "tracking"` for fused pose with roll/pitch/yaw (degrees), velocity, IMU rate, and tracking status; defaults to tracking when `control.mavlink.tracking.enabled` and transport is mavlink. `data_source: "trace"` shows estimator position/altitude only.
 - `logs/latency_tuning_recommendation.json` — autotuner results.
 - `logs/vision_frames/` — debug frame dumps (when `vision.save_debug_frames=true`).
 
@@ -104,7 +105,7 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `src/mavlink_prereq.py` — MAVLink WSL/PX4 prerequisites; used by `sim_launch` and preflight static checks.
 - `src/landing_telemetry.py` — Optional CSV samples during landing.
 - `src/position_trace.py` — MAVLink `LOCAL_POSITION_NED` trace (estimator fixes, CSV on shutdown).
-- `src/tracking/` — Arm-gated LOCAL_NED origin, HIGHRES_IMU propagation, UDP vision sync, `TrackingSnapshot` API.
+- `src/tracking/` — Arm-gated LOCAL_NED origin, HIGHRES_IMU propagation (120 Hz dead reckoning), ATTITUDE fusion, UDP vision sync, `TrackingSnapshot` API. Enable with `control.mavlink.tracking.enabled: true`; request HIGHRES_IMU at 120 Hz and set `ned_environment.use_full_attitude: true` for robust exploration SLAM.
 - `src/vision/udp_video.py` — UDP port 5600 chunked JPEG reassembly (`sim_time_ns` header).
 - `src/position_hud.py` — On-screen HUD via AirSim `simPrintLogMessage` (display-only RPC; `position_hud.data_source` trace or tracking).
 - `src/control/` — Flight client abstraction (`flight_client.py`), AirSim adapter, MAVLink client (`mavlink_client.py`), primitives, command rate, IMU, timesync.
@@ -134,7 +135,7 @@ Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonom
 
 ### Exploration mapping (`autonomous_explore.exploration`)
 
-Leg/altitude/panorama mapping plus optional `exploration.slam` (grid, landmarks, loop closure). See `docs/exploration.md` and `src.control.exploration`.
+Leg/altitude/panorama mapping plus optional `exploration.slam` (grid, landmarks, loop closure). SLAM and `internal_mapping` consume fused `LocalTracker` state (full roll/pitch/yaw + IMU) when MAVLink tracking is enabled. See `docs/exploration.md` and `src.control.exploration`.
 
 ## Adding a New Algorithm
 

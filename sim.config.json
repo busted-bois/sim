@@ -220,7 +220,9 @@
       "internal_mapping": {
         "enabled": true,
         "path": "logs/internal_mapping_{timestamp}.csv",
-        "sample_hz": 20.0
+        "sample_hz": 20.0,
+        "data_source": "tracking",
+        "log_imu": true
       }
     }
   },
@@ -266,7 +268,7 @@
       "source_system": 255,
       "source_component": 1,
       "tracking": {
-        "enabled": false,
+        "enabled": true,
         "origin_on_arm": true,
         "imu_propagation": true,
         "local_position_blend": 0.2,
@@ -277,7 +279,7 @@
       },
       "highres_imu": {
         "enabled": true,
-        "request_hz": 50.0,
+        "request_hz": 120.0,
         "require_stream": false,
         "log_messages": false,
         "max_staleness_ms": 1000.0,
@@ -322,9 +324,9 @@
       },
       "position_hud": {
         "enabled": true,
-        "data_source": "trace",
+        "data_source": "tracking",
         "update_hz": 15,
-        "message_label": "AIGP pos",
+        "message_label": "AIGP pos: ",
         "severity": 0
       },
       "px4_wsl": {
@@ -353,7 +355,7 @@
       },
       "ned_environment": {
         "enabled": true,
-        "use_full_attitude": false,
+        "use_full_attitude": true,
         "spawn_relative_enabled": true,
         "max_position_staleness_ms": 500,
         "max_attitude_staleness_ms": 500

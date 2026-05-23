@@ -59,6 +59,36 @@ class ExplorationSlamTests(unittest.TestCase):
         rate = slam.imu_yaw_assist_deg_s(0.1)
         self.assertGreater(rate, 0.0)
 
+    def test_tilted_pitch_changes_depth_bearing(self) -> None:
+        slam = ExplorationSlam(parse_slam_settings({}), **self._spawn())
+        scores = [2.0, 8.0, 9.0, 8.0, 2.0]
+        slam.integrate_depth_columns(
+            5,
+            scores,
+            yaw_rad=0.0,
+            half_fov_rad=math.radians(45.0),
+            roll_rad=0.0,
+            pitch_rad=0.0,
+            pitch_up_degrees=20.0,
+            column_center_u=[128.0, 192.0, 320.0, 448.0, 512.0],
+            image_center_v=180.0,
+        )
+        level_cells = set(slam._log_odds.keys())
+        slam_tilt = ExplorationSlam(parse_slam_settings({}), **self._spawn())
+        slam_tilt.integrate_depth_columns(
+            5,
+            scores,
+            yaw_rad=0.0,
+            half_fov_rad=math.radians(45.0),
+            roll_rad=0.0,
+            pitch_rad=0.2,
+            pitch_up_degrees=20.0,
+            column_center_u=[128.0, 192.0, 320.0, 448.0, 512.0],
+            image_center_v=180.0,
+        )
+        tilt_cells = set(slam_tilt._log_odds.keys())
+        self.assertNotEqual(level_cells, tilt_cells)
+
     def test_export_map_writes_json(self) -> None:
         slam = ExplorationSlam(parse_slam_settings({"export_enabled": True}), **self._spawn())
         slam.update_pose(1.0, 0.0, 0.0)

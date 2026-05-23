@@ -30,7 +30,7 @@ def _wrap_pi(angle: float) -> float:
     return angle
 
 
-def _rotate_body_to_ned(
+def rotate_body_to_ned(
     ax: float, ay: float, az: float, roll: float, pitch: float, yaw: float
 ) -> tuple[float, float, float]:
     cr, sr = math.cos(roll), math.sin(roll)
@@ -122,7 +122,7 @@ class ImuPropagator:
 
         ax, ay, az = float(xacc), float(yacc), float(zacc)
         st = self._state
-        nx, ny, nz = _rotate_body_to_ned(ax, ay, az, st.roll, st.pitch, st.yaw)
+        nx, ny, nz = rotate_body_to_ned(ax, ay, az, st.roll, st.pitch, st.yaw)
         nx, ny, nz = nx, ny, nz + GRAVITY_MS2  # NED: +g on Z (down)
 
         self._state.vx += nx * dt

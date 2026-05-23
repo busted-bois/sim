@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from src.control.utils import _clamp
+from src.tracking.camera import bearing_local_yaw_rad, normalized_to_pixel
 
 _BEARING_BINS = 36
 _LOG_ODDS_FREE = -0.45
@@ -107,6 +108,8 @@ class ExplorationSlam:
         self._x = spawn_x_m
         self._y = spawn_y_m
         self._yaw = spawn_yaw_rad
+        self._roll = 0.0
+        self._pitch = 0.0
         self._prev_x = spawn_x_m
         self._prev_y = spawn_y_m
         self._path_m = 0.0
@@ -120,6 +123,7 @@ class ExplorationSlam:
         self._last_n_cols = 0
         self._last_center_idx = 0.0
         self._last_inverse_depth = True
+        self._image_center_v = 180.0
         spawn_cell = _cell_index(spawn_x_m, spawn_y_m, settings.grid_cell_m)
         self._touch_log_odds(spawn_cell, _LOG_ODDS_FREE)
 
@@ -139,7 +143,15 @@ class ExplorationSlam:
             return "free"
         return "unknown"
 
-    def update_pose(self, x_m: float, y_m: float, yaw_rad: float) -> None:
+    def update_pose(
+        self,
+        x_m: float,
+        y_m: float,
+        yaw_rad: float,
+        *,
+        roll_rad: float = 0.0,
+        pitch_rad: float = 0.0,
+    ) -> None:
         if not self._s.enabled:
             return
         step = math.hypot(x_m - self._prev_x, y_m - self._prev_y)
@@ -147,6 +159,8 @@ class ExplorationSlam:
         self._prev_x, self._prev_y = self._x, self._y
         self._x, self._y = x_m, y_m
         self._yaw = yaw_rad
+        self._roll = roll_rad
+        self._pitch = pitch_rad
         if step >= 0.15:
             self._path_xy.append((x_m, y_m))
         cell = _cell_index(x_m, y_m, self._s.grid_cell_m)
@@ -170,6 +184,31 @@ class ExplorationSlam:
         col = round((float(nx) * center) + center)
         return int(_clamp(col, 0, self._last_n_cols - 1))
 
+    def _column_bearing_rad(
+        self,
+        i: int,
+        *,
+        yaw_rad: float,
+        half_fov_rad: float,
+        roll_rad: float,
+        pitch_rad: float,
+        pitch_up_degrees: float,
+        column_center_u: list[float] | None,
+    ) -> float:
+        if column_center_u is not None and i < len(column_center_u):
+            u = column_center_u[i]
+            return bearing_local_yaw_rad(
+                u,
+                self._image_center_v,
+                roll=roll_rad,
+                pitch=pitch_rad,
+                yaw=yaw_rad,
+                pitch_up_degrees=pitch_up_degrees,
+            )
+        center = self._last_center_idx
+        offset = (i - center) / max(1.0, center)
+        return yaw_rad + offset * half_fov_rad
+
     def integrate_depth_columns(
         self,
         n_cols: int,
@@ -178,6 +217,11 @@ class ExplorationSlam:
         yaw_rad: float,
         half_fov_rad: float,
         inverse_depth: bool = True,
+        roll_rad: float = 0.0,
+        pitch_rad: float = 0.0,
+        pitch_up_degrees: float = 20.0,
+        column_center_u: list[float] | None = None,
+        image_center_v: float | None = None,
     ) -> None:
         if not self._s.enabled or n_cols < 1:
             return
@@ -186,13 +230,20 @@ class ExplorationSlam:
         self._last_n_cols = n_cols
         self._last_center_idx = (n_cols - 1) / 2.0
         self._last_inverse_depth = inverse_depth
+        self._image_center_v = float(image_center_v) if image_center_v is not None else 180.0
         ranked = sorted(scores)
         close_threshold = ranked[min(n_cols - 1, int(0.65 * (n_cols - 1)))]
-        center = self._last_center_idx
         cell_m = self._s.grid_cell_m
         for i in range(n_cols):
-            offset = (i - center) / max(1.0, center)
-            bearing = yaw_rad + offset * half_fov_rad
+            bearing = self._column_bearing_rad(
+                i,
+                yaw_rad=yaw_rad,
+                half_fov_rad=half_fov_rad,
+                roll_rad=roll_rad,
+                pitch_rad=pitch_rad,
+                pitch_up_degrees=pitch_up_degrees,
+                column_center_u=column_center_u,
+            )
             self._bearing_visits[_bearing_bin(bearing)] += 1
             range_m = self._range_from_score(scores[i], scores, inverse_depth=inverse_depth)
             steps = max(1, int(range_m / cell_m))
@@ -216,6 +267,11 @@ class ExplorationSlam:
         *,
         half_fov_rad: float,
         range_m: float | None = None,
+        ny: float = 0.0,
+        roll_rad: float | None = None,
+        pitch_rad: float | None = None,
+        yaw_rad: float | None = None,
+        pitch_up_degrees: float = 20.0,
     ) -> None:
         if not self._s.enabled or not self._s.landmark_enabled:
             return
@@ -227,7 +283,18 @@ class ExplorationSlam:
                 inverse_depth=self._last_inverse_depth,
             )
         r = range_m if range_m is not None else self._s.landmark_default_range_m
-        bearing = self._yaw + float(nx) * half_fov_rad
+        roll = self._roll if roll_rad is None else roll_rad
+        pitch = self._pitch if pitch_rad is None else pitch_rad
+        yaw = self._yaw if yaw_rad is None else yaw_rad
+        u, v = normalized_to_pixel(nx, ny)
+        bearing = bearing_local_yaw_rad(
+            u,
+            v,
+            roll=roll,
+            pitch=pitch,
+            yaw=yaw,
+            pitch_up_degrees=pitch_up_degrees,
+        )
         lx = self._x + r * math.cos(bearing)
         ly = self._y + r * math.sin(bearing)
         self._landmarks.append({"kind": kind, "x_m": lx, "y_m": ly, "range_m": r, "nx": nx})

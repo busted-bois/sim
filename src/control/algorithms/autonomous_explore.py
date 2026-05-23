@@ -75,6 +75,36 @@ def _rpc_pose_xy_yaw(client: FlightClient) -> tuple[float, float, float]:
     )
 
 
+def _fused_pose_xy_rpy(client: FlightClient) -> tuple[float, float, float, float, float]:
+    """Fused LOCAL NED pose: tracking snapshot, then NED map, then RPC fallback."""
+    getter = getattr(client, "getTrackingSnapshot", None)
+    if callable(getter):
+        snapshot = getter()
+        if snapshot is not None and snapshot.health.status in ("ok", "degraded"):
+            if snapshot.state is not None:
+                x, y, z = snapshot.state.position_ned
+                roll, pitch, yaw = snapshot.state.attitude_rpy
+            else:
+                x, y, _z = snapshot.position_ned
+                roll, pitch, yaw = snapshot.attitude_rpy
+            return float(x), float(y), float(roll), float(pitch), float(yaw)
+
+    ned_getter = getattr(client, "get_ned_environment", None)
+    if callable(ned_getter):
+        ned = ned_getter()
+        if ned is not None:
+            snap = ned.snapshot()
+            if snap.has_position:
+                att = snap.attitude
+                roll = att.roll if att is not None else 0.0
+                pitch = att.pitch if att is not None else 0.0
+                yaw = att.yaw if att is not None else 0.0
+                return float(snap.position.x), float(snap.position.y), roll, pitch, yaw
+
+    x, y, yaw = _rpc_pose_xy_yaw(client)
+    return x, y, 0.0, 0.0, yaw
+
+
 @register("autonomous_explore")
 class AutonomousExplore(Algorithm):
     config_section = "autonomous_explore"
@@ -240,6 +270,7 @@ class AutonomousExplore(Algorithm):
         print(f"[autonomous_explore] start heading yaw={spawn_yaw_deg:+.1f}°")
 
         cam_half_fov_deg = yaw_mapping_half_fov_degrees(self._config.get("vision", {}))
+        camera_pitch_up_deg = float(self._config.get("camera", {}).get("pitch_up_degrees", 20.0))
         t0 = time.monotonic()
         spawn_z = float(spawn_snap.position.z)
         explore_ned.set_spawn_origin(
@@ -254,7 +285,7 @@ class AutonomousExplore(Algorithm):
             initial_z_ned=spawn_z,
         )
         half_fov_rad = math.radians(cam_half_fov_deg)
-        slam_spawn_x, slam_spawn_y, slam_spawn_yaw = _rpc_pose_xy_yaw(client)
+        slam_spawn_x, slam_spawn_y, _, _, slam_spawn_yaw = _fused_pose_xy_rpy(client)
         explore_slam = ExplorationSlam(
             slam_settings,
             spawn_x_m=slam_spawn_x,
@@ -393,9 +424,11 @@ class AutonomousExplore(Algorithm):
 
             tick_ned = self.ned_environment(client) or explore_ned
             tick_snap = tick_ned.snapshot()
-            slam_x, slam_y, yaw_rad = _rpc_pose_xy_yaw(client)
+            slam_x, slam_y, roll_rad, pitch_rad, yaw_rad = _fused_pose_xy_rpy(client)
             z_ned = float(tick_snap.position.z)
-            explore_slam.update_pose(slam_x, slam_y, yaw_rad)
+            explore_slam.update_pose(
+                slam_x, slam_y, yaw_rad, roll_rad=roll_rad, pitch_rad=pitch_rad
+            )
             cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
             vz = vz_toward_altitude_hold(z_ned, explore_sched.z_hold_ned)
 
@@ -427,7 +460,16 @@ class AutonomousExplore(Algorithm):
                     last_target_nx = real_blue[0]
                     last_blue = (real_blue[0], real_blue[1], real_blue[2], now_s, yaw_rad)
                     explore_sched.reset_panorama_timer(now_s)
-                    explore_slam.register_landmark("blue", real_blue[0], half_fov_rad=half_fov_rad)
+                    explore_slam.register_landmark(
+                        "blue",
+                        real_blue[0],
+                        ny=real_blue[1],
+                        half_fov_rad=half_fov_rad,
+                        roll_rad=roll_rad,
+                        pitch_rad=pitch_rad,
+                        yaw_rad=yaw_rad,
+                        pitch_up_degrees=camera_pitch_up_deg,
+                    )
                     blue_lock_until_s = now_s + 2.5
                 blue_lock_engaged = now_s < blue_lock_until_s
 
@@ -436,7 +478,16 @@ class AutonomousExplore(Algorithm):
                     last_target_nx = real_red[0]
                     last_red = (real_red[0], real_red[1], real_red[2], now_s, yaw_rad)
                     explore_sched.reset_panorama_timer(now_s)
-                    explore_slam.register_landmark("red", real_red[0], half_fov_rad=half_fov_rad)
+                    explore_slam.register_landmark(
+                        "red",
+                        real_red[0],
+                        ny=real_red[1],
+                        half_fov_rad=half_fov_rad,
+                        roll_rad=roll_rad,
+                        pitch_rad=pitch_rad,
+                        yaw_rad=yaw_rad,
+                        pitch_up_degrees=camera_pitch_up_deg,
+                    )
                     red_lock_until_s = now_s + 2.0
                 red_lock_engaged = now_s < red_lock_until_s
 
@@ -693,6 +744,9 @@ class AutonomousExplore(Algorithm):
             tick_now = time.monotonic()
 
             col_edges = np.linspace(0, band.shape[1], n_cols + 1, dtype=int)
+            column_center_u = [
+                0.5 * (float(col_edges[i]) + float(col_edges[i + 1])) for i in range(n_cols)
+            ]
             col_scores = np.empty(n_cols, dtype=np.float32)
             for i in range(n_cols):
                 strip = band[:, col_edges[i]:col_edges[i + 1]]
@@ -705,6 +759,11 @@ class AutonomousExplore(Algorithm):
                 yaw_rad=yaw_rad,
                 half_fov_rad=half_fov_rad,
                 inverse_depth=inverse_depth,
+                roll_rad=roll_rad,
+                pitch_rad=pitch_rad,
+                pitch_up_degrees=camera_pitch_up_deg,
+                column_center_u=column_center_u,
+                image_center_v=0.5 * (r0 + r1),
             )
             raw_range = float(obstacle_score.max() - obstacle_score.min())
 

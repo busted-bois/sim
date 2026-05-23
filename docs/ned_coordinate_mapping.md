@@ -33,7 +33,9 @@ For horizontal vectors at yaw ψ:
 - `v_n = v_xb·cos(ψ) − v_yb·sin(ψ)`
 - `v_e = v_xb·sin(ψ) + v_yb·cos(ψ)`
 
-Set `control.mavlink.ned_environment.use_full_attitude: true` for full roll/pitch/yaw rotation.
+Set `control.mavlink.ned_environment.use_full_attitude: true` for full roll/pitch/yaw rotation (required for camera ray projection in exploration SLAM).
+
+Camera mount compensation: `src/tracking/camera.py` chains the fixed `camera.pitch_up_degrees` mount with vehicle ATTITUDE for LOCAL NED bearings.
 
 ### Config (`sim.config.json`)
 

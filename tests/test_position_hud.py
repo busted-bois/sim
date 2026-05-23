@@ -12,6 +12,7 @@ from src.position_hud import (
     format_position_hud_param,
     format_tracking_hud_param,
     position_hud_config_from_dict,
+    resolve_hud_data_source,
 )
 from src.position_trace import PositionTraceHealth, PositionTraceSnapshot
 from src.tracking.snapshot import TrackingSnapshot
@@ -37,11 +38,51 @@ class _FakeRpcClient:
 
 class PositionHudTests(unittest.TestCase):
     def test_format_position_hud_param(self) -> None:
-        row = (1.5, 1500, 1.0, -2.0, -5.0, 0.0, 0.0, 0.0, 5.0)
+        row = (1.5, 1500, 1.0, -2.0, -5.0, 0.1, 0.2, -0.3, 5.0)
         text = format_position_hud_param(row)
         self.assertIn("t=1.50s", text)
         self.assertIn("x=1.00", text)
         self.assertIn("alt=5.00m", text)
+        self.assertIn("vx=0.10", text)
+
+    def test_rpc_tracking_hud_provider_builds_full_snapshot(self) -> None:
+        from src.position_hud import RpcTrackingHudProvider
+
+        class _Ori:
+            x_val = 0.0
+            y_val = 0.0
+            z_val = 0.0
+            w_val = 1.0
+
+        class _Vec:
+            def __init__(self, x: float, y: float, z: float) -> None:
+                self.x_val = x
+                self.y_val = y
+                self.z_val = z
+
+        class _Kin:
+            position = _Vec(1.0, 2.0, -3.0)
+            linear_velocity = _Vec(0.1, 0.2, 0.3)
+            orientation = _Ori()
+
+        class _State:
+            timestamp = 99
+            kinematics_estimated = _Kin()
+
+        class _Client:
+            def getMultirotorState(self):
+                return _State()
+
+            def getHighresImuHealth(self):
+                return None
+
+        snap = RpcTrackingHudProvider(_Client())()
+        assert snap is not None
+        text = format_tracking_hud_param(snap)
+        self.assertIn("roll=", text)
+        self.assertIn("pitch=", text)
+        self.assertIn("yaw=", text)
+        self.assertIn("vx=0.10", text)
 
     def test_format_tracking_hud_param(self) -> None:
         state = TrackingState(
@@ -75,9 +116,52 @@ class PositionHudTests(unittest.TestCase):
         self.assertIn("t=12.34s", text)
         self.assertIn("x=1.20", text)
         self.assertIn("alt=4.80m", text)
-        self.assertIn("yaw=0.31", text)
+        self.assertIn("roll=0.0deg", text)
+        self.assertIn("pitch=-20.1deg", text)
+        self.assertIn("yaw=17.8deg", text)
         self.assertIn("imu=118Hz", text)
+        self.assertIn("status=ok", text)
         self.assertIn("vis=2", text)
+
+    def test_resolve_hud_data_source_defaults_tracking_for_mavlink(self) -> None:
+        cfg = {
+            "control": {
+                "transport": "mavlink",
+                "mavlink": {"tracking": {"enabled": True}},
+            }
+        }
+        self.assertEqual(resolve_hud_data_source(cfg), "tracking")
+
+    def test_resolve_hud_data_source_respects_explicit(self) -> None:
+        cfg = {
+            "control": {
+                "transport": "mavlink",
+                "mavlink": {"tracking": {"enabled": True}},
+            }
+        }
+        self.assertEqual(resolve_hud_data_source(cfg, explicit="trace"), "trace")
+
+    def test_resolve_hud_data_source_falls_back_on_airsim_transport(self) -> None:
+        cfg = {
+            "control": {
+                "transport": "mavlink",
+                "mavlink": {"tracking": {"enabled": True}},
+            }
+        }
+        self.assertEqual(resolve_hud_data_source(cfg, explicit="tracking", transport="airsim"), "trace")
+
+    def test_config_from_dict_uses_tracking_default_when_enabled(self) -> None:
+        cfg = position_hud_config_from_dict(
+            {"enabled": True},
+            config={
+                "control": {
+                    "transport": "mavlink",
+                    "mavlink": {"tracking": {"enabled": True}},
+                }
+            },
+            transport="mavlink",
+        )
+        self.assertEqual(cfg.data_source, "tracking")
 
     def test_config_from_dict(self) -> None:
         cfg = position_hud_config_from_dict(
@@ -91,7 +175,7 @@ class PositionHudTests(unittest.TestCase):
         )
         self.assertTrue(cfg.enabled)
         self.assertEqual(cfg.update_hz, 20.0)
-        self.assertEqual(cfg.message_label, "pos")
+        self.assertEqual(cfg.message_label, "pos: ")
         self.assertEqual(cfg.severity, 2)
         self.assertEqual(cfg.data_source, "tracking")
 
