@@ -46,7 +46,9 @@ class AirSimFlightClient:
     def reset(self) -> None:
         self._client.reset()
 
-    def moveByVelocityAsync(self, vx: float, vy: float, vz: float, duration: float, **kwargs) -> Any:
+    def moveByVelocityAsync(
+        self, vx: float, vy: float, vz: float, duration: float, **kwargs
+    ) -> Any:
         return self._client.moveByVelocityAsync(vx, vy, vz, duration, **kwargs)
 
     def moveByVelocityZAsync(self, vx: float, vy: float, z: float, duration: float) -> Any:

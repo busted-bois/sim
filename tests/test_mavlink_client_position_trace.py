@@ -37,6 +37,7 @@ class PymavlinkFlightClientPositionTraceTests(unittest.TestCase):
                 prepare_for_flight_on_connect=False,
                 request_state_messages_on_connect=False,
                 highres_imu_enabled=False,
+                sim_config={},
                 position_trace=trace_store,
                 connection_factory=lambda *args, **kwargs: connection,
             )

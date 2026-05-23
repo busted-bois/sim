@@ -121,6 +121,10 @@ Auto-discovered from `src/control/algorithms/*.py`:
 
 Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonomous_explore"`.
 
+### Exploration mapping (`autonomous_explore.exploration`)
+
+Leg/altitude/panorama mapping plus optional `exploration.slam` (grid, landmarks, loop closure). See `docs/exploration.md` and `src.control.exploration`.
+
 ## Adding a New Algorithm
 
 1. Create `src/control/algorithms/my_algo.py`
@@ -141,6 +145,16 @@ Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonom
 
 Helpers on `PymavlinkFlightClient` and `FlightClient` protocol. Checklist: `docs/set_position_target_pr_test_plan.md`.
 
+### Internal NED mapping (`NedEnvironmentMap`)
+
+- Module: `src/control/ned_environment.py` — ingests `LOCAL_POSITION_NED` + `ATTITUDE`, exposes LOCAL/BODY transforms and spawn-relative XY.
+- MAVLink: `PymavlinkFlightClient.get_ned_environment()` (telemetry pump requests ATTITUDE when `control.mavlink.attitude.enabled`).
+- Algorithms: `Algorithm.ned_environment(client)`, `ned_environment_health(client)`; `SensorSnapshot.ned` in `latest_sensor_snapshot()`.
+- AirSim: `AirSimAdapter.get_ned_environment()` refreshes from RPC each call.
+- Setpoint helper: `plan_body_velocity()`; debug: `NedEnvironmentMap.export_snapshot_json()`.
+- Preflight (MAVLink): warns if ATTITUDE stream missing (`control.mavlink.attitude.require_stream` to hard-fail).
+- Docs: `docs/ned_coordinate_mapping.md`.
+
 ## Algorithm Config Sections in sim.config.json
 
 Each algorithm has its own top-level config key matching its name (e.g. `"autonomous_explore"`, `"attitude_four_motion"`). Read by algorithm constructor via `self._config`.
@@ -152,6 +166,7 @@ Key top-level config keys:
 - `"safety"` — `algorithm_timeout_seconds`
 - `"low_end_profile"` — overrides applied when `AIGP_LOW_END=1`
 - `"waypoints"` — NED coordinate list
+- `"autonomous_explore"."exploration"` — mapping scheduler (panorama, legs, altitude layers); see `docs/exploration.md`
 
 ## Ruff Exclusions
 

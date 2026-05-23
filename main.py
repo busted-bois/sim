@@ -1,26 +1,27 @@
-import logging
 import os
 import sys
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-from src.config import apply_low_end_overrides, load_config, simulator_endpoint  # noqa: E402
-from src.control.airsim_client import AirSimFlightClient  # noqa: E402
-from src.control.algorithms import get_algorithm, list_algorithms  # noqa: E402
-from src.control.highres_imu import format_highres_imu_health  # noqa: E402
-from src.control.mavlink_client import PymavlinkFlightClient  # noqa: E402
-from src.control.primitives import (  # noqa: E402
+import airsim
+from src.config import apply_low_end_overrides, load_config, simulator_endpoint
+from src.control.algorithms import get_algorithm, list_algorithms
+from src.control.flight_client import AirSimAdapter
+from src.control.highres_imu import format_highres_imu_health
+from src.control.mavlink_client import PymavlinkFlightClient
+from src.control.primitives import (
     apply_trace_style,
     land_with_telemetry,
     run_algorithm_with_timeout,
+    set_front_camera_pose,
     suppress_api_cleanup_warning,
+    wait_until_stationary,
 )
-from src.position_hud import PositionOnScreenHud, position_hud_config_from_dict  # noqa: E402
-from src.position_trace import position_trace_store_from_config  # noqa: E402
-from src.simulator_specs import assert_specification_snapshot_if_required  # noqa: E402
-from src.tracking import local_tracker_from_config  # noqa: E402
-from src.vision.feed import vision_feed_from_config  # noqa: E402
+from src.mavlink_endpoints import resolve_control_transport
+from src.position_hud import PositionOnScreenHud, position_hud_config_from_dict
+from src.position_trace import position_trace_store_from_config
+from src.simulator_specs import assert_specification_snapshot_if_required
+from src.tracking import local_tracker_from_config
+from src.vision import VisionFeed, vision_feed_from_config
 
 ROOT = Path(__file__).resolve().parent
 
@@ -60,6 +61,16 @@ def _log_timesync_status(client, label: str) -> None:
     )
 
 
+def _log_ned_environment_status(client, label: str) -> None:
+    health_getter = getattr(client, "get_ned_environment_health", None)
+    if not callable(health_getter):
+        return
+    from src.control.ned_environment import format_ned_environment_health
+
+    health = health_getter()
+    print(f"[{label}] NED {format_ned_environment_health(health)}")
+
+
 def _log_highres_imu_status(client, label: str) -> None:
     health_getter = getattr(client, "getHighresImuHealth", None)
     sample_getter = getattr(client, "getHighresImu", None)
@@ -82,12 +93,10 @@ def main() -> None:
     apply_low_end_overrides(config)
     assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
+    transport = resolve_control_transport(config)
     host, port = simulator_endpoint(config)
     profile = os.environ.get("AIGP_PROFILE", "").strip()
     map_name = str(sim_cfg.get("map_name", "")).strip()
-    transport = os.environ.get("AIGP_CONTROL_TRANSPORT", "").strip().lower() or str(
-        config.get("control", {}).get("transport", "airsim")
-    ).strip().lower()
     print(
         "Flight session: "
         f"algorithm={config.algorithm_name!r} "
@@ -97,38 +106,25 @@ def main() -> None:
     )
 
     mav_cfg = config.get("control", {}).get("mavlink", {})
-    timesync_cfg = mav_cfg.get("timesync", {})
-    highres_imu_cfg = mav_cfg.get("highres_imu", {})
-    endpoint = os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip() or str(
-        mav_cfg.get("endpoint", "udpin:0.0.0.0:14550")
-    ).strip()
+    hud_cfg = position_hud_config_from_dict(mav_cfg.get("position_hud", {}))
+    position_trace = None
+    local_tracker = None
+    position_hud: PositionOnScreenHud | None = None
+    airsim_client: airsim.MultirotorClient | None = None
+    vision_feed: VisionFeed | None = None
 
     if transport == "mavlink":
         position_trace = position_trace_store_from_config(config, ROOT)
         local_tracker = local_tracker_from_config(config, ROOT)
-    else:
-        position_trace = None
-        local_tracker = None
-    hud_cfg = position_hud_config_from_dict(mav_cfg.get("position_hud", {}))
-    position_hud: PositionOnScreenHud | None = None
-    vision_feed = None
-
-    if transport == "airsim":
-        client = AirSimFlightClient(host=host, port=port)
-    else:
-        tracker_cb = None
-        if local_tracker is not None:
-
-            def tracker_cb(image_rgb, sim_time_ns: int) -> None:
-                local_tracker.on_video_frame(image_rgb, sim_time_ns)
-
-        vision_feed = vision_feed_from_config(config, tracker_callback=tracker_cb)
+        timesync_cfg = mav_cfg.get("timesync", {})
+        highres_imu_cfg = mav_cfg.get("highres_imu", {})
+        endpoint = os.environ.get("AIGP_MAVLINK_ENDPOINT", "").strip() or str(
+            mav_cfg.get("endpoint", "udpin:0.0.0.0:14550")
+        ).strip()
         client = PymavlinkFlightClient(
             endpoint=endpoint,
             command_rate_hz=float(config.get("control", {}).get("command_rate_hz", 50.0)),
             state_request_hz=float(mav_cfg.get("state_request_hz", 20.0)),
-            position_trace=position_trace,
-            local_tracker=local_tracker,
             guided_custom_mode=int(mav_cfg.get("guided_custom_mode", 4)),
             takeoff_altitude_m=float(mav_cfg.get("takeoff_altitude_m", 5.0)),
             land_descent_speed_ms=float(config.get("landing", {}).get("descent_speed_ms", 2.0)),
@@ -159,13 +155,52 @@ def main() -> None:
             attitude_target_throttle_body_z=bool(
                 mav_cfg.get("attitude_target", {}).get("throttle_body_z", False)
             ),
+            sim_config=getattr(config, "_raw", config),
+            position_trace=position_trace,
+            local_tracker=local_tracker,
         )
+        tracker_cb = None
+        if local_tracker is not None:
+
+            def tracker_cb(image_rgb, sim_time_ns: int) -> None:
+                local_tracker.on_video_frame(image_rgb, sim_time_ns)
+
+        udp_video_enabled = bool(
+            config.get("vision", {}).get("udp_video", {}).get("enabled", False)
+        )
+        allow_airsim_vision = (
+            bool(config.get("vision", {}).get("enabled", False))
+            and os.environ.get("AIGP_ENABLE_AIRSIM_VISION", "").strip() == "1"
+        )
+        if udp_video_enabled or local_tracker is not None:
+            vision_feed = vision_feed_from_config(config, tracker_callback=tracker_cb)
+        elif allow_airsim_vision:
+            airsim_client = airsim.MultirotorClient(ip=host, port=port)
+            vision_feed = VisionFeed(airsim_client, config.get("vision", {}))
+        else:
+            config.setdefault("vision", {})["enabled"] = False
+    else:
+        airsim_client = airsim.MultirotorClient(ip=host, port=port)
+        client = AirSimAdapter(
+            airsim_client,
+            command_rate_hz=float(config.get("control", {}).get("command_rate_hz", 50.0)),
+            sim_config=getattr(config, "_raw", config),
+        )
+        vision_feed = VisionFeed(airsim_client, config.get("vision", {}))
 
     try:
         client.confirmConnection()
+        if transport == "airsim":
+            try:
+                client.reset()
+            except Exception as reset_exc:
+                print(f"Warning: client.reset() failed (continuing): {reset_exc}", file=sys.stderr)
         client.enableApiControl(True)
         client.armDisarm(True)
-        if hud_cfg.enabled:
+        if transport == "airsim":
+            wait_until_stationary(client)
+        set_front_camera_pose(client, config)
+        if transport == "mavlink" and hud_cfg.enabled:
             hud_provider = None
             if hud_cfg.data_source == "tracking":
                 if local_tracker is None:
@@ -198,14 +233,21 @@ def main() -> None:
                     f"{hud_cfg.update_hz:.0f} Hz via AirSim RPC)."
                 )
         apply_trace_style(client, config)
+        if airsim_client is not None and airsim_client is not client:
+            airsim_client.confirmConnection()
+            set_front_camera_pose(airsim_client, config)
+            apply_trace_style(airsim_client, config)
         _log_timesync_status(client, "startup")
         _log_highres_imu_status(client, "startup")
+        if transport == "mavlink":
+            _log_ned_environment_status(client, "startup")
         if vision_feed is not None and vision_feed.enabled:
             vision_feed.start()
-            print(
-                f"UDP vision feed started (port "
-                f"{config.get('vision', {}).get('udp_video', {}).get('port', 5600)})"
-            )
+            udp_port = config.get("vision", {}).get("udp_video", {}).get("port", 5600)
+            if transport == "mavlink" and bool(
+                config.get("vision", {}).get("udp_video", {}).get("enabled", False)
+            ):
+                print(f"UDP vision feed started (port {udp_port})")
         if local_tracker is not None:
             health = local_tracker.health()
             print(
@@ -216,8 +258,9 @@ def main() -> None:
         try:
             algo_name = config.algorithm_name
             algo = get_algorithm(algo_name, config)
-            feed = vision_feed if vision_feed is not None and vision_feed.enabled else None
-            algo.set_vision_feed(feed)
+            algo.set_vision_feed(
+                vision_feed if vision_feed is not None and vision_feed.enabled else None
+            )
             safety_cfg = config.get("safety", {})
             algo_timeout_seconds = max(
                 5.0, float(safety_cfg.get("algorithm_timeout_seconds", 180.0))
@@ -240,15 +283,18 @@ def main() -> None:
                 f"[shutdown] position_hud updates={position_hud.update_count} "
                 f"rpc_errors={position_hud.rpc_error_count}"
             )
+        if vision_feed is not None:
+            vision_feed.stop()
+            if vision_feed.enabled:
+                stats = vision_feed.get_stats()
+                print(
+                    f"[shutdown] vision_feed successes={stats.capture_successes} "
+                    f"udp_frames={stats.udp_frames} udp_packets={stats.udp_packets}"
+                )
         _log_timesync_status(client, "shutdown")
         _log_highres_imu_status(client, "shutdown")
-        if vision_feed is not None and vision_feed.enabled:
-            vision_feed.stop()
-            stats = vision_feed.get_stats()
-            print(
-                f"[shutdown] vision_feed successes={stats.capture_successes} "
-                f"udp_frames={stats.udp_frames} udp_packets={stats.udp_packets}"
-            )
+        if transport == "mavlink":
+            _log_ned_environment_status(client, "shutdown")
         if position_trace is not None:
             trace_health = position_trace.health()
             print(
@@ -279,7 +325,7 @@ def main() -> None:
             closer()
 
     if os.environ.get("AIGP_PAUSE_BEFORE_EXIT", "").strip() == "1":
-        input("AIGP_PAUSE_BEFORE_EXIT=1 -- press Enter to exit the flight client...")
+        input("AIGP_PAUSE_BEFORE_EXIT=1 - press Enter to exit the flight client...")
 
 
 if __name__ == "__main__":
