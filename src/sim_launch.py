@@ -11,6 +11,46 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+_DEBUG_LOG_PATH = ROOT / "debug-8be999.log"
+
+
+def _agent_debug_log(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict | None = None,
+    *,
+    run_id: str = "pre-fix",
+) -> None:
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "8be999",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(time.time() * 1000),
+        }
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload) + "\n")
+    except OSError:
+        pass
+    # #endregion
+
+
+def _wants_mavlink_session(config: dict) -> bool:
+    """True when config/env requests MAVLink or position-trace HUD features."""
+    control = config.get("control", {})
+    env_transport = os.environ.get("AIGP_CONTROL_TRANSPORT", "").strip().lower()
+    raw = env_transport or str(control.get("transport", "airsim")).strip().lower()
+    if raw in {"mavlink", "auto"}:
+        return True
+    mav = control.get("mavlink", {})
+    trace = mav.get("position_trace", {})
+    hud = mav.get("position_hud", {})
+    return bool(trace.get("enabled")) or bool(hud.get("enabled"))
 
 
 @dataclass
@@ -642,11 +682,13 @@ def restore_simpleflight_settings() -> bool:
     return False
 
 
-def _maybe_restore_simpleflight_from_backup() -> bool:
+def _maybe_restore_simpleflight_from_backup(config: dict | None = None) -> bool:
     # Self-heal for users who ran sim-mavlink/mavlink-all and skipped Ctrl+C
     # cleanup (Task Manager kill, BSOD). Only restores when the current file
     # still looks like PX4Multirotor, so a freshly-edited SimpleFlight config
-    # is never clobbered.
+    # is never clobbered. Skip when MAVLink / position-trace HUD is requested.
+    if config is not None and _wants_mavlink_session(config):
+        return False
     settings_path = _airsim_settings_path()
     backup_path = settings_path.with_name("settings.simpleflight.bak.json")
     if not (settings_path.is_file() and backup_path.is_file()):
@@ -820,12 +862,26 @@ def launch(
     config = load_config()
     assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
-    restored_simpleflight = _maybe_restore_simpleflight_from_backup()
+    wants_mavlink = _wants_mavlink_session(config)
+    restored_simpleflight = _maybe_restore_simpleflight_from_backup(config)
     transport = _launch_transport(config, restored_simpleflight=restored_simpleflight)
     resolved_transport = transport
     resolved_mavlink_endpoint: str | None = None
     if transport == "mavlink":
         resolved_mavlink_endpoint = first_mavlink_heartbeat_endpoint(config, timeout_s=2.0)
+    hil_already_up = transport == "mavlink" and _is_tcp_listening_passive(PX4_HIL_TCP_PORT)
+    _agent_debug_log(
+        "H1",
+        "sim_launch.launch:entry",
+        "launcher session resolved",
+        {
+            "wants_mavlink": wants_mavlink,
+            "restored_simpleflight": restored_simpleflight,
+            "transport": transport,
+            "mavlink_endpoint": resolved_mavlink_endpoint,
+            "hil_tcp_4560_listening": hil_already_up,
+        },
+    )
 
     colosseum = sim_cfg.get("colosseum_path", "")
     project = _resolve_project_path(sim_cfg)
@@ -834,7 +890,8 @@ def launch(
     if transport == "mavlink":
         print(
             "[launcher] MAVLink transport: AirSim will use PX4Multirotor. "
-            "Start PX4-SITL (uv run sim-mavlink) or ensure MAVLink HEARTBEAT on UDP 14550."
+            "Start PX4-SITL in WSL while UE loads (see 'uv run sim-mavlink' for the command). "
+            "Use only 'uv run sim' — do not also run 'uv run sim-mavlink' (that opens a second UE)."
         )
     windowed = sim_cfg.get("windowed", True)
     res_x = sim_cfg.get("res_x", 1280)
@@ -863,6 +920,29 @@ def launch(
             "MAVLink heartbeat already available on "
             f"{resolved_mavlink_endpoint}; skipping simulator launch."
         )
+    elif hil_already_up:
+        print(
+            "[launcher] AirSim HIL TCP :4560 already listening — skipping UE launch to avoid "
+            "a second Colosseum instance. Stop 'uv run sim-mavlink' if it is still running, "
+            "then use this 'uv run sim' session only."
+        )
+        wait_label = "MAVLink/AirSim control link"
+        print(f"Waiting for {wait_label} on {host}:{airsim_port} (timeout {rpc_tout_label}s)...")
+        try:
+            resolved_transport, resolved_mavlink_endpoint = _wait_for_control_link(
+                host,
+                airsim_port,
+                config,
+                rpc_ready_timeout_s,
+                transport,
+            )
+        except KeyboardInterrupt:
+            _cleanup_on_interrupt()
+            raise SystemExit(130) from None
+        if resolved_transport == "mavlink" and resolved_mavlink_endpoint is not None:
+            print(f"MAVLink heartbeat detected on {resolved_mavlink_endpoint}")
+        else:
+            print(f"AirSim RPC is ready on {host}:{airsim_port}")
     elif colosseum and Path(colosseum).exists():
         if not project:
             raise SystemExit(
@@ -950,6 +1030,16 @@ def launch(
         env["AIGP_MAVLINK_ENDPOINT"] = resolved_mavlink_endpoint
     else:
         env.pop("AIGP_MAVLINK_ENDPOINT", None)
+    _agent_debug_log(
+        "H2",
+        "sim_launch.launch:main_env",
+        "starting main.py child",
+        {
+            "resolved_transport": resolved_transport,
+            "mavlink_endpoint": resolved_mavlink_endpoint,
+            "launched_ue": _handles.ue is not None,
+        },
+    )
     if landing_profile:
         env["AIGP_LANDING_PROFILE"] = landing_profile
     if low_end:

@@ -242,7 +242,7 @@
     "random_seed": 42
   },
   "control": {
-    "transport": "airsim",
+    "transport": "mavlink",
     "mavlink": {
       "endpoint": "udpin:0.0.0.0:14550",
       "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],
@@ -300,7 +300,7 @@
         }
       },
       "position_trace": {
-        "enabled": false,
+        "enabled": true,
         "path": "logs/position_trace.csv",
         "relative_origin": true,
         "max_samples": 0,
@@ -308,10 +308,10 @@
         "allow_discontinuities": false
       },
       "position_hud": {
-        "enabled": false,
-        "data_source": "tracking",
+        "enabled": true,
+        "data_source": "trace",
         "update_hz": 15,
-        "message_label": "AIGP track",
+        "message_label": "AIGP pos",
         "severity": 0
       },
       "airsim_profile": {

@@ -93,6 +93,36 @@ def main() -> None:
     assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
     transport = resolve_control_transport(config)
+    # #region agent log
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        import time as _time
+
+        _mav = config.get("control", {}).get("mavlink", {})
+        _payload = {
+            "sessionId": "8be999",
+            "runId": "pre-fix",
+            "hypothesisId": "H2",
+            "location": "main.py:main",
+            "message": "flight client transport",
+            "data": {
+                "transport": transport,
+                "position_trace_enabled": bool(
+                    _mav.get("position_trace", {}).get("enabled", False)
+                ),
+                "position_hud_enabled": bool(_mav.get("position_hud", {}).get("enabled", False)),
+                "position_hud_data_source": str(_mav.get("position_hud", {}).get("data_source", "")),
+            },
+            "timestamp": int(_time.time() * 1000),
+        }
+        with (_Path(__file__).resolve().parent / "debug-8be999.log").open(
+            "a", encoding="utf-8"
+        ) as _handle:
+            _handle.write(_json.dumps(_payload) + "\n")
+    except OSError:
+        pass
+    # #endregion
     host, port = simulator_endpoint(config)
     profile = os.environ.get("AIGP_PROFILE", "").strip()
     map_name = str(sim_cfg.get("map_name", "")).strip()
@@ -231,6 +261,28 @@ def main() -> None:
                     f"On-screen HUD started ({hud_cfg.data_source}, "
                     f"{hud_cfg.update_hz:.0f} Hz via AirSim RPC)."
                 )
+                # #region agent log
+                try:
+                    import json as _json
+                    from pathlib import Path as _Path
+                    import time as _time
+
+                    _payload = {
+                        "sessionId": "8be999",
+                        "runId": "pre-fix",
+                        "hypothesisId": "H2",
+                        "location": "main.py:hud_start",
+                        "message": "position HUD started",
+                        "data": {"data_source": hud_cfg.data_source},
+                        "timestamp": int(_time.time() * 1000),
+                    }
+                    with (_Path(__file__).resolve().parent / "debug-8be999.log").open(
+                        "a", encoding="utf-8"
+                    ) as _handle:
+                        _handle.write(_json.dumps(_payload) + "\n")
+                except OSError:
+                    pass
+                # #endregion
         apply_trace_style(client, config)
         if airsim_client is not None and airsim_client is not client:
             airsim_client.confirmConnection()
