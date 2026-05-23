@@ -237,22 +237,29 @@ class PymavlinkFlightClient:
     def get_ned_environment_health(self) -> NedEnvironmentHealth:
         return self._ned_environment.get_health()
 
-    def _default_orientation(self) -> Quaternionr:
-        snap = self._ned_environment.snapshot()
-        if snap.has_attitude and snap.attitude is not None:
-            att = snap.attitude
-            return orientation_from_rpy(att.roll, att.pitch, att.yaw)
-        return orientation_from_yaw(0.0)
-
     def _kinematics_from_ned(self) -> _KinematicsEstimated:
         snap = self._ned_environment.snapshot()
         pos = snap.position
         vel = snap.velocity
+        if snap.has_attitude and snap.attitude is not None:
+            att = snap.attitude
+            orientation = orientation_from_rpy(att.roll, att.pitch, att.yaw)
+        else:
+            orientation = orientation_from_yaw(0.0)
         return _KinematicsEstimated(
             position=_Vector3r(pos.x, pos.y, pos.z),
             linear_velocity=_Vector3r(vel.vx, vel.vy, vel.vz),
-            orientation=self._default_orientation(),
+            orientation=orientation,
         )
+
+    def _publish_telemetry_from_ned(self, armed: bool) -> None:
+        kinematics = self._kinematics_from_ned()
+        with self._telemetry_lock:
+            self._telemetry = _Telemetry(
+                state=_MultirotorState(kinematics_estimated=kinematics),
+                armed=armed,
+            )
+            self._state_ready_evt.set()
 
     def confirmConnection(self) -> None:
         self._mav = self._connection_factory(
@@ -753,53 +760,45 @@ class PymavlinkFlightClient:
             except Exception:
                 continue
 
+    def _armed_from_latest_telemetry(self) -> bool:
+        previous = self._get_latest_telemetry()
+        return previous.armed if previous is not None else False
+
     def _handle_attitude(self, message: Any) -> None:
         self._attitude_bridge.on_message(message)
         self._ned_ingest.on_attitude(message)
         if self._local_tracker is not None:
-            roll = float(getattr(message, "roll", 0.0))
-            pitch = float(getattr(message, "pitch", 0.0))
-            yaw = float(getattr(message, "yaw", 0.0))
-            self._local_tracker.on_attitude(roll, pitch, yaw)
-        previous = self._get_latest_telemetry()
-        armed = previous.armed if previous is not None else False
-        with self._telemetry_lock:
-            self._telemetry = _Telemetry(
-                state=_MultirotorState(kinematics_estimated=self._kinematics_from_ned()),
-                armed=armed,
+            self._local_tracker.on_attitude(
+                float(getattr(message, "roll", 0.0)),
+                float(getattr(message, "pitch", 0.0)),
+                float(getattr(message, "yaw", 0.0)),
             )
-            self._state_ready_evt.set()
+        self._publish_telemetry_from_ned(self._armed_from_latest_telemetry())
 
     def _handle_local_position(self, message: Any) -> None:
         self._ned_ingest.on_local_position_ned(message)
-        previous = self._get_latest_telemetry()
-        armed = previous.armed if previous is not None else False
-        with self._telemetry_lock:
-            self._telemetry = _Telemetry(
-                state=_MultirotorState(kinematics_estimated=self._kinematics_from_ned()),
-                armed=armed,
-            )
-            self._state_ready_evt.set()
+        armed = self._armed_from_latest_telemetry()
+        self._publish_telemetry_from_ned(armed)
+        time_boot_ms = int(getattr(message, "time_boot_ms", 0))
+        x = float(message.x)
+        y = float(message.y)
+        z = float(message.z)
+        vx = float(message.vx)
+        vy = float(message.vy)
+        vz = float(message.vz)
         if self._position_trace is not None:
             self._position_trace.record(
-                int(getattr(message, "time_boot_ms", 0)),
-                float(message.x),
-                float(message.y),
-                float(message.z),
-                float(message.vx),
-                float(message.vy),
-                float(message.vz),
-                time.monotonic_ns(),
+                time_boot_ms, x, y, z, vx, vy, vz, time.monotonic_ns()
             )
         if self._local_tracker is not None:
             self._local_tracker.on_local_position(
-                time_boot_ms=int(getattr(message, "time_boot_ms", 0)),
-                x=float(message.x),
-                y=float(message.y),
-                z=float(message.z),
-                vx=float(message.vx),
-                vy=float(message.vy),
-                vz=float(message.vz),
+                time_boot_ms=time_boot_ms,
+                x=x,
+                y=y,
+                z=z,
+                vx=vx,
+                vy=vy,
+                vz=vz,
                 armed=armed,
             )
 

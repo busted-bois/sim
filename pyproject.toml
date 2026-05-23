@@ -44,6 +44,7 @@ sim-timesync-smoke = "src.sim_launch:main_timesync_smoke"
 attitude-smoke = "src.attitude_smoke:main"
 sim-attitude-smoke = "src.sim_launch:main_attitude_smoke"
 tracking-smoke = "src.tracking_smoke:main"
+exploration-smoke = "scripts.smoke_exploration:main"
 
 [dependency-groups]
 dev = [

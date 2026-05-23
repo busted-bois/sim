@@ -32,6 +32,7 @@ def main() -> None:
     )
     client = PymavlinkFlightClient(
         endpoint=endpoint,
+        sim_config=getattr(config, "_raw", config),
         local_tracker=tracker,
         highres_imu_enabled=True,
         highres_imu_request_hz=float(mav_cfg.get("highres_imu", {}).get("request_hz", 120.0)),
