@@ -3,6 +3,7 @@ import numpy as np
 
 from src.vision.depth_perception import DepthEstimator
 from src.vision.feed import VisionFrame
+from src.vision.yolo_detector import Detection, YoloDetector
 
 _depth_estimator: DepthEstimator | None = None
 
@@ -247,3 +248,30 @@ def mean_rgb_summary(image_rgb: np.ndarray) -> str:
         return ""
     m = cv2.mean(image_rgb)
     return f" cv_mean=({m[0]:.1f},{m[1]:.1f},{m[2]:.1f})"
+
+# ---------------------------------------------------------------------------
+# YOLO object detection (lazy singleton)
+# ---------------------------------------------------------------------------
+
+_yolo_detectors: dict[tuple[str, float, tuple[str, ...] | None], YoloDetector] = {}
+
+
+def get_yolo_detections(
+    frame: VisionFrame,
+    model_path: str | None = None,
+    confidence: float = 0.5,
+    classes: list[str] | None = None,
+) -> list[Detection]:
+    """Run YOLO on *frame* and return detections sorted by size (largest first)."""
+    resolved_model_path = model_path or "models/yolov8n.pt"
+    class_key = tuple(classes) if classes else None
+    detector_key = (resolved_model_path, float(confidence), class_key)
+    detector = _yolo_detectors.get(detector_key)
+    if detector is None:
+        detector = YoloDetector(
+            model_path=resolved_model_path,
+            confidence=confidence,
+            classes=classes,
+        )
+        _yolo_detectors[detector_key] = detector
+    return detector.detect(frame)

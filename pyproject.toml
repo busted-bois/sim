@@ -18,6 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+yolo = ["ultralytics>=8.0,<9"]
 mavlink = ["pymavlink>=2.4.49"]
 manual = [
     "pyvjoy",

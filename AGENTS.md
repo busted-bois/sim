@@ -110,6 +110,7 @@ Auto-discovered from `src/control/algorithms/*.py`:
 | `opencv_landing` | `opencv_landing.py` | Vision-guided landing |
 | `vision_guided_control` | `vision_guided_control.py` | Red-circle detector pursuit |
 | `autonomous_explore` | `autonomous_explore.py` | Depth-based obstacle avoidance + ring/target pursuit |
+| `yolo_explore` | `yolo_explore.py` | YOLO gate/target pursuit (`uv sync --extra yolo`, `models/yolov8n.pt`) |
 
 Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonomous_explore"`.
 
