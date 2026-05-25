@@ -205,6 +205,12 @@
     "direction_labels": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"],
     "mavlink_setpoint_demo_enabled": false
   },
+  "pathfinding_explore": {
+    "speed_ms": 2.0,
+    "waypoint_tolerance_m": 0.5,
+    "connectivity": 26,
+    "start": [0, 0, -3]
+  },
   "mavlink_jitter": {
     "duration_s": 60,
     "move_duration_s": 2.0,
