@@ -1,87 +1,83 @@
-# UE 5.4 + custom course (any map other than BlocksV2)
+# UE 5.4 + custom course (swap via `uv run sim map=<course>`)
 
-Use this when the user wants a course other than the default `BlocksV2` — for example a square-gate ring course, an obstacle course, or any custom map asset in the same Colosseum project.
+Course swapping in this repo is a **deterministic script**, not an AI edit. Do **not** hand-edit `map_asset` — the launcher stages the chosen course's actors into the map for you. Your job here is to pick the right course token and run one command.
 
-This file covers **what changes** vs the default. For everything else — prereqs, launch, verification — follow the matching transport reference:
+> **Prerequisite — the course system must be present on your branch.**
+> This runbook uses `src/course_sync.py` and the launcher's `map=` override, which originated on the `babblewall` branch and is **not yet merged** into `main` / `sim_config_ai_skill`. Verify before relying on it:
+>
+> ```powershell
+> Test-Path src\course_sync.py            # must be True
+> Get-ChildItem course -Directory -Name   # lists candidate course tokens
+> ```
+>
+> If `course_sync.py` is missing, the course system hasn't landed yet — that merge is a tracked dependency, not something to reinvent in this skill. Until then, only the maps already cooked into the uproject are available (see [`ue54-blocksv2-airsim.md`](ue54-blocksv2-airsim.md)).
 
-- Transport = `airsim` → also read [`ue54-blocksv2-airsim.md`](ue54-blocksv2-airsim.md)
-- Transport = `mavlink` → also read [`ue54-blocksv2-mavlink.md`](ue54-blocksv2-mavlink.md)
+## How it works
 
-## What the user needs to tell you
+Every course reuses the **same** UE map, `FlyingExampleMapV2`. A "course" is just a set of External Actors (gates, obstacles) stored at `course/<token>/FlyingExampleMapV2/`. On launch, `course_sync.py` copies the chosen course's actors into the uproject's `Content/__ExternalActors__/FlyingCPP/Maps/FlyingExampleMapV2`, replacing whatever was there. So `map_name` / `map_asset` never change — only the actor content does. This is why a course swap is mechanical and needs no AI.
 
-To configure a custom course you need **two pieces** of information:
-
-1. **`map_name`** — the short name UE uses to identify the level (e.g. `SquareGateCourse`). Used by the launcher for diagnostics and trace overlays.
-2. **`map_asset`** — the full UE asset path to the umap, of the form `/Game/<Folder>/Maps/<MapName>` (e.g. `/Game/FlyingCPP/Maps/SquareGateCourse`). This is what UE actually opens.
-
-If the user gives you only one, ask for the other. Both must match what the `.uproject` contains. To list available maps:
+## Swap the course (one command)
 
 ```powershell
-# from the .uproject's Content/ directory:
-Get-ChildItem -Path . -Filter *.umap -Recurse | Select-Object -Expand FullName
+uv run sim map=<course>
 ```
 
-## `sim.config.json` deltas
+- `map=` overrides `sim.config.json`; if repeated, last wins; `map=none` or empty = no staging (keep current).
+- The token must match a folder under `course/` (matched case-insensitively) **and** that folder must be in the extracted layout `course/<token>/FlyingExampleMapV2/...`.
 
-Edit `sim.config.json` → `"simulator"`:
+### Available course tokens (as of the `babblewall` work)
+
+| token   | course                     | status                                                                 |
+| ------- | -------------------------- | ---------------------------------------------------------------------- |
+| `main`  | stock BlocksV2 (restore)   | ready — extracted layout                                               |
+| `wall`  | wall course                | ready — extracted layout                                               |
+| `UE5.4` | UE 5.4 square-gate course  | **not ready** — still `course/UE5.4/Content.zip`; extract to `course/UE5.4/FlyingExampleMapV2/` first |
+| `UE416` | UE 4.16 course content     | **not ready** — still `Content.zip`; needs extraction                  |
+
+A token only works if `course/<token>/FlyingExampleMapV2/` exists. Run `Get-ChildItem course -Directory -Name` for the live list on your checkout; confirm the subfolder with `Test-Path course\<token>\FlyingExampleMapV2`.
+
+Examples:
+
+```powershell
+uv run sim map=wall    # wall course (ready)
+uv run sim map=main    # restore stock BlocksV2
+```
+
+## Persisting the choice in config
+
+To avoid passing `map=` every launch, set it in `sim.config.json` → `simulator.map`:
 
 ```json
-{
-  "simulator": {
-    "map_name": "SquareGateCourse",
-    "map_asset": "/Game/FlyingCPP/Maps/SquareGateCourse"
-  }
-}
+{ "simulator": { "map": "wall" } }
 ```
 
-Optional but recommended for any gate-style course:
+`"none"` (the default) disables staging. A CLI `map=` arg overrides this for that run.
 
-```json
-{
-  "simulator": {
-    "gate_search_tokens": "gate,ring,torus,hoop,square"
-  }
-}
-```
+## MAVLink + custom course
 
-`gate_search_tokens` is a comma-separated list of substrings the runtime uses to identify gate actors in the UE world via AirSim's scene-actor RPC. Add the dominant geometry word for the course (e.g. `square`, `ring`).
+`course_sync` runs on the `uv run sim` path. The staged actors are a real file copy that persists in the uproject, so for a MAVLink run on a custom course: stage once with `uv run sim map=<course>` (Ctrl+C once UE has loaded), then launch `uv run mavlink-all`. Both transports open the same `FlyingExampleMapV2`, now carrying the staged course. (Wiring `map=` directly into the MAVLink launch path is a possible follow-up — it is not there today.)
 
-Course-specific waypoints, if the user has them, go in the top-level `"waypoints"` array (NED, negative z = above ground):
+## Adding a new course
 
-```json
-{
-  "waypoints": [
-    { "x": 5.0, "y": 0.0, "z": -3.0 },
-    { "x": 10.0, "y": 5.0, "z": -3.0 }
-  ]
-}
-```
+1. Export the course's External Actors and place them at `course/<name>/FlyingExampleMapV2/<actors>` (an extra nested `FlyingExampleMapV2/FlyingExampleMapV2/` level is also accepted — UE export quirk handled by `course_sync._flying_map_source_root`).
+2. `uv run sim map=<name>` stages and launches it.
 
-## What stays the same
+No new file in **this skill** is needed for a new course — the course content lives under `course/` at the repo root, and this one runbook covers every swap.
 
-- `physics_update_hz: 120` and `specification_profile: official_conformant` — keep these.
-- `airsim_port: 41451` — keep.
-- The `~/Documents/AirSim/settings.json` shape is determined by **transport**, not by course. See [`airsim-settings.md`](airsim-settings.md).
+## gate_search_tokens
 
-## Launch
-
-Same as the base transport reference:
-
-- Transport = `airsim` → `uv run sim`
-- Transport = `mavlink` → `uv run mavlink-all`
-
-The launcher reads `simulator.map_name` / `simulator.map_asset` and passes them to UE as command-line args, so no extra step is needed.
+If the new course's gate actors use different names, update `sim.config.json` → `simulator.gate_search_tokens` (comma-separated substrings the runtime matches against scene actors via the AirSim scene-actor RPC), e.g. `"gate,ring,torus,hoop,square"`.
 
 ## Verification
 
-Standard transport-specific verification (see the base references). Course-specific:
-
-- UE viewport shows the expected level geometry, not BlocksV2.
-- For autonomous runs with vision, gates appear in the FPV feed; if `pursue_blue_rings` or `pursue_red_targets` is enabled in `sim.config.json` → `autonomous_explore`, the drone reacts to them.
-- Trace overlay (`simulator.trace.enabled: true`) draws the flight path on the actual course terrain.
+- `uv run sim map=<course>` prints `Course map "<token>": replaced FlyingExampleMapV2 (N files) -> ...`.
+- The UE viewport shows the new course geometry, not stock BlocksV2.
+- `uv run sim map=main` restores stock and the geometry reverts — proves the swap is real.
 
 ## Common pitfalls
 
-- **`Failed to load map: /Game/.../SquareGateCourse`** — the asset path is wrong or the map isn't cooked. Open the project in the UE editor once to verify the path; the asset browser shows the canonical path under "Copy Reference".
-- **Map loads but drone spawns inside geometry** — the `pawn_asset`'s default spawn transform doesn't match this course. Either move the player start in UE, or override the spawn pose via AirSim `settings.json`'s `Vehicles.<name>.X/Y/Z`.
-- **`gate_search_tokens` finds nothing** — the actors in this course don't include any of the tokens in their names. Open the UE outliner and add a matching substring, or change the tokens to match what's there.
+- **`map=<x>: no matching folder under course/`** — token doesn't match a `course/` subfolder. Run `Get-ChildItem course -Directory -Name` for valid tokens.
+- **`Course map "<x>" has no FlyingExampleMapV2 folder`** — the token exists but is still a `Content.zip` (e.g. `UE5.4`, `UE416`). Extract it to `course/<x>/FlyingExampleMapV2/` first.
+- **`course_sync safety: refuse to delete...`** — destination isn't the expected `FlyingExampleMapV2` folder inside the uproject; check `PROJECT_PATH` points at the real `.uproject`.
+- **Course staged but UE still shows old geometry** — UE was already running; staging happens at launch, before UE opens. Restart UE.
+- **`PROJECT_PATH is unset` warning, sync skipped** — set `PROJECT_PATH` in `.env.local` (see [`ue54-blocksv2-airsim.md`](ue54-blocksv2-airsim.md)).

@@ -14,3 +14,7 @@ logs/
 .opencode*
 
 .codex_worktrees/
+
+# Local-only junction: .claude/skills -> .agents/skills (Claude Code skill discovery).
+# Not committed; pending a cross-platform decision for sharing skills with teammates.
+.claude/skills/
