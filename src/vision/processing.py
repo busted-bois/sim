@@ -253,7 +253,7 @@ def mean_rgb_summary(image_rgb: np.ndarray) -> str:
 # YOLO object detection (lazy singleton)
 # ---------------------------------------------------------------------------
 
-_yolo_detector: YoloDetector | None = None
+_yolo_detectors: dict[tuple[str, float, tuple[str, ...] | None], YoloDetector] = {}
 
 
 def get_yolo_detections(
@@ -263,11 +263,15 @@ def get_yolo_detections(
     classes: list[str] | None = None,
 ) -> list[Detection]:
     """Run YOLO on *frame* and return detections sorted by size (largest first)."""
-    global _yolo_detector
-    if _yolo_detector is None:
-        _yolo_detector = YoloDetector(
-            model_path=model_path or "models/yolov8n.pt",
+    resolved_model_path = model_path or "models/yolov8n.pt"
+    class_key = tuple(classes) if classes else None
+    detector_key = (resolved_model_path, float(confidence), class_key)
+    detector = _yolo_detectors.get(detector_key)
+    if detector is None:
+        detector = YoloDetector(
+            model_path=resolved_model_path,
             confidence=confidence,
             classes=classes,
         )
-    return _yolo_detector.detect(frame)
+        _yolo_detectors[detector_key] = detector
+    return detector.detect(frame)
