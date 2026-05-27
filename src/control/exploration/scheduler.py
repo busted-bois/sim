@@ -286,8 +286,11 @@ class ExplorationScheduler:
         label = f"ALT_TRANSITION z_hold={-self._z_hold_ned:.1f}"
         if abs(inp.z_ned - self._z_hold_ned) <= _ALT_TOL_M:
             self._mode = ExplorationMode.WANDER
+        creep = self._s.panorama_creep_speed_ms
+        if creep <= 0.0:
+            creep = 0.4
         return WanderTickOutput(
-            fwd_speed=0.0,
+            fwd_speed=creep,
             yaw_rate_deg_s=0.0,
             vz=vz,
             mode=ExplorationMode.ALT_TRANSITION,

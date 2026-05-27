@@ -263,7 +263,7 @@
       "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],
       "auto_discover_endpoints": true,
       "state_request_hz": 20,
-      "guided_custom_mode": 4,
+      "guided_custom_mode": 6,
       "takeoff_altitude_m": 5.0,
       "source_system": 255,
       "source_component": 1,

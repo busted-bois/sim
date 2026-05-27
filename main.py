@@ -7,7 +7,7 @@ from src.config import apply_low_end_overrides, load_config, simulator_endpoint
 from src.control.algorithms import get_algorithm, list_algorithms
 from src.control.flight_client import AirSimAdapter
 from src.control.highres_imu import format_highres_imu_health
-from src.control.mavlink_client import PymavlinkFlightClient
+from src.control.mavlink_client import PX4_CUSTOM_MAIN_MODE_OFFBOARD, PymavlinkFlightClient
 from src.control.ned_environment import format_ned_environment_health
 from src.control.primitives import (
     apply_trace_style,
@@ -142,7 +142,9 @@ def main() -> None:
             endpoint=endpoint,
             command_rate_hz=float(config.get("control", {}).get("command_rate_hz", 50.0)),
             state_request_hz=float(mav_cfg.get("state_request_hz", 20.0)),
-            guided_custom_mode=int(mav_cfg.get("guided_custom_mode", 4)),
+            guided_custom_mode=int(
+                mav_cfg.get("guided_custom_mode", PX4_CUSTOM_MAIN_MODE_OFFBOARD)
+            ),
             takeoff_altitude_m=float(mav_cfg.get("takeoff_altitude_m", 5.0)),
             land_descent_speed_ms=float(config.get("landing", {}).get("descent_speed_ms", 2.0)),
             source_system=int(mav_cfg.get("source_system", 255)),
@@ -182,19 +184,34 @@ def main() -> None:
             def tracker_cb(image_rgb, sim_time_ns: int) -> None:
                 local_tracker.on_video_frame(image_rgb, sim_time_ns)
 
-        udp_video_enabled = bool(
-            config.get("vision", {}).get("udp_video", {}).get("enabled", False)
-        )
-        allow_airsim_vision = (
-            bool(config.get("vision", {}).get("enabled", False))
-            and os.environ.get("AIGP_ENABLE_AIRSIM_VISION", "").strip() == "1"
-        )
-        if udp_video_enabled or local_tracker is not None:
-            vision_feed = vision_feed_from_config(config, tracker_callback=tracker_cb)
-        elif allow_airsim_vision:
-            airsim_client = airsim.MultirotorClient(ip=host, port=port)
-            vision_feed = VisionFeed(airsim_client, config.get("vision", {}))
+        vision_cfg = config.get("vision", {})
+        vision_enabled = bool(vision_cfg.get("enabled", False))
+        udp_video_enabled = bool(vision_cfg.get("udp_video", {}).get("enabled", False))
+        airsim_vision_client: airsim.MultirotorClient | None = None
+        if vision_enabled and not udp_video_enabled:
+            try:
+                airsim_vision_client = airsim.MultirotorClient(ip=host, port=port, timeout_value=5)
+                airsim_vision_client.confirmConnection()
+            except Exception as exc:
+                print(
+                    f"Warning: AirSim RPC vision unavailable ({exc}); "
+                    "depth/obstacle avoidance disabled for this session.",
+                    file=sys.stderr,
+                )
+                airsim_vision_client = None
+        if vision_enabled and (udp_video_enabled or airsim_vision_client is not None):
+            vision_feed = vision_feed_from_config(
+                config,
+                tracker_callback=tracker_cb,
+                airsim_client=airsim_vision_client,
+            )
         else:
+            if vision_enabled:
+                print(
+                    "Warning: vision.enabled but no capture backend "
+                    "(enable udp_video or ensure AirSim RPC is up).",
+                    file=sys.stderr,
+                )
             config.setdefault("vision", {})["enabled"] = False
     else:
         airsim_client = airsim.MultirotorClient(ip=host, port=port)
@@ -203,7 +220,7 @@ def main() -> None:
             command_rate_hz=float(config.get("control", {}).get("command_rate_hz", 50.0)),
             sim_config=getattr(config, "_raw", config),
         )
-        vision_feed = VisionFeed(airsim_client, config.get("vision", {}))
+        vision_feed = vision_feed_from_config(config, airsim_client=airsim_client)
 
     explore_cfg = config.get("autonomous_explore", {}).get("exploration", {})
     explore_slam_cfg = explore_cfg.get("slam", {})

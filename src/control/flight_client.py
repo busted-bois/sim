@@ -125,6 +125,14 @@ def build_velocity_type_mask(*, force_set: bool = True) -> int:
     )
 
 
+def build_velocity_yaw_rate_type_mask(*, force_set: bool = True) -> int:
+    return build_position_target_type_mask(
+        use_velocity=True,
+        use_yaw_rate=True,
+        force_set=force_set,
+    )
+
+
 def build_position_type_mask() -> int:
     return build_position_target_type_mask(use_position=True)
 
