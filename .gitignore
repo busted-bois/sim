@@ -12,5 +12,6 @@ opensrc/
 logs/
 *.log
 .opencode*
-
+.claude*
+.cursor/
 .codex_worktrees/

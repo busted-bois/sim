@@ -122,6 +122,7 @@ From a fresh Cursor session, use this exact sequence.
 | **Softer landing** | `uv run sim-very-soft` uses the gentle landing profile. |
 | **Landing telemetry** | With `landing.telemetry_log.enabled` true in `sim.config.json`, each run writes `logs/landing_telemetry.csv` with altitude, vertical velocity, command, IMU acceleration/gyro, IMU health status, and IMU sample age during the landing phase for tuning. |
 | **MAVLink IMU validation** | Use `uv run highres-imu-smoke` against an already-running MAVLink endpoint, or `uv run sim-highres-imu-smoke` to launch the simulator first and then probe `HIGHRES_IMU`. |
+| **Regenerate simulator snapshot** | `uv run extract-simulator-specs`, then `uv run verify-sim-physics-metadata` and `uv run verify-sim-gate-reference` (or `uv run preflight`) before committing `docs/simulator_specs.json`. See `docs/simulator_specs_pr_checklist.md`. |
 
 ### Common errors
 

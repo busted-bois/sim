@@ -8,7 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.competition_specs import (
+    competition_validation_from_config,
+    load_competition_specs,
+    resolve_competition_spec_path,
+)
 from src.config import load_config
+from src.simulator_gate_selection import gate_reference_opening_ok
+from src.vision.intrinsics import official_resolution, official_resolution_list
 
 ROOT = Path(__file__).resolve().parent.parent
 UNREAL_DUMP_SCRIPT = ROOT / "scripts" / "unreal_dump_simulator_specs.py"
@@ -62,13 +69,14 @@ def conformity_fingerprint_payload(config: dict[str, Any] | Any) -> dict[str, An
     control_cfg = raw.get("control", {})
     latency_cfg = control_cfg.get("latency_tuning", {})
     camera_cfg = raw.get("camera", {})
-    resolution = vision_cfg.get("resolution", [640, 360])
+    resolution = vision_cfg.get("resolution", official_resolution_list())
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
         normalized_resolution = [int(resolution[0]), int(resolution[1])]
     else:
+        width, height = official_resolution()
         normalized_resolution = [
-            int(vision_cfg.get("width", 640)),
-            int(vision_cfg.get("height", 360)),
+            int(vision_cfg.get("width", width)),
+            int(vision_cfg.get("height", height)),
         ]
     pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
     normalized_pose_offset = [float(value) for value in pose_offset[:3]]
@@ -128,10 +136,11 @@ def physics_snapshot_matches_120hz(physics: Any) -> bool:
 def vision_resolution_from_config(raw: dict[str, Any] | Any) -> list[int]:
     data = _to_plain_mapping(raw)
     vision_cfg = data.get("vision", {})
-    resolution = vision_cfg.get("resolution", [640, 360])
+    resolution = vision_cfg.get("resolution", official_resolution_list())
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
         return [int(resolution[0]), int(resolution[1])]
-    return [int(vision_cfg.get("width", 640)), int(vision_cfg.get("height", 360))]
+    width, height = official_resolution()
+    return [int(vision_cfg.get("width", width)), int(vision_cfg.get("height", height))]
 
 
 def camera_pose_offset_from_config(raw: dict[str, Any] | Any) -> list[float] | None:
@@ -231,6 +240,10 @@ def specification_snapshot_validation(
             "Simulator specification snapshot has no runtime camera metadata; "
             "re-run uv run extract-simulator-specs to record it"
         )
+    comp_errs, comp_passes, comp_warns = competition_validation_from_config(config, spec_snapshot)
+    errors.extend(comp_errs)
+    passes.extend(comp_passes)
+    warnings.extend(comp_warns)
     return errors, passes, warnings
 
 
@@ -308,6 +321,9 @@ def extract_specification_snapshot(config: dict[str, Any]) -> Path:
     env["CODEX_SIM_SPEC_PROJECT_PATH"] = _as_unreal_path(project_path)
     env["CODEX_SIM_SPEC_EXTRACTED_AT_UTC"] = datetime.now(timezone.utc).isoformat()
     env["CODEX_SIM_SPEC_CONFIG_SHA256"] = conformity_fingerprint(config)
+    opening, tolerance_m = _gate_opening_params_from_config(config)
+    env["CODEX_SIM_SPEC_GATE_OPENING_M"] = json.dumps(list(opening))
+    env["CODEX_SIM_SPEC_GATE_TOLERANCE_M"] = str(tolerance_m)
     fingerprint_payload = conformity_fingerprint_payload(config)
     env["CODEX_SIM_SPEC_CAMERA_RUNTIME"] = json.dumps(
         {
@@ -348,6 +364,13 @@ def extract_specification_snapshot(config: dict[str, Any]) -> Path:
         not snapshot.get("drone") or not snapshot.get("gate_reference")
     ):
         raise subprocess.CalledProcessError(completed.returncode, completed.args)
+    opening, tolerance_m = _gate_opening_params_from_config(config)
+    assert_gate_reference_in_snapshot(
+        snapshot,
+        opening=opening,
+        tolerance_m=tolerance_m,
+        spec_path=output_path,
+    )
     return output_path
 
 
@@ -355,6 +378,36 @@ def main() -> None:
     config = load_config()
     output_path = extract_specification_snapshot(config)
     print(f"Simulator specification snapshot written to {output_path}")
+
+
+def _gate_opening_params_from_config(
+    config: dict[str, Any],
+) -> tuple[tuple[float, float], float]:
+    comp_cfg = config.get("competition", {})
+    comp_path = resolve_competition_spec_path(config)
+    if comp_path is not None and comp_path.is_file():
+        gate = load_competition_specs(comp_path).gate_opening
+        return (gate.width_m, gate.length_m), float(comp_cfg.get("dimension_tolerance_m", 0.15))
+    return (1.5, 1.5), 0.15
+
+
+def assert_gate_reference_in_snapshot(
+    spec: dict[str, Any],
+    *,
+    opening: tuple[float, float],
+    tolerance_m: float,
+    spec_path: Path | str,
+) -> None:
+    dims = spec.get("gate_reference", {}).get("dimensions_m", [])
+    if gate_reference_opening_ok(dims, opening, tolerance_m):
+        return
+    width = float(dims[0]) if len(dims) >= 1 else 0.0
+    height = float(dims[1]) if len(dims) >= 2 else 0.0
+    raise SystemExit(
+        f"Snapshot at {spec_path} gate_reference opening {width:.3f}x{height:.3f} m "
+        f"does not match official {opening[0]:.2f}x{opening[1]:.2f} m "
+        f"within ±{tolerance_m:.2f} m."
+    )
 
 
 def main_verify_physics_metadata() -> None:
@@ -373,6 +426,26 @@ def main_verify_physics_metadata() -> None:
     print(
         f"OK: {path} documents 120 Hz physics (UE step not exposed on RPC). "
         "Run: uv run extract-simulator-specs after Unreal edits."
+    )
+
+
+def main_verify_gate_reference() -> None:
+    _load_env_local()
+    cfg = load_config()
+    path = resolve_specification_path(cfg)
+    if path is None or not path.is_file():
+        raise SystemExit("simulator.specification_path missing or file not found.")
+    spec = json.loads(path.read_text(encoding="utf-8"))
+    opening, tolerance_m = _gate_opening_params_from_config(cfg)
+    assert_gate_reference_in_snapshot(
+        spec,
+        opening=opening,
+        tolerance_m=tolerance_m,
+        spec_path=path,
+    )
+    print(
+        f"OK: {path} gate_reference opening matches official "
+        f"{opening[0]:.2f}x{opening[1]:.2f} m within ±{tolerance_m:.2f} m."
     )
 
 

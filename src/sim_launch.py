@@ -98,7 +98,7 @@ def _ensure_camera_settings(
     transport: str,
     use_vjoy: bool = False,
 ) -> None:
-    from src.vision.intrinsics import horizontal_fov_degrees
+    from src.vision.intrinsics import horizontal_fov_degrees, official_resolution
 
     settings_path = _airsim_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,13 +148,14 @@ def _ensure_camera_settings(
     camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
     camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
     camera_name = str(vision_cfg.get("camera_name", "0"))
-    resolution = vision_cfg.get("resolution", [640, 360])
+    default_width, default_height = official_resolution()
+    resolution = vision_cfg.get("resolution", [default_width, default_height])
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
         capture_width = int(resolution[0])
         capture_height = int(resolution[1])
     else:
-        capture_width = int(vision_cfg.get("width", 640))
-        capture_height = int(vision_cfg.get("height", 360))
+        capture_width = int(vision_cfg.get("width", default_width))
+        capture_height = int(vision_cfg.get("height", default_height))
     front_camera_settings = {
         "X": float(pose_offset[0]),
         "Y": float(pose_offset[1]),

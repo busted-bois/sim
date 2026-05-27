@@ -1,6 +1,11 @@
 pre-commit:
   jobs:
+    - name: check merge conflict markers
+      run: uv run check-merge-markers
     - name: ruff check
       glob: "*.{py,toml}"
       run: uvx ruff check --fix {staged_files}
       stage_fixed: true
+    - name: verify simulator gate snapshot
+      glob: "docs/simulator_specs.json"
+      run: uv run verify-sim-gate-reference

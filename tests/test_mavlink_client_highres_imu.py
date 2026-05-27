@@ -1,8 +1,10 @@
 import time
 import unittest
+from types import SimpleNamespace
 
 from pymavlink import mavutil
 
+from src.control.flight_client import AirSimAdapter
 from src.control.highres_imu import (
     HIGHRES_IMU_UPDATED_XACC,
     HighresImuSample,
@@ -213,6 +215,41 @@ class PymavlinkFlightClientHighresImuTests(unittest.TestCase):
                 return client.getHighresImu()
             time.sleep(0.01)
         return client.getHighresImu()
+
+
+class AirSimAdapterHighresImuTests(unittest.TestCase):
+    def test_adapter_maps_airsim_sensor_calls_to_highres_imu_shape(self) -> None:
+        fake_client = SimpleNamespace(
+            getImuData=lambda: SimpleNamespace(
+                time_stamp=123,
+                angular_velocity=SimpleNamespace(x_val=0.1, y_val=0.2, z_val=0.3),
+                linear_acceleration=SimpleNamespace(x_val=1.1, y_val=1.2, z_val=1.3),
+            ),
+            getMagnetometerData=lambda: SimpleNamespace(
+                magnetic_field_body=SimpleNamespace(x_val=0.01, y_val=0.02, z_val=0.03)
+            ),
+            getBarometerData=lambda: SimpleNamespace(
+                pressure=1012.5,
+                altitude=88.0,
+                qnh=25.0,
+            ),
+        )
+        adapter = AirSimAdapter(fake_client)
+
+        sample = adapter.getHighresImu()
+        health = adapter.getHighresImuHealth()
+
+        self.assertIsNotNone(sample)
+        assert sample is not None
+        self.assertEqual(sample.transport, "airsim")
+        self.assertEqual(sample.time_usec, 123)
+        self.assertAlmostEqual(sample.xacc or 0.0, 1.1)
+        self.assertAlmostEqual(sample.zgyro or 0.0, 0.3)
+        self.assertAlmostEqual(sample.abs_pressure or 0.0, 1012.5)
+        self.assertIsNone(sample.temperature)
+        self.assertIsNotNone(health)
+        assert health is not None
+        self.assertEqual(health.status, "ok")
 
 
 if __name__ == "__main__":

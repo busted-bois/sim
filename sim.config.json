@@ -1,5 +1,5 @@
 {
-  "algorithm": "mavlink_jitter",
+  "algorithm": "autonomous_explore",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -22,10 +22,15 @@
       "thickness": 4.0
     }
   },
+  "competition": {
+    "spec_path": "docs/competition_specs.json",
+    "validate_against_snapshot": true,
+    "dimension_tolerance_m": 0.15,
+    "validate_drone_chassis_in_snapshot": false
+  },
   "vision": {
     "enabled": true,
     "camera_name": "0",
-"pitch_up_degrees": -20,
     "fps": 30,
     "min_fps": 30,
     "fov_degrees": 90,
@@ -205,7 +210,7 @@
     "random_seed": 42
   },
   "control": {
-    "transport": "mavlink",
+    "transport": "auto",
     "mavlink": {
       "endpoint": "udpin:0.0.0.0:14550",
       "endpoint_candidates": [14540, 14550, 14560, 14580, 5760, 5762],

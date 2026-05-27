@@ -12,6 +12,17 @@ FX_PX: Final[float] = 320.0
 FY_PX: Final[float] = 320.0
 CX_PX: Final[float] = 320.0
 CY_PX: Final[float] = 180.0
+OFFICIAL_PHYSICS_HZ: Final[float] = 120.0
+OFFICIAL_VISION_FPS: Final[float] = 30.0
+OFFICIAL_CAMERA_PITCH_UP_DEG: Final[float] = 20.0
+
+
+def official_resolution() -> tuple[int, int]:
+    return WIDTH_PX, HEIGHT_PX
+
+
+def official_resolution_list() -> list[int]:
+    return [WIDTH_PX, HEIGHT_PX]
 
 
 def horizontal_fov_degrees() -> float:

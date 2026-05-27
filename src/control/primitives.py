@@ -2,17 +2,61 @@
 
 from __future__ import annotations
 
-import errno
+import math
 import os
 import sys
-import threading
 import time
 from typing import TYPE_CHECKING
+
+import airsim
+from msgpackrpc.error import RPCError
 
 if TYPE_CHECKING:
     from src.config import Config
     from src.control.flight_client import FlightClient
     from src.landing_telemetry import LandingTelemetrySampler
+
+
+def set_front_camera_pose(client: FlightClient, config: Config | dict) -> None:
+    vision_cfg = config.get("vision", {})
+    camera_name = str(vision_cfg.get("camera_name", "0"))
+    cam_cfg = config.get("camera", {})
+    pose_offset = tuple(cam_cfg.get("pose_offset", [0.35, 0.0, -0.05]))
+    pitch_up_degrees = float(cam_cfg.get("pitch_up_degrees", 20.0))
+    roll_degrees = float(cam_cfg.get("roll_degrees", 0.0))
+    yaw_degrees = float(cam_cfg.get("yaw_degrees", 0.0))
+    pitch_rad = math.radians(-pitch_up_degrees)
+    front_pose = airsim.Pose(
+        airsim.Vector3r(pose_offset[0], pose_offset[1], pose_offset[2]),
+        _airsim_quaternion_from_euler(
+            math.radians(roll_degrees),
+            pitch_rad,
+            math.radians(yaw_degrees),
+        ),
+    )
+    try:
+        client.simSetCameraPose(camera_name, front_pose)
+    except Exception as exc:
+        print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
+
+
+def _airsim_quaternion_from_euler(
+    roll_rad: float,
+    pitch_rad: float,
+    yaw_rad: float,
+) -> airsim.Quaternionr:
+    cr = math.cos(roll_rad / 2.0)
+    sr = math.sin(roll_rad / 2.0)
+    cp = math.cos(pitch_rad / 2.0)
+    sp = math.sin(pitch_rad / 2.0)
+    cy = math.cos(yaw_rad / 2.0)
+    sy = math.sin(yaw_rad / 2.0)
+    return airsim.Quaternionr(
+        cr * sp * cy + sr * cp * sy,
+        sr * cp * cy - cr * sp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
 
 
 def apply_trace_style(client: FlightClient, config: Config | dict) -> None:
@@ -39,9 +83,27 @@ def apply_trace_style(client: FlightClient, config: Config | dict) -> None:
 
 
 def suppress_api_cleanup_warning(exc: BaseException) -> bool:
-    """True when disarm/API cleanup failed because the connection is already gone."""
+    """True when disarm/API cleanup failed because the sim or socket is already gone."""
+    import errno
+
     if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
         return True
+    from msgpackrpc.error import RPCError, TransportError
+
+    if isinstance(exc, (RPCError, TransportError)):
+        msg = str(exc).lower()
+        return any(
+            token in msg
+            for token in (
+                "connection reset",
+                "connection aborted",
+                "broken pipe",
+                "forcibly closed",
+                "transport endpoint is not connected",
+                "not connected",
+                "failed to send request",
+            )
+        )
     if isinstance(exc, OSError):
         if getattr(exc, "winerror", None) in (10053, 10054):
             return True
@@ -51,6 +113,7 @@ def suppress_api_cleanup_warning(exc: BaseException) -> bool:
 
 
 def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
+    import threading
     import traceback
 
     error_holder: dict[str, BaseException] = {}
@@ -90,9 +153,9 @@ def run_algorithm_with_timeout(algo, client, timeout_seconds: float) -> None:
 
     if elapsed_s < 8.0:
         print(
-            f"Warning: algorithm reported completion in {elapsed_s:.1f}s -- much shorter than "
-            "a full attitude routine. If the drone barely moved, check that the simulation "
-            "is real-time, and watch for errors above.",
+            f"Warning: algorithm reported completion in {elapsed_s:.1f}s — much shorter than "
+            "a full attitude routine. If the drone barely moved, check Unreal is unpaused, "
+            "simulation is real-time, and watch for errors above.",
             file=sys.stderr,
         )
 
@@ -105,6 +168,33 @@ def takeoff_with_settle(
         try:
             client.takeoffAsync().join()
             return
+        except RPCError as exc:
+            msg = str(exc).lower()
+            if "already moving" in msg:
+                last_exc = exc
+                print(
+                    f"[{label}] Takeoff attempt {attempt}/{max_attempts} rejected: {exc}; "
+                    "re-settling...",
+                    file=sys.stderr,
+                )
+                try:
+                    client.cancelLastTask()
+                    client.armDisarm(False)
+                    time.sleep(0.3)
+                    client.armDisarm(True)
+                except Exception:
+                    pass
+                wait_until_stationary(client, timeout_s=6.0, velocity_eps_ms=0.03, label=label)
+                continue
+            last_exc = exc
+            if attempt == max_attempts:
+                raise
+            print(
+                f"[{label}] takeoff attempt {attempt}/{max_attempts} "
+                f"failed ({type(exc).__name__}: {exc}); retrying...",
+                file=sys.stderr,
+            )
+            time.sleep(1.5 * attempt)
         except Exception as exc:
             last_exc = exc
             if attempt == max_attempts:
@@ -158,14 +248,14 @@ def land_with_telemetry(
             time.sleep(min_hover_seconds)
 
         if profile == "very_soft":
-            print(f"[{label}] Hover settle complete -- starting final land.")
+            print(f"[{label}] Hover settle complete — starting final land.")
             if sampler:
                 sampler.set_command("land_async")
             client.landAsync().join()
             return
 
         print(
-            f"[{label}] Hover settle complete -- next: controlled descent if above final altitude, "
+            f"[{label}] Hover settle complete — next: controlled descent if above final altitude, "
             "then final land."
         )
         descent_speed_ms = max(0.5, float(landing_cfg.get("descent_speed_ms", 2.0)))
@@ -203,7 +293,12 @@ def wait_until_stationary(
     velocity_eps_ms: float = 0.05,
     label: str = "primitives",
 ) -> None:
-    """Block until drone velocity drops below velocity_eps_ms."""
+    """Block until drone velocity drops below velocity_eps_ms.
+
+    AirSim's takeoff RPC refuses if |velocity| is non-trivial — observed
+    rejection at 0.19 m/s. After client.reset() the drone usually settles
+    within ~0.5s, but residual motion from a prior run can take longer.
+    """
     deadline = time.monotonic() + timeout_s
     last_speed = float("inf")
     consecutive_quiet = 0
