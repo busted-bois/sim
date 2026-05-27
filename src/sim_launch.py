@@ -91,6 +91,65 @@ def _normalize_view_mode(view_mode: str) -> str:
     return "Fpv"
 
 
+def _camera_settings_from_config(config: dict) -> dict:
+    """Front-camera block for AirSim settings (conformant resolution/FOV from config)."""
+    from src.vision.intrinsics import horizontal_fov_degrees
+
+    vision_cfg = config.get("vision", {})
+    camera_cfg = config.get("camera", {})
+    pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
+    camera_pitch = -float(camera_cfg.get("pitch_up_degrees", 20.0))
+    camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
+    camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
+    camera_name = str(vision_cfg.get("camera_name", "0"))
+    resolution = vision_cfg.get("resolution", [640, 360])
+    if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
+        capture_width = int(resolution[0])
+        capture_height = int(resolution[1])
+    else:
+        capture_width = int(vision_cfg.get("width", 640))
+        capture_height = int(vision_cfg.get("height", 360))
+    front_camera_settings = {
+        "X": float(pose_offset[0]),
+        "Y": float(pose_offset[1]),
+        "Z": float(pose_offset[2]),
+        "Pitch": camera_pitch,
+        "Roll": camera_roll,
+        "Yaw": camera_yaw,
+        "CaptureSettings": [
+            {
+                "ImageType": 0,
+                "Width": capture_width,
+                "Height": capture_height,
+                "FOV_Degrees": float(vision_cfg.get("fov_degrees", horizontal_fov_degrees())),
+            }
+        ],
+    }
+    return {
+        camera_name: front_camera_settings,
+        "front_center": dict(front_camera_settings),
+    }
+
+
+def _px4_hil_vehicle_settings(config: dict, *, enable_trace: bool) -> dict:
+    """PX4 SITL vehicle: TCP HIL :4560 plus MAVLink bridge ports from sim.config.json."""
+    vehicle = json.loads(json.dumps(PX4_VEHICLE_TEMPLATE))
+    airsim_mav_cfg = config.get("control", {}).get("mavlink", {}).get("airsim_profile", {})
+    vehicle["LockStep"] = bool(airsim_mav_cfg.get("lock_step", True))
+    vehicle["ControlPortLocal"] = int(airsim_mav_cfg.get("control_port_local", 14540))
+    vehicle["ControlPortRemote"] = int(airsim_mav_cfg.get("control_port_remote", 14580))
+    qgc_host_ip = str(airsim_mav_cfg.get("qgc_host_ip", "127.0.0.1")).strip() or "127.0.0.1"
+    vehicle["QgcHostIp"] = qgc_host_ip
+    vehicle["QgcPort"] = int(airsim_mav_cfg.get("qgc_port", 14550))
+    vehicle["AllowAPIAlways"] = True
+    vehicle["UseTcp"] = True
+    vehicle["TcpPort"] = PX4_HIL_TCP_PORT
+    vehicle["Cameras"] = _camera_settings_from_config(config)
+    if enable_trace:
+        vehicle["EnableTrace"] = True
+    return vehicle
+
+
 def _ensure_camera_settings(
     airsim_port: int,
     view_mode: str,
@@ -101,8 +160,6 @@ def _ensure_camera_settings(
     transport: str,
     use_vjoy: bool = False,
 ) -> None:
-    from src.vision.intrinsics import horizontal_fov_degrees
-
     settings_path = _airsim_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -143,82 +200,19 @@ def _ensure_camera_settings(
 
     normalized_view_mode = _normalize_view_mode(view_mode)
     transport_l = str(transport).strip().lower()
-    vehicle_name = "Drone1"
-    vision_cfg = config.get("vision", {})
-    camera_cfg = config.get("camera", {})
-    pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
-    camera_pitch = -float(camera_cfg.get("pitch_up_degrees", 20.0))
-    camera_roll = float(camera_cfg.get("roll_degrees", 0.0))
-    camera_yaw = float(camera_cfg.get("yaw_degrees", 0.0))
-    camera_name = str(vision_cfg.get("camera_name", "0"))
-    resolution = vision_cfg.get("resolution", [640, 360])
-    if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
-        capture_width = int(resolution[0])
-        capture_height = int(resolution[1])
-    else:
-        capture_width = int(vision_cfg.get("width", 640))
-        capture_height = int(vision_cfg.get("height", 360))
-    front_camera_settings = {
-        "X": float(pose_offset[0]),
-        "Y": float(pose_offset[1]),
-        "Z": float(pose_offset[2]),
-        "Pitch": camera_pitch,
-        "Roll": camera_roll,
-        "Yaw": camera_yaw,
-        "CaptureSettings": [
-            {
-                "ImageType": 0,
-                "Width": capture_width,
-                "Height": capture_height,
-                "FOV_Degrees": float(vision_cfg.get("fov_degrees", horizontal_fov_degrees())),
-            }
-        ],
-    }
-    cameras_settings = {
-        camera_name: front_camera_settings,
-        "front_center": dict(front_camera_settings),
-    }
     if transport_l == "mavlink":
-        mav_cfg = config.get("control", {}).get("mavlink", {})
-        airsim_mav_cfg = mav_cfg.get("airsim_profile", {})
-        udp_ip = str(airsim_mav_cfg.get("udp_ip", "127.0.0.1")).strip() or "127.0.0.1"
-        udp_port = int(airsim_mav_cfg.get("udp_port", 14560))
-        control_port_local = int(airsim_mav_cfg.get("control_port_local", 14540))
-        control_port_remote = int(airsim_mav_cfg.get("control_port_remote", 14580))
-        qgc_host_ip = str(airsim_mav_cfg.get("qgc_host_ip", "127.0.0.1")).strip() or "127.0.0.1"
-        qgc_port = int(airsim_mav_cfg.get("qgc_port", 14550))
-        vehicle_type = str(airsim_mav_cfg.get("vehicle_type", "PX4Multirotor")).strip()
-        allowed_mav = {"px4multirotor", "arducopter", "ardurover", "arducoptersolo"}
-        if vehicle_type.lower() not in allowed_mav:
-            print(
-                "Warning: control.mavlink.airsim_profile.vehicle_type="
-                f"{vehicle_type!r} is not a supported AirSim MAVLink backend; "
-                "forcing PX4Multirotor."
-            )
-            vehicle_type = "PX4Multirotor"
-        vehicle_settings = {
-            "VehicleType": vehicle_type,
-            "UseSerial": False,
-            "UseTcp": False,
-            "LockStep": bool(airsim_mav_cfg.get("lock_step", False)),
-            "UdpIp": udp_ip,
-            "UdpPort": udp_port,
-            "ControlIp": "127.0.0.1",
-            "ControlPortLocal": control_port_local,
-            "ControlPortRemote": control_port_remote,
-            "QgcHostIp": qgc_host_ip,
-            "QgcPort": qgc_port,
-            "AllowAPIAlways": True,
-            "EnableTrace": bool(enable_trace),
-            "Cameras": cameras_settings,
-        }
-    else:
-        vehicle_settings = {
-            "VehicleType": "SimpleFlight",
-            "AllowAPIAlways": True,
-            "EnableTrace": bool(enable_trace),
-            "Cameras": cameras_settings,
-        }
+        raise ValueError(
+            "MAVLink sessions must use _ensure_px4_mavlink_settings (TCP HIL :4560), "
+            "not _ensure_camera_settings."
+        )
+    vehicle_name = "Drone1"
+    cameras_settings = _camera_settings_from_config(config)
+    vehicle_settings = {
+        "VehicleType": "SimpleFlight",
+        "AllowAPIAlways": True,
+        "EnableTrace": bool(enable_trace),
+        "Cameras": cameras_settings,
+    }
 
     required_settings = {
         "SettingsVersion": 1.2,
@@ -487,7 +481,14 @@ PX4_VEHICLE_TEMPLATE: dict = {
 PX4_HIL_TCP_PORT = 4560
 
 
-def _ensure_px4_mavlink_settings(airsim_port: int) -> Path:
+def _ensure_px4_mavlink_settings(
+    airsim_port: int,
+    *,
+    config: dict | None = None,
+    view_mode: str = "Fpv",
+    enable_trace: bool = False,
+    corner_chase_pip: bool = False,
+) -> Path:
     settings_path = _airsim_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings: dict = {}
@@ -509,25 +510,61 @@ def _ensure_px4_mavlink_settings(airsim_port: int) -> Path:
         backup_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
         print(f"[mavlink] backed up SimpleFlight settings to {backup_path}")
 
+    normalized_view_mode = _normalize_view_mode(view_mode)
+    if config is not None:
+        px4_vehicle = _px4_hil_vehicle_settings(config, enable_trace=enable_trace)
+    else:
+        px4_vehicle = json.loads(json.dumps(PX4_VEHICLE_TEMPLATE))
+
     settings["SettingsVersion"] = 1.2
     settings["SimMode"] = "Multirotor"
+    settings["ViewMode"] = normalized_view_mode
+    settings["LocalHostIp"] = "127.0.0.1"
     settings["ApiServerPort"] = int(airsim_port)
     settings["ClockType"] = "SteppableClock"
-    settings["Vehicles"] = {"PX4": json.loads(json.dumps(PX4_VEHICLE_TEMPLATE))}
+    settings["Vehicles"] = {"PX4": px4_vehicle}
+    settings["Recording"] = {
+        "Cameras": [
+            {"CameraName": "0", "ImageType": 0, "PixelsAsFloat": False, "Compress": False}
+        ]
+    }
     settings.pop("SubWindows", None)
     settings.pop("CameraDirector", None)
+    if corner_chase_pip:
+        settings["SubWindows"] = [
+            {
+                "WindowID": 0,
+                "ImageType": 0,
+                "CameraName": "0",
+                "External": False,
+                "Visible": True,
+            }
+        ]
+    if normalized_view_mode == "Fpv":
+        settings["CameraDirector"] = {"FollowDistance": -50.0}
 
     settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-    print(f"[mavlink] wrote PX4Multirotor settings to {settings_path}")
+    print(
+        f"Configured AirSim PX4 HIL (TCP :{PX4_HIL_TCP_PORT}), "
+        f"ViewMode={normalized_view_mode} in {settings_path}"
+    )
     return settings_path
 
 
 def _wait_for_hil_tcp_listener(timeout_s: float) -> bool:
     deadline = time.time() + max(5.0, float(timeout_s))
+    next_status_s = time.time() + 15.0
     while time.time() < deadline:
         if _is_tcp_listening_passive(PX4_HIL_TCP_PORT):
             print(f"[launcher] AirSim HIL TCP :{PX4_HIL_TCP_PORT} is listening.")
             return True
+        if time.time() >= next_status_s:
+            remaining = max(0.0, deadline - time.time())
+            print(
+                f"[launcher] Waiting for AirSim HIL TCP :{PX4_HIL_TCP_PORT} "
+                f"({remaining:.0f}s left)..."
+            )
+            next_status_s = time.time() + 15.0
         time.sleep(1.0)
     return False
 
@@ -1004,15 +1041,24 @@ def launch(
     airsim_port = int(sim_cfg.get("airsim_port", 41451))
     rpc_ready_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
     rpc_tout_label = f"{rpc_ready_timeout_s:.0f}"
-    _ensure_camera_settings(
-        airsim_port,
-        view_mode,
-        corner_chase_pip=corner_chase_pip,
-        enable_trace=enable_trace,
-        config=config,
-        transport=transport,
-        use_vjoy=use_vjoy,
-    )
+    if transport == "mavlink":
+        _ensure_px4_mavlink_settings(
+            airsim_port,
+            config=config,
+            view_mode=view_mode,
+            enable_trace=enable_trace,
+            corner_chase_pip=corner_chase_pip,
+        )
+    else:
+        _ensure_camera_settings(
+            airsim_port,
+            view_mode,
+            corner_chase_pip=corner_chase_pip,
+            enable_trace=enable_trace,
+            config=config,
+            transport=transport,
+            use_vjoy=use_vjoy,
+        )
 
     if resolved_mavlink_endpoint is not None:
         print(
