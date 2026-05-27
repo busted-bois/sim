@@ -82,7 +82,7 @@ def _fused_pose_xy_rpy(client: FlightClient) -> tuple[float, float, float, float
         snapshot = getter()
         if snapshot is not None and snapshot.health.status in ("ok", "degraded"):
             if snapshot.state is not None:
-                x, y, z = snapshot.state.position_ned
+                x, y, _z = snapshot.state.position_ned
                 roll, pitch, yaw = snapshot.state.attitude_rpy
             else:
                 x, y, _z = snapshot.position_ned

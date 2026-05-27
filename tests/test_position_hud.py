@@ -148,7 +148,10 @@ class PositionHudTests(unittest.TestCase):
                 "mavlink": {"tracking": {"enabled": True}},
             }
         }
-        self.assertEqual(resolve_hud_data_source(cfg, explicit="tracking", transport="airsim"), "trace")
+        self.assertEqual(
+            resolve_hud_data_source(cfg, explicit="tracking", transport="airsim"),
+            "trace",
+        )
 
     def test_config_from_dict_uses_tracking_default_when_enabled(self) -> None:
         cfg = position_hud_config_from_dict(

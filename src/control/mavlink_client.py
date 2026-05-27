@@ -52,6 +52,7 @@ PX4_CUSTOM_MAIN_MODE_OFFBOARD: Final[int] = 6
 _DEFAULT_GUIDED_CUSTOM_MODE: Final[int] = PX4_CUSTOM_MAIN_MODE_OFFBOARD
 _OFFBOARD_PRIME_SETPOINT_COUNT: Final[int] = 10
 _OFFBOARD_PRIME_INTERVAL_S: Final[float] = 0.05
+_MAV_AUTOPILOT_PX4: Final[int] = int(getattr(mavutil.mavlink, "MAV_AUTOPILOT_PX4", 12))
 
 
 def _parse_udp_endpoint(endpoint: str) -> tuple[str, int]:
@@ -178,11 +179,7 @@ class PymavlinkFlightClient:
         self._state_request_hz = state_request_hz
         self._guided_custom_mode = guided_custom_mode
         self._offboard_ready = False
-        if self._guided_custom_mode == PX4_CUSTOM_MAIN_MODE_AUTO:
-            _logger.warning(
-                "guided_custom_mode=4 (AUTO): PX4 ignores most velocity setpoints; "
-                "use 6 (OFFBOARD) for autonomous flight."
-            )
+        self._autopilot: int | None = None
         self._takeoff_altitude_m = takeoff_altitude_m
         self._takeoff_climb_speed_ms = takeoff_climb_speed_ms
         self._land_descent_speed_ms = land_descent_speed_ms
@@ -289,6 +286,16 @@ class PymavlinkFlightClient:
         if heartbeat is None:
             raise TimeoutError(f"No MAVLink HEARTBEAT received on {self._endpoint}.")
 
+        self._autopilot = self._message_source_id(heartbeat, "get_autopilot")
+        if (
+            self._autopilot == _MAV_AUTOPILOT_PX4
+            and self._guided_custom_mode == PX4_CUSTOM_MAIN_MODE_AUTO
+        ):
+            _logger.warning(
+                "guided_custom_mode=4 (AUTO) with PX4 autopilot: velocity setpoints "
+                "are typically ignored. Use guided_custom_mode=6 (OFFBOARD)."
+            )
+
         self._target_system = int(
             getattr(self._mav, "target_system", 0) or heartbeat.get_srcSystem() or 1
         )
@@ -341,6 +348,8 @@ class PymavlinkFlightClient:
         while time.monotonic() < deadline:
             telemetry = self._get_latest_telemetry()
             if telemetry is not None and telemetry.armed == arm:
+                if not arm:
+                    self._offboard_ready = False
                 return
             time.sleep(0.05)
 
