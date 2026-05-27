@@ -4,11 +4,17 @@ from src.vision.intrinsics import (
     camera_matrix_k,
     horizontal_fov_degrees,
     horizontal_fov_degrees_from_vision,
+    official_resolution,
+    official_resolution_list,
     yaw_mapping_half_fov_degrees,
 )
 
 
 class VisionIntrinsicsTests(unittest.TestCase):
+    def test_official_resolution_helpers(self) -> None:
+        self.assertEqual(official_resolution(), (640, 360))
+        self.assertEqual(official_resolution_list(), [640, 360])
+
     def test_horizontal_fov_matches_intrinsics(self) -> None:
         self.assertAlmostEqual(horizontal_fov_degrees(), 90.0, places=6)
 

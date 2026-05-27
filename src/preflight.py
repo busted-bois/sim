@@ -14,7 +14,14 @@ from src.config import load_config, resolve_config_path, simulator_endpoint
 from src.control.algorithms import list_algorithms
 from src.mavlink_endpoints import candidate_mavlink_endpoints, resolve_control_transport
 from src.simulator_specs import resolve_specification_path, specification_snapshot_validation
-from src.vision.intrinsics import horizontal_fov_degrees
+from src.vision.intrinsics import (
+    OFFICIAL_CAMERA_PITCH_UP_DEG,
+    OFFICIAL_PHYSICS_HZ,
+    OFFICIAL_VISION_FPS,
+    horizontal_fov_degrees,
+    official_resolution,
+    official_resolution_list,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -129,10 +136,15 @@ def _mavlink_highres_imu(
 
 
 def _normalized_resolution(vision_cfg: dict[str, Any]) -> list[int]:
-    resolution = vision_cfg.get("resolution", [640, 360])
+    resolution = vision_cfg.get("resolution", official_resolution_list())
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
         return [int(resolution[0]), int(resolution[1])]
-    return [int(vision_cfg.get("width", 640)), int(vision_cfg.get("height", 360))]
+    width, height = official_resolution()
+    return [int(vision_cfg.get("width", width)), int(vision_cfg.get("height", height))]
+
+
+def is_official_conformant_profile(sim_cfg: Mapping[str, Any]) -> bool:
+    return str(sim_cfg.get("specification_profile", "")).strip() == "official_conformant"
 
 
 def official_conformant_vision_errors(
@@ -140,12 +152,13 @@ def official_conformant_vision_errors(
     camera_resolution: list[int],
     camera_fov: float,
 ) -> list[str]:
-    if str(sim_cfg.get("specification_profile", "")).strip() != "official_conformant":
+    if not is_official_conformant_profile(sim_cfg):
         return []
     errors: list[str] = []
-    if camera_resolution != [640, 360]:
+    expected_resolution = official_resolution_list()
+    if camera_resolution != expected_resolution:
         errors.append(
-            "vision.resolution must be [640, 360] for official_conformant "
+            f"vision.resolution must be {expected_resolution} for official_conformant "
             f"(got {camera_resolution})"
         )
     expected_fov = horizontal_fov_degrees()
@@ -212,20 +225,17 @@ def run_preflight() -> int:
     else:
         passes.append("PROJECT_PATH exists")
 
-    physics_update_hz = float(sim_cfg.get("physics_update_hz", 0.0))
-    if abs(physics_update_hz - 120.0) > 1e-6:
-        errors.append(
-            "simulator.physics_update_hz must be 120.0 for the official spec "
-            f"(got {physics_update_hz})"
-        )
-    else:
-        passes.append("Simulator physics update rate is 120 Hz")
+    conformant = is_official_conformant_profile(sim_cfg)
 
-    vision_fps = float(vision_cfg.get("fps", 0.0))
-    if abs(vision_fps - 30.0) > 1e-6:
-        errors.append(f"vision.fps must be 30.0 for the official spec (got {vision_fps})")
-    else:
-        passes.append("Camera capture rate is 30 Hz")
+    if conformant:
+        physics_update_hz = float(sim_cfg.get("physics_update_hz", 0.0))
+        if abs(physics_update_hz - OFFICIAL_PHYSICS_HZ) > 1e-6:
+            errors.append(
+                "simulator.physics_update_hz must be "
+                f"{OFFICIAL_PHYSICS_HZ} for official_conformant (got {physics_update_hz})"
+            )
+        else:
+            passes.append("Simulator physics update rate is 120 Hz")
 
     camera_resolution = _normalized_resolution(vision_cfg)
     if camera_resolution[0] <= 0 or camera_resolution[1] <= 0:
@@ -245,18 +255,41 @@ def run_preflight() -> int:
 
     errors.extend(official_conformant_vision_errors(sim_cfg, camera_resolution, camera_fov))
 
-    if bool(vision_cfg.get("startup_autotune_enabled", False)):
-        errors.append("vision.startup_autotune_enabled must be false for fixed 30 Hz compliance")
-    else:
-        passes.append("Camera startup auto-tuning is disabled for fixed timing")
+    if conformant:
+        vision_fps = float(vision_cfg.get("fps", 0.0))
+        if abs(vision_fps - OFFICIAL_VISION_FPS) > 1e-6:
+            errors.append(
+                f"vision.fps must be {OFFICIAL_VISION_FPS} for official_conformant "
+                f"(got {vision_fps})"
+            )
+        else:
+            passes.append("Camera capture rate is 30 Hz")
 
-    camera_pitch_up = float(camera_cfg.get("pitch_up_degrees", 0.0))
-    if abs(camera_pitch_up - 20.0) > 1e-6:
-        errors.append(
-            f"camera.pitch_up_degrees must be 20.0 for the official spec (got {camera_pitch_up})"
-        )
-    else:
-        passes.append("Front camera upward tilt is 20 degrees")
+        vision_min_fps = float(vision_cfg.get("min_fps", vision_fps))
+        if abs(vision_min_fps - vision_fps) > 1e-6:
+            errors.append(
+                "vision.min_fps must match vision.fps for official_conformant "
+                f"(got min_fps={vision_min_fps}, fps={vision_fps})"
+            )
+        else:
+            passes.append("Camera min_fps matches fps for fixed timing")
+
+        if bool(vision_cfg.get("startup_autotune_enabled", False)):
+            errors.append(
+                "vision.startup_autotune_enabled must be false for official_conformant"
+            )
+        else:
+            passes.append("Camera startup auto-tuning is disabled for fixed timing")
+
+        camera_pitch_up = float(camera_cfg.get("pitch_up_degrees", 0.0))
+        if abs(camera_pitch_up - OFFICIAL_CAMERA_PITCH_UP_DEG) > 1e-6:
+            errors.append(
+                "camera.pitch_up_degrees must be "
+                f"{OFFICIAL_CAMERA_PITCH_UP_DEG} for official_conformant "
+                f"(got {camera_pitch_up})"
+            )
+        else:
+            passes.append("Front camera upward tilt is 20 degrees")
 
     pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
     normalized_pose_offset: list[float] | None = None
@@ -276,11 +309,11 @@ def run_preflight() -> int:
         passes.append(f"Command rate limit is in spec (<100 Hz): {command_rate_hz:.1f} Hz")
 
     latency_cfg = control_cfg.get("latency_tuning", {})
-    if bool(latency_cfg.get("enabled", False)):
+    if conformant and bool(latency_cfg.get("enabled", False)):
         errors.append(
-            "control.latency_tuning.enabled must be false for fixed command-rate compliance"
+            "control.latency_tuning.enabled must be false for official_conformant"
         )
-    else:
+    elif conformant:
         passes.append("Command-rate auto-tuning is disabled for fixed timing")
 
     spec_required = bool(sim_cfg.get("specification_required", False))

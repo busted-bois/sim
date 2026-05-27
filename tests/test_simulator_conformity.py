@@ -5,10 +5,10 @@ from src.config import apply_low_end_overrides
 from src.control.command_rate import CommandRateGate, normalize_command_rate_hz
 from src.control.flight_client import AirSimAdapter
 from src.control.primitives import _airsim_quaternion_from_euler, set_front_camera_pose
-from src.preflight import official_conformant_vision_errors
+from src.preflight import is_official_conformant_profile, official_conformant_vision_errors
 from src.simulator_specs import conformity_fingerprint, resolve_specification_path
 from src.vision.feed import VisionFeed
-from src.vision.intrinsics import horizontal_fov_degrees
+from src.vision.intrinsics import horizontal_fov_degrees, official_resolution_list
 
 
 class _FakeAsyncResult:
@@ -36,8 +36,15 @@ class SimulatorConformityTests(unittest.TestCase):
     def test_official_conformant_vision_errors_use_intrinsics_fov(self) -> None:
         sim = {"specification_profile": "official_conformant"}
         fov = horizontal_fov_degrees()
-        self.assertEqual(official_conformant_vision_errors(sim, [640, 360], fov), [])
-        self.assertGreater(len(official_conformant_vision_errors(sim, [640, 360], 60.0)), 0)
+        res = official_resolution_list()
+        self.assertEqual(official_conformant_vision_errors(sim, res, fov), [])
+        self.assertGreater(len(official_conformant_vision_errors(sim, res, 60.0)), 0)
+
+    def test_is_official_conformant_profile(self) -> None:
+        self.assertTrue(
+            is_official_conformant_profile({"specification_profile": "official_conformant"})
+        )
+        self.assertFalse(is_official_conformant_profile({"specification_profile": "other"}))
 
     def test_official_conformant_vision_errors_skip_other_profiles(self) -> None:
         sim = {"specification_profile": "low_end_nonconformant"}

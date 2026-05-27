@@ -1,5 +1,5 @@
 {
-  "algorithm": "mavlink_jitter",
+  "algorithm": "autonomous_explore",
   "simulator": {
     "colosseum_path": "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor.exe",
     "map_name": "BlocksV2",
@@ -31,7 +31,6 @@
   "vision": {
     "enabled": true,
     "camera_name": "0",
-"pitch_up_degrees": -20,
     "fps": 30,
     "min_fps": 30,
     "fov_degrees": 90,

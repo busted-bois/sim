@@ -15,6 +15,7 @@ from src.competition_specs import (
 )
 from src.config import load_config
 from src.simulator_gate_selection import gate_reference_opening_ok
+from src.vision.intrinsics import official_resolution, official_resolution_list
 
 ROOT = Path(__file__).resolve().parent.parent
 UNREAL_DUMP_SCRIPT = ROOT / "scripts" / "unreal_dump_simulator_specs.py"
@@ -68,13 +69,14 @@ def conformity_fingerprint_payload(config: dict[str, Any] | Any) -> dict[str, An
     control_cfg = raw.get("control", {})
     latency_cfg = control_cfg.get("latency_tuning", {})
     camera_cfg = raw.get("camera", {})
-    resolution = vision_cfg.get("resolution", [640, 360])
+    resolution = vision_cfg.get("resolution", official_resolution_list())
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
         normalized_resolution = [int(resolution[0]), int(resolution[1])]
     else:
+        width, height = official_resolution()
         normalized_resolution = [
-            int(vision_cfg.get("width", 640)),
-            int(vision_cfg.get("height", 360)),
+            int(vision_cfg.get("width", width)),
+            int(vision_cfg.get("height", height)),
         ]
     pose_offset = camera_cfg.get("pose_offset", [0.35, 0.0, -0.05])
     normalized_pose_offset = [float(value) for value in pose_offset[:3]]
@@ -134,10 +136,11 @@ def physics_snapshot_matches_120hz(physics: Any) -> bool:
 def vision_resolution_from_config(raw: dict[str, Any] | Any) -> list[int]:
     data = _to_plain_mapping(raw)
     vision_cfg = data.get("vision", {})
-    resolution = vision_cfg.get("resolution", [640, 360])
+    resolution = vision_cfg.get("resolution", official_resolution_list())
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
         return [int(resolution[0]), int(resolution[1])]
-    return [int(vision_cfg.get("width", 640)), int(vision_cfg.get("height", 360))]
+    width, height = official_resolution()
+    return [int(vision_cfg.get("width", width)), int(vision_cfg.get("height", height))]
 
 
 def camera_pose_offset_from_config(raw: dict[str, Any] | Any) -> list[float] | None:
