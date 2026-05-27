@@ -20,6 +20,12 @@ For smoother flight on lower-end laptops (reduced telemetry/logging):
 uv run sim low-end
 ```
 
+To launch the simulator and immediately validate the live MAVLink IMU stream:
+
+```bash
+uv run sim-highres-imu-smoke
+```
+
 To run with the old third-person chase camera:
 
 ```bash
@@ -114,7 +120,8 @@ From a fresh Cursor session, use this exact sequence.
 | **Stop** | In the terminal running the client, press `Ctrl+C`. Then close Unreal. Closing Unreal first may disconnect the client with errors; that is usually harmless. |
 | **Reset** | Restart the Unreal/AirSim session if the drone or API state acts stuck; run `uv run sim` again. |
 | **Softer landing** | `uv run sim-very-soft` uses the gentle landing profile. |
-| **Landing telemetry** | With `landing.telemetry_log.enabled` true in `sim.config.json`, each run writes `logs/landing_telemetry.csv` (`t_s`, `altitude_m`, `vz_ms`, `command`) during the landing phase for tuning. |
+| **Landing telemetry** | With `landing.telemetry_log.enabled` true in `sim.config.json`, each run writes `logs/landing_telemetry.csv` with altitude, vertical velocity, command, IMU acceleration/gyro, IMU health status, and IMU sample age during the landing phase for tuning. |
+| **MAVLink IMU validation** | Use `uv run highres-imu-smoke` against an already-running MAVLink endpoint, or `uv run sim-highres-imu-smoke` to launch the simulator first and then probe `HIGHRES_IMU`. |
 | **Regenerate simulator snapshot** | `uv run extract-simulator-specs`, then `uv run verify-sim-physics-metadata` and `uv run verify-sim-gate-reference` (or `uv run preflight`) before committing `docs/simulator_specs.json`. See `docs/simulator_specs_pr_checklist.md`. |
 
 ### Common errors
@@ -124,6 +131,52 @@ From a fresh Cursor session, use this exact sequence.
 | Unreal asks for a project file first | `PROJECT_PATH` missing or wrong | Set `PROJECT_PATH` in `.env.local` or `simulator.project_path`, or run `pwsh scripts/fix_project_path.ps1`. |
 | Connection / RPC errors | Simulator not up or wrong port | Start Unreal; check `simulator.airsim_port` matches AirSim. |
 | Preflight warns “AirSim RPC not reachable” | Normal if UE is not running yet | Start the sim, or set `preflight.require_airsim_reachable` to `false` (default) to only warn. |
+| `HIGHRES_IMU` smoke test times out | MAVLink transport not active, wrong endpoint, or autopilot not publishing IMU | Set `control.transport="mavlink"`, verify `control.mavlink.endpoint`, and rerun `uv run highres-imu-smoke` after the vehicle is fully up. |
+
+## MAVLink HIGHRES_IMU
+
+The MAVLink client can now request, cache, summarize, and validate `HIGHRES_IMU` data from the live vehicle stream.
+
+Use these commands:
+
+```bash
+uv run highres-imu-smoke
+uv run sim-highres-imu-smoke
+```
+
+Useful config lives under `control.mavlink.highres_imu` in `sim.config.json`:
+
+- `enabled` and `request_hz` control whether the stream is requested and at what target rate.
+- `require_stream` upgrades missing `HIGHRES_IMU` in preflight from a warning to a failure.
+- `log_messages` enables per-message logging; this is noisy at higher rates.
+- `summary_interval_seconds` emits throttled runtime summaries without flooding the console.
+- `warn_on_stale` prints warnings when samples go stale or the observed rate drops well below the requested rate.
+- `capture_log.enabled` and `capture_log.path` write raw IMU samples to CSV for tuning.
+
+Typical validation flow:
+
+1. Set `control.transport` to `"mavlink"` if you want to force the MAVLink path.
+2. Start the simulator or autopilot bridge.
+3. Run `uv run preflight` to check heartbeat and optional IMU availability.
+4. Run `uv run highres-imu-smoke` or `uv run sim-highres-imu-smoke`.
+
+Failure modes to expect:
+
+- No heartbeat: the MAVLink endpoint is wrong or the vehicle has not started publishing yet.
+- Heartbeat but no `HIGHRES_IMU`: the upstream simulator/autopilot path is live but not emitting the IMU stream.
+- Stale or degraded health: samples are arriving too slowly, stopped arriving, or are falling behind the configured freshness budget.
+
+## MAVLink ATTITUDE (DRO-12)
+
+Decode MAVLink **ATTITUDE** (#30) on UDP **:14550**. No flight required—only a stable MAVLink link with UE + PX4-SITL up.
+
+```bash
+uv run --group dev pytest tests/ -q
+uv run python scripts/smoke_attitude_integration.py
+uv run mavlink-all   # live; needs WSL mirrored networking
+```
+
+`mavlink-all` exits with code 2 if MAVLink packets arrive but ATTITUDE decode stays 0 for 90s (`-SkipAttitudeGate` to disable). Config: `control.mavlink.attitude` in `sim.config.json`. Wire into `PymavlinkFlightClient` via `src/mavlink/integration.py`.
 
 ## Project Structure
 

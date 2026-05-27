@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import threading
 import time
@@ -31,6 +32,8 @@ from src.control.highres_imu import (
     merge_highres_imu_sample,
 )
 from src.control.mavlink_timesync import TimesyncOutboundRequest, TimesyncSnapshot, TimesyncStore
+
+_logger = logging.getLogger(__name__)
 
 
 def _parse_udp_endpoint(endpoint: str) -> tuple[str, int]:
@@ -94,9 +97,9 @@ class _Joinable:
 
 
 class PymavlinkFlightClient:
-    """AirSim-like MAVLink runtime client with TIMESYNC observability.
+    """MAVLink runtime client with TIMESYNC observability.
 
-    Motion setpoints map AirSim Euler/sign conventions before SET_POSITION /
+    Motion setpoints use NED Euler/sign conventions for SET_POSITION /
     SET_ATTITUDE_TARGET sends.
     """
 
@@ -140,6 +143,7 @@ class PymavlinkFlightClient:
         timesync_max_offset_jitter_ns: int = 50_000_000,
         attitude_target_throttle_body_z: bool = False,
         connection_factory: Callable[..., Any] | None = None,
+        log_commands: bool = True,
     ) -> None:
         self._endpoint = endpoint.strip() if endpoint else self._DEFAULT_ENDPOINT
         _parse_udp_endpoint(self._endpoint)
@@ -149,32 +153,31 @@ class PymavlinkFlightClient:
             self._command_rate_hz,
             label="MAVLink outbound motion commands",
         )
-        self._state_request_hz = float(state_request_hz)
-        self._guided_custom_mode = int(guided_custom_mode)
-        self._takeoff_altitude_m = float(takeoff_altitude_m)
-        self._takeoff_climb_speed_ms = float(takeoff_climb_speed_ms)
-        self._land_descent_speed_ms = float(land_descent_speed_ms)
-        self._takeoff_timeout_s = float(takeoff_timeout_s)
-        self._land_timeout_s = float(land_timeout_s)
-        self._heartbeat_timeout_s = float(heartbeat_timeout_s)
-        self._source_system = int(source_system)
-        self._source_component = int(source_component)
-        self._respond_to_timesync_requests = bool(respond_to_timesync_requests)
-        self._timesync_log_messages = bool(timesync_log_messages)
-        self._send_timesync_requests = bool(send_timesync_requests)
-        self._timesync_request_interval_s = max(0.1, float(timesync_request_interval_s))
-        self._prepare_for_flight_on_connect = bool(prepare_for_flight_on_connect)
-        self._request_state_messages_on_connect = bool(request_state_messages_on_connect)
-        self._highres_imu_enabled = bool(highres_imu_enabled)
+        self._state_request_hz = state_request_hz
+        self._guided_custom_mode = guided_custom_mode
+        self._takeoff_altitude_m = takeoff_altitude_m
+        self._takeoff_climb_speed_ms = takeoff_climb_speed_ms
+        self._land_descent_speed_ms = land_descent_speed_ms
+        self._takeoff_timeout_s = takeoff_timeout_s
+        self._land_timeout_s = land_timeout_s
+        self._heartbeat_timeout_s = heartbeat_timeout_s
+        self._source_system = source_system
+        self._source_component = source_component
+        self._respond_to_timesync_requests = respond_to_timesync_requests
+        self._timesync_log_messages = timesync_log_messages
+        self._send_timesync_requests = send_timesync_requests
+        self._timesync_request_interval_s = max(0.1, timesync_request_interval_s)
+        self._prepare_for_flight_on_connect = prepare_for_flight_on_connect
+        self._request_state_messages_on_connect = request_state_messages_on_connect
+        self._highres_imu_enabled = highres_imu_enabled
         imu_request_hz = (
-            float(highres_imu_request_hz)
-            if highres_imu_request_hz is not None
-            else float(state_request_hz)
+            highres_imu_request_hz if highres_imu_request_hz is not None else state_request_hz
         )
         self._highres_imu_request_hz = max(1.0, imu_request_hz)
-        self._highres_imu_log_messages = bool(highres_imu_log_messages)
-        self._highres_imu_max_staleness_ms = max(1.0, float(highres_imu_max_staleness_ms))
+        self._highres_imu_log_messages = highres_imu_log_messages
+        self._highres_imu_max_staleness_ms = max(1.0, highres_imu_max_staleness_ms)
         self._connection_factory = connection_factory or mavutil.mavlink_connection
+        self._log_commands = log_commands
 
         self._mav: Any | None = None
         self._target_system: int | None = None
@@ -254,6 +257,8 @@ class PymavlinkFlightClient:
         _ = enable
 
     def armDisarm(self, arm: bool) -> None:
+        if self._log_commands:
+            _logger.info("[MAVLink <<] %s", "ARM" if arm else "DISARM")
         assert self._mav is not None and self._target_system is not None
         self._mav.mav.command_long_send(
             self._target_system,
@@ -285,6 +290,8 @@ class PymavlinkFlightClient:
         return _Joinable(self._go_home)
 
     def hoverAsync(self) -> _Joinable:
+        if self._log_commands:
+            _logger.info("[MAVLink <<] HOVER")
         return self.moveByVelocityAsync(0.0, 0.0, 0.0, 0.25)
 
     def getMultirotorState(self) -> _MultirotorState:
@@ -309,9 +316,20 @@ class PymavlinkFlightClient:
         self, vx: float, vy: float, vz: float, duration: float, **kwargs
     ) -> _Joinable:
         _ = kwargs
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] VELOCITY vx=%.2f vy=%.2f vz=%.2f dur=%.1fs",
+                vx, vy, vz, duration,
+            )
         return _Joinable(lambda: self._stream_velocity(vx, vy, vz, duration))
 
     def moveByVelocityZAsync(self, vx: float, vy: float, z: float, duration: float) -> _Joinable:
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] VELOCITY_Z vx=%.2f vy=%.2f z=%.2f dur=%.1fs",
+                vx, vy, z, duration,
+            )
+
         def _run() -> None:
             current_z = float(self.getMultirotorState().kinematics_estimated.position.z_val)
             if duration <= 0:
@@ -323,11 +341,20 @@ class PymavlinkFlightClient:
         return _Joinable(_run)
 
     def submitSetPositionTargetLocalNed(self, command: SetPositionTargetLocalNedCommand) -> None:
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] POSITION_TARGET frame=%s mask=%s",
+                command.frame, command.type_mask,
+            )
         assert self._mav is not None and self._target_system is not None
         self._set_guided_mode(force=False)
         self._send_set_position_target_local_ned(command)
 
     def submitVelocityLocalNed(self, vx: float, vy: float, vz: float) -> None:
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] VELOCITY_LOCAL_NED vx=%.2f vy=%.2f vz=%.2f", vx, vy, vz,
+            )
         self.submitSetPositionTargetLocalNed(
             SetPositionTargetLocalNedCommand(
                 frame=SET_POSITION_FRAME_LOCAL_NED,
@@ -339,6 +366,10 @@ class PymavlinkFlightClient:
         )
 
     def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] VELOCITY_BODY_NED vx=%.2f vy=%.2f vz=%.2f", vx, vy, vz,
+            )
         self.submitSetPositionTargetLocalNed(
             SetPositionTargetLocalNedCommand(
                 frame=SET_POSITION_FRAME_BODY_NED,
@@ -350,6 +381,10 @@ class PymavlinkFlightClient:
         )
 
     def submitPositionLocalNed(self, x: float, y: float, z: float) -> None:
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] POSITION_LOCAL_NED x=%.2f y=%.2f z=%.2f", x, y, z,
+            )
         self.submitSetPositionTargetLocalNed(
             SetPositionTargetLocalNedCommand(
                 frame=SET_POSITION_FRAME_LOCAL_NED,
@@ -366,6 +401,11 @@ class PymavlinkFlightClient:
         return _Joinable(lambda: self._stream_set_position_target_local_ned(command, duration))
 
     def submitSetAttitudeTarget(self, command: SetAttitudeTargetCommand) -> None:
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] ATTITUDE_TARGET mask=%s thrust=%.3f",
+                command.type_mask, command.thrust,
+            )
         assert self._mav is not None and self._target_system is not None
         self._set_guided_mode(force=False)
         self._send_set_attitude_target(command)
@@ -410,6 +450,10 @@ class PymavlinkFlightClient:
         )
 
     def rotateByYawRateAsync(self, yaw_rate: float, duration: float) -> _Joinable:
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] YAW_RATE rate=%.1f deg/s dur=%.1fs", yaw_rate, duration,
+            )
         yaw_rate_rad_s = math.radians(float(yaw_rate))
         return _Joinable(
             lambda: self._stream_attitude_rate_target(
@@ -521,6 +565,8 @@ class PymavlinkFlightClient:
             self._motion_epoch_monotonic = None
 
     def _takeoff(self) -> None:
+        if self._log_commands:
+            _logger.info("[MAVLink <<] TAKEOFF alt=%sm", self._takeoff_altitude_m)
         self._state_ready_evt.wait(timeout=self._heartbeat_timeout_s)
         self._set_guided_mode(force=True)
         self._send_takeoff_command()
@@ -539,6 +585,8 @@ class PymavlinkFlightClient:
         self._stream_velocity(0.0, 0.0, 0.0, 0.25)
 
     def _land(self) -> None:
+        if self._log_commands:
+            _logger.info("[MAVLink <<] LAND")
         self._state_ready_evt.wait(timeout=self._heartbeat_timeout_s)
         target_altitude_m = 0.15
         expected_s = abs(self._takeoff_altitude_m) / max(0.1, abs(self._land_descent_speed_ms))
@@ -555,6 +603,8 @@ class PymavlinkFlightClient:
         self.armDisarm(False)
 
     def _go_home(self) -> None:
+        if self._log_commands:
+            _logger.info("[MAVLink <<] GO_HOME")
         if self._mav is None or self._target_system is None:
             return
         self._mav.mav.command_long_send(
@@ -622,9 +672,21 @@ class PymavlinkFlightClient:
                 message_type = message.get_type()
                 if message_type == "LOCAL_POSITION_NED":
                     self._handle_local_position(message)
+                    if self._log_commands:
+                        _logger.info(
+                            "[MAVLink >>] LOCAL_POSITION_NED x=%.2f y=%.2f z=%.2f",
+                            message.x,
+                            message.y,
+                            message.z,
+                        )
                 elif message_type == "HEARTBEAT":
                     armed = (int(message.base_mode) & int(armed_bit)) != 0
                     self._handle_heartbeat(armed)
+                    if self._log_commands:
+                        mode = getattr(message, "custom_mode", "?")
+                        _logger.info(
+                            "[MAVLink >>] HEARTBEAT armed=%s mode=%s", armed, mode
+                        )
                 elif message_type == "TIMESYNC":
                     self._handle_timesync(message)
                 elif message_type == "HIGHRES_IMU":
@@ -759,6 +821,8 @@ class PymavlinkFlightClient:
     def _set_guided_mode(self, *, force: bool = False) -> None:
         if self._mav is None or self._target_system is None:
             return
+        if force and self._log_commands:
+            _logger.info("[MAVLink <<] SET_GUIDED_MODE force=%s", force)
         now_s = time.monotonic()
         if not force and self._guided_mode_last_sent_monotonic_s is not None:
             if (
@@ -782,6 +846,8 @@ class PymavlinkFlightClient:
         self._guided_mode_last_sent_monotonic_s = now_s
 
     def _send_takeoff_command(self) -> None:
+        if self._log_commands:
+            _logger.info("[MAVLink <<] NAV_TAKEOFF alt=%sm", self._takeoff_altitude_m)
         if self._mav is None or self._target_system is None:
             return
         self._mav.mav.command_long_send(

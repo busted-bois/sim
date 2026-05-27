@@ -123,6 +123,8 @@ def fake_mavlink_monotonic_sleep():
 
 
 class FakeMav:
+    """Simple fake for MAVLink sender (used by attitude bridge tests)."""
+
     def __init__(self) -> None:
         self.message_interval_calls: list[tuple[int, int]] = []
 

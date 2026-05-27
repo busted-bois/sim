@@ -21,6 +21,13 @@
 .PARAMETER WslDistro
     WSL distro name (default: WSL's default distro).
 
+.PARAMETER AttitudeGateSeconds
+    After PX4 connects, fail if MAVLink packets are seen but ATTITUDE decoded stays 0
+    for this many seconds (0 = disable gate). Default 90.
+
+.PARAMETER SkipAttitudeGate
+    Do not exit on missing ATTITUDE decode (probe still runs with --decode-attitude).
+
 .EXAMPLE
     pwsh scripts/dev-mavlink.ps1
     uv run mavlink-all
@@ -29,7 +36,9 @@
 param(
     [switch]$EnableMirrored,
     [switch]$SkipMirroredCheck,
-    [string]$WslDistro = ""
+    [string]$WslDistro = "",
+    [int]$AttitudeGateSeconds = 90,
+    [switch]$SkipAttitudeGate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -364,7 +373,9 @@ try {
     $ProbeState = @{}
     Push-Location $RepoRoot
     try {
-        $ProbeProc = Start-LoggedProcess -Exe "uv" -ArgList @("run", "check-mavlink", "--duration", "0", "--quiet") -LogPath $ProbeLog -State $ProbeState
+        $ProbeProc = Start-LoggedProcess -Exe "uv" -ArgList @(
+            "run", "check-mavlink", "--duration", "0", "--quiet", "--decode-attitude"
+        ) -LogPath $ProbeLog -State $ProbeState
     } finally {
         Pop-Location
     }
@@ -379,27 +390,56 @@ try {
     # exit on Ctrl+C or any process death.
     # ----------------------------------------------------------------------
     $lastProbeMirror = [DateTime]::MinValue
+    $px4ConnectedAt = [DateTime]::Now
+    $maxMavlinkPkts = 0
+    $maxAttitudeDecoded = 0
+    $attitudeGateExit = $false
+    $orchExitCode = 0
     while ($true) {
         Start-Sleep -Milliseconds 500
         foreach ($line in (Drain-Lines -State $ProbeState)) {
-            if ($line -match "^\[check-mavlink\] tick:") {
+            if ($line -match "^\[check-mavlink\] tick:\s+(\d+)\s+pkts,\s+(\d+)\s+mavlink,\s+(\d+)\s+ATTITUDE decoded") {
+                $pkt = [int]$Matches[1]
+                $att = [int]$Matches[3]
+                if ($pkt -gt $maxMavlinkPkts) { $maxMavlinkPkts = $pkt }
+                if ($att -gt $maxAttitudeDecoded) { $maxAttitudeDecoded = $att }
                 $now = [DateTime]::Now
                 if (($now - $lastProbeMirror).TotalSeconds -ge 5) {
                     $lastProbeMirror = $now
                     Write-Host "[PROBE] $line"
                 }
             }
+            elseif ($line -match "ATTITUDE total decoded:\s+(\d+)") {
+                $att = [int]$Matches[1]
+                if ($att -gt $maxAttitudeDecoded) { $maxAttitudeDecoded = $att }
+            }
             elseif ($line -match "^\[check-mavlink\] (PASS|FAIL|=== summary|interrupted|WARN|probing|passive)") {
                 Write-Host "[PROBE] $line"
             }
             elseif ($line -match "^\s*:\d+\s+pkts=") {
-                # Final per-port summary line
                 Write-Host "[PROBE] $line"
+            }
+        }
+        if (-not $SkipAttitudeGate -and $AttitudeGateSeconds -gt 0) {
+            $elapsed = ([DateTime]::Now - $px4ConnectedAt).TotalSeconds
+            if ($elapsed -ge $AttitudeGateSeconds -and $maxMavlinkPkts -gt 0 -and $maxAttitudeDecoded -eq 0) {
+                Write-Host "[ORCH] FAIL: saw $maxMavlinkPkts packets but ATTITUDE decoded=0 after ${AttitudeGateSeconds}s."
+                Write-Host "[ORCH] Keep UE open/unpaused; check PX4 preflight and UDP :14550."
+                $attitudeGateExit = $true
+                $orchExitCode = 2
+                break
+            }
+            if ($maxAttitudeDecoded -gt 0) {
+                Write-Host "[ORCH] ATTITUDE gate PASS: decoded=$maxAttitudeDecoded (mavlink pkts=$maxMavlinkPkts)."
+                $SkipAttitudeGate = $true
             }
         }
         if ($UeProc.HasExited)    { Write-Host "[ORCH] UE exited (code $($UeProc.ExitCode)). Stopping.";    break }
         if ($Px4Proc.HasExited)   { Write-Host "[ORCH] PX4 exited (code $($Px4Proc.ExitCode)). Stopping.";  break }
         if ($ProbeProc.HasExited) { Write-Host "[ORCH] Probe exited (code $($ProbeProc.ExitCode)). Stopping."; break }
+    }
+    if ($attitudeGateExit) {
+        exit $orchExitCode
     }
 }
 finally {

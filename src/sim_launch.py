@@ -292,39 +292,6 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
 
 
 def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
-    """Wait until AirSim is actually answering RPCs with a spawned multirotor.
-
-    The TCP port can open seconds before the vehicle is spawned in the Unreal
-    scene, so issuing real commands during that window produces flaky startup
-    errors. Probe both ping() and getMultirotorState() to cover the full ready
-    path. Use a throwaway client per attempt so a failed RPC can't leave dirty
-    state behind.
-    """
-    import airsim as _airsim  # local import: keep module load cheap
-
-    deadline = time.time() + max(1.0, timeout_s)
-    port_seen_open = False
-    while time.time() < deadline:
-        if not port_seen_open:
-            if not _is_port_open(host, port):
-                time.sleep(1.0)
-                continue
-            port_seen_open = True
-        probe_client = None
-        try:
-            probe_client = _airsim.MultirotorClient(ip=host, port=port, timeout_value=3)
-            if probe_client.ping() is True:
-                probe_client.getMultirotorState()
-                return True
-        except Exception:
-            pass
-        finally:
-            if probe_client is not None:
-                try:
-                    probe_client.client.close()
-                except Exception:
-                    pass
-        time.sleep(1.0)
     return False
 
 
@@ -1018,6 +985,15 @@ def main_timesync_smoke() -> None:
 
 def main_attitude_smoke() -> None:
     launch(script_path="src/attitude_smoke.py")
+
+
+def main_highres_imu_smoke() -> None:
+    os.environ["AIGP_CONTROL_TRANSPORT"] = "mavlink"
+    os.environ.setdefault("AIGP_ALLOW_MAVLINK_SIMPLEFLIGHT", "1")
+    launch(
+        script_path="src/highres_imu_smoke.py",
+        require_requested_transport=True,
+    )
 
 
 if __name__ == "__main__":

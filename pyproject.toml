@@ -18,6 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mavlink = ["pymavlink>=2.4.49"]
 manual = [
     "pyvjoy",
     "pynput",
@@ -31,6 +32,7 @@ sim-low-end = "src.sim_launch:main_low_end"
 calibrate = "src.sim_launch:main_calibrate"
 preflight = "src.preflight:main"
 check-mavlink = "src.check_mavlink:main"
+attitude-listen = "src.mavlink.attitude_listen:main"
 sim-mavlink = "src.sim_launch:main_mavlink"
 mavlink-all = "src.sim_launch:main_mavlink_all"
 sim-restore-simpleflight = "src.sim_launch:main_restore_simpleflight"
@@ -39,6 +41,7 @@ verify-sim-physics-metadata = "src.simulator_specs:main_verify_physics_metadata"
 verify-sim-gate-reference = "src.simulator_specs:main_verify_gate_reference"
 check-merge-markers = "src.check_merge_markers:main"
 highres-imu-smoke = "src.highres_imu_smoke:main"
+sim-highres-imu-smoke = "src.sim_launch:main_highres_imu_smoke"
 timesync-smoke = "src.timesync_smoke:main"
 sim-timesync-smoke = "src.sim_launch:main_timesync_smoke"
 attitude-smoke = "src.attitude_smoke:main"
@@ -47,6 +50,7 @@ sim-attitude-smoke = "src.sim_launch:main_attitude_smoke"
 [dependency-groups]
 dev = [
     "lefthook",
+    "pytest>=8.0",
 ]
 
 [tool.ruff]
@@ -57,6 +61,7 @@ exclude = [
     "airsim/",
     "msgpackrpc/",
     "opensrc/",
+    ".codex_worktrees/",
     "simple_airsim/",
     ".claude/",
     ".sisyphus/",

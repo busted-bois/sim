@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -44,16 +45,10 @@ class Algorithm:
         return self._vision_feed.get_stats()
 
     def latest_highres_imu(self, client: FlightClient) -> HighresImuSample | None:
-        getter = getattr(client, "getHighresImu", None)
-        if not callable(getter):
-            return None
-        return getter()
+        return client.getHighresImu()
 
     def highres_imu_health(self, client: FlightClient) -> HighresImuHealth | None:
-        getter = getattr(client, "getHighresImuHealth", None)
-        if not callable(getter):
-            return None
-        return getter()
+        return client.getHighresImuHealth()
 
 
 def register(name: str):
@@ -91,4 +86,10 @@ for module_path in _algorithms_dir.glob("*.py"):
     if module_path.name.startswith("_") or module_path.name == "__init__.py":
         continue
     module_name = f"src.control.algorithms.{module_path.stem}"
-    importlib.import_module(module_name)
+    try:
+        importlib.import_module(module_name)
+    except ImportError as exc:
+        print(
+            f"[algorithms] Skipping {module_path.stem}: {exc}",
+            file=sys.stderr,
+        )

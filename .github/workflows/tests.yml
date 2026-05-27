@@ -4,6 +4,8 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
+  push:
+    branches: [main]
 
 jobs:
   unittest:
@@ -26,3 +28,6 @@ jobs:
 
       - name: Verify simulator gate_reference in snapshot
         run: uv run verify-sim-gate-reference
+
+      - name: MAVLink attitude smoke test
+        run: uv run python scripts/smoke_attitude_integration.py
