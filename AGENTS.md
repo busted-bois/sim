@@ -71,6 +71,9 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `AIGP_ENABLE_TRACE=1` — enable flight path trace line.
 - `AIGP_PAUSE_BEFORE_EXIT=1` — pause before client exit.
 - `AIGP_SKIP_MAVLINK_INTEGRATION=1` — skip UDP loopback integration tests.
+- `AIGP_WSL_DISTRO` — WSL distro for PX4 auto-start (optional; default WSL distro when unset).
+- `AIGP_WSL_STARTUP_TIMEOUT_SECONDS` — WSL cold-start wait before PX4 auto-start (default 45).
+- `AIGP_WSL_PATH_TIMEOUT_SECONDS` — WSL `wslpath` conversion wait for PX4 script (default 45).
 - `AIRSIM_PORT` — set by launcher, forwarded to main.py.
 
 ### Output Artifacts

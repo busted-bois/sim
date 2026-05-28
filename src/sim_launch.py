@@ -20,17 +20,85 @@ class _LaunchHandles:
     ue: subprocess.Popen | None = None
     main: subprocess.Popen | None = None
     px4: subprocess.Popen | None = None
+    px4_log: Path | None = None
     cleanup_done: bool = False
 
     def reset(self) -> None:
         self.ue = None
         self.main = None
         self.px4 = None
+        self.px4_log = None
         self.cleanup_done = False
 
 
 _handles = _LaunchHandles()
 _signals_registered: bool = False
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        print(f"[mavlink] Warning: invalid {name}={raw!r}; using {default:.0f}s.")
+        return default
+    if value <= 0:
+        print(f"[mavlink] Warning: {name} must be > 0; using {default:.0f}s.")
+        return default
+    return value
+
+
+def _wsl_distro() -> str | None:
+    for name in ("AIGP_WSL_DISTRO", "PX4_WSL_DISTRO", "WSL_DISTRO"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _wsl_command(*args: str) -> list[str]:
+    cmd = ["wsl"]
+    distro = _wsl_distro()
+    if distro:
+        cmd.extend(["-d", distro])
+    cmd.extend(["-e", *args])
+    return cmd
+
+
+def _wsl_display_prefix() -> str:
+    distro = _wsl_distro()
+    if distro:
+        escaped = distro.replace('"', '`"')
+        return f'wsl -d "{escaped}"'
+    return "wsl"
+
+
+def _warm_wsl() -> bool:
+    timeout = _env_float("AIGP_WSL_STARTUP_TIMEOUT_SECONDS", 45.0)
+    try:
+        subprocess.run(
+            _wsl_command("true"),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=True,
+        )
+        return True
+    except subprocess.TimeoutExpired:
+        print(f"[mavlink] WSL did not become ready within {timeout:.0f}s.")
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"[mavlink] WSL startup check failed: {exc}")
+    return False
+
+
+def _tail_text(path: Path, *, max_lines: int = 20) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-max_lines:])
 
 
 def _terminate_process(
@@ -57,17 +125,15 @@ def _stop_px4_wsl() -> None:
         return
     try:
         subprocess.run(
-            [
-                "wsl",
-                "-e",
+            _wsl_command(
                 "bash",
                 "-lc",
                 "pkill -INT -f 'px4 -i 0' 2>/dev/null; "
                 "pkill -f 'make px4_sitl' 2>/dev/null; true",
-            ],
+            ),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=10.0,
+            timeout=_env_float("AIGP_WSL_STOP_TIMEOUT_SECONDS", 15.0),
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -559,8 +625,10 @@ def _is_tcp_listening_passive(port: int) -> bool:
 def _windows_host_ip_for_wsl() -> str:
     try:
         out = subprocess.run(
-            ["wsl", "-e", "bash", "-c", "ip route show default | awk '{print $3}'"],
-            capture_output=True, text=True, timeout=5,
+            _wsl_command("bash", "-lc", "ip route show default | awk '{print $3}'"),
+            capture_output=True,
+            text=True,
+            timeout=_env_float("AIGP_WSL_HOST_IP_TIMEOUT_SECONDS", 15.0),
         )
         ip = out.stdout.strip()
         if ip and ip.count(".") == 3:
@@ -574,11 +642,16 @@ def _print_px4_bringup_instructions(wsl_host_ip: str) -> None:
     make_cmd = (
         f"cd ~/PX4-Autopilot && PX4_SIM_HOST_ADDR={wsl_host_ip} make px4_sitl none_iris"
     )
+    ps_cmd = f'{_wsl_display_prefix()} -e bash -lc "{make_cmd}"'
     print("\n[mavlink] === Start PX4-SITL in a SECOND terminal ===")
     print("  From Windows PowerShell:")
-    print(f"    wsl -d Ubuntu -e bash -c '{make_cmd}'")
-    print("  From inside WSL Ubuntu:")
+    print(f"    {ps_cmd}")
+    print("  From inside WSL:")
     print(f"    {make_cmd}")
+    print(
+        "\nSet AIGP_WSL_DISTRO=<name> in .env.local if PX4 is installed in a "
+        "non-default WSL distro."
+    )
     print(
         "\nLook for 'INFO  [simulator_mavlink] Simulator connected on TCP port 4560.' "
         "in the PX4 log."
@@ -604,14 +677,23 @@ def _start_px4_sitl_for_probe() -> subprocess.Popen | None:
         print(f"[mavlink] PX4 WSL launcher not found: {script}")
         return None
 
+    if not _warm_wsl():
+        return None
+
+    timeout = _env_float("AIGP_WSL_PATH_TIMEOUT_SECONDS", 45.0)
     try:
         translated = subprocess.run(
-            ["wsl", "-e", "wslpath", "-u", str(script)],
+            _wsl_command("wslpath", "-u", str(script)),
             capture_output=True,
             text=True,
-            timeout=10.0,
+            timeout=timeout,
             check=True,
         )
+    except subprocess.TimeoutExpired as exc:
+        print(
+            f"[mavlink] could not resolve WSL launcher path within {timeout:.0f}s: {exc}"
+        )
+        return None
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"[mavlink] could not resolve WSL launcher path: {exc}")
         return None
@@ -622,13 +704,19 @@ def _start_px4_sitl_for_probe() -> subprocess.Popen | None:
         return None
 
     print("[mavlink] auto-starting PX4-SITL in WSL for probe mode...")
-    proc = subprocess.Popen(
-        ["wsl", "-e", "bash", px4_script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.STDOUT,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-    )
+    log_dir = ROOT / "logs" / "mavlink"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    px4_log = log_dir / "probe_px4_latest.log"
+    with px4_log.open("w", encoding="utf-8") as log_handle:
+        proc = subprocess.Popen(
+            _wsl_command("bash", px4_script),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
     _handles.px4 = proc
+    _handles.px4_log = px4_log
+    print(f"[mavlink] PX4-SITL log: {px4_log}")
     return proc
 
 
@@ -642,6 +730,11 @@ def _wait_for_px4_hil_connection(px4_proc: subprocess.Popen, timeout_seconds: fl
     while time.time() < deadline:
         if px4_proc.poll() is not None:
             print(f"[mavlink] PX4-SITL exited early with code {px4_proc.returncode}.")
+            if _handles.px4_log is not None:
+                tail = _tail_text(_handles.px4_log)
+                if tail:
+                    print("[mavlink] PX4-SITL log tail:")
+                    print(tail)
             return False
         if not _is_tcp_listening_passive(PX4_HIL_TCP_PORT):
             print("[mavlink] PX4-SITL appears connected to AirSim HIL.")
