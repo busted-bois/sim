@@ -19,39 +19,146 @@ class _LaunchHandles:
 
     ue: subprocess.Popen | None = None
     main: subprocess.Popen | None = None
+    px4: subprocess.Popen | None = None
+    px4_log: Path | None = None
     cleanup_done: bool = False
+
+    def reset(self) -> None:
+        self.ue = None
+        self.main = None
+        self.px4 = None
+        self.px4_log = None
+        self.cleanup_done = False
 
 
 _handles = _LaunchHandles()
 _signals_registered: bool = False
 
 
-def _cleanup_on_interrupt() -> None:
-    """Terminate drone client, then Unreal if we launched it."""
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        print(f"[mavlink] Warning: invalid {name}={raw!r}; using {default:.0f}s.")
+        return default
+    if value <= 0:
+        print(f"[mavlink] Warning: {name} must be > 0; using {default:.0f}s.")
+        return default
+    return value
+
+
+def _wsl_distro() -> str | None:
+    for name in ("AIGP_WSL_DISTRO", "PX4_WSL_DISTRO", "WSL_DISTRO"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _wsl_command(*args: str) -> list[str]:
+    cmd = ["wsl"]
+    distro = _wsl_distro()
+    if distro:
+        cmd.extend(["-d", distro])
+    cmd.extend(["-e", *args])
+    return cmd
+
+
+def _wsl_display_prefix() -> str:
+    distro = _wsl_distro()
+    if distro:
+        escaped = distro.replace('"', '`"')
+        return f'wsl -d "{escaped}"'
+    return "wsl"
+
+
+def _warm_wsl() -> bool:
+    timeout = _env_float("AIGP_WSL_STARTUP_TIMEOUT_SECONDS", 45.0)
+    try:
+        subprocess.run(
+            _wsl_command("true"),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=True,
+        )
+        return True
+    except subprocess.TimeoutExpired:
+        print(f"[mavlink] WSL did not become ready within {timeout:.0f}s.")
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"[mavlink] WSL startup check failed: {exc}")
+    return False
+
+
+def _tail_text(path: Path, *, max_lines: int = 20) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-max_lines:])
+
+
+def _terminate_process(
+    proc: subprocess.Popen | None,
+    *,
+    timeout: float,
+    kill_timeout: float,
+) -> None:
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            proc.kill()
+            proc.wait(timeout=kill_timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def _stop_px4_wsl() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        subprocess.run(
+            _wsl_command(
+                "bash",
+                "-lc",
+                "pkill -INT -f 'px4 -i 0' 2>/dev/null; "
+                "pkill -f 'make px4_sitl' 2>/dev/null; true",
+            ),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_env_float("AIGP_WSL_STOP_TIMEOUT_SECONDS", 15.0),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _terminate_started_processes(message: str | None = None, *, stderr: bool = False) -> None:
+    """Terminate processes started by this launcher."""
     if _handles.cleanup_done:
         return
     _handles.cleanup_done = True
-    print("\nInterrupt received — stopping drone client and simulator...", file=sys.stderr)
-    if _handles.main is not None and _handles.main.poll() is None:
-        _handles.main.terminate()
-        try:
-            _handles.main.wait(timeout=8.0)
-        except subprocess.TimeoutExpired:
-            _handles.main.kill()
-            try:
-                _handles.main.wait(timeout=3.0)
-            except subprocess.TimeoutExpired:
-                pass
-    if _handles.ue is not None and _handles.ue.poll() is None:
-        _handles.ue.terminate()
-        try:
-            _handles.ue.wait(timeout=15.0)
-        except subprocess.TimeoutExpired:
-            _handles.ue.kill()
-            try:
-                _handles.ue.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                pass
+    if message:
+        print(message, file=sys.stderr if stderr else sys.stdout)
+    _stop_px4_wsl()
+    _terminate_process(_handles.px4, timeout=8.0, kill_timeout=3.0)
+    _terminate_process(_handles.main, timeout=8.0, kill_timeout=3.0)
+    _terminate_process(_handles.ue, timeout=15.0, kill_timeout=5.0)
+
+
+def _cleanup_on_interrupt() -> None:
+    """Terminate drone client, PX4, then Unreal if we launched them."""
+    _terminate_started_processes(
+        "\nInterrupt received — stopping drone client and simulator...",
+        stderr=True,
+    )
 
 
 def _sigint_handler(_signum: int, _frame) -> None:
@@ -292,7 +399,48 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
 
 
 def _wait_for_airsim_rpc(host: str, port: int, timeout_s: float) -> bool:
+    import airsim
+
+    deadline = time.monotonic() + max(1.0, float(timeout_s))
+    poll_s = 0.5
+    while time.monotonic() < deadline:
+        if _is_port_open(host, port, timeout_s=0.5):
+            try:
+                client = airsim.MultirotorClient(ip=host, port=port, timeout_value=2)
+                client.confirmConnection()
+                return True
+            except Exception:
+                pass
+        time.sleep(poll_s)
     return False
+
+
+def _settings_use_simpleflight() -> bool:
+    settings_path = _airsim_settings_path()
+    if not settings_path.is_file():
+        return False
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    vehicles = settings.get("Vehicles")
+    if not isinstance(vehicles, dict):
+        return False
+    return any(
+        isinstance(v, dict) and v.get("VehicleType") == "SimpleFlight"
+        for v in vehicles.values()
+    )
+
+
+def _launch_transport(config: dict, *, restored_simpleflight: bool) -> str:
+    from src.mavlink_endpoints import resolve_control_transport
+
+    transport = resolve_control_transport(config)
+    if restored_simpleflight or _settings_use_simpleflight():
+        if transport != "airsim":
+            print("[launcher] SimpleFlight settings - using AirSim RPC transport.")
+        return "airsim"
+    return transport
 
 
 def _wait_for_control_link(
@@ -477,8 +625,10 @@ def _is_tcp_listening_passive(port: int) -> bool:
 def _windows_host_ip_for_wsl() -> str:
     try:
         out = subprocess.run(
-            ["wsl", "-e", "bash", "-c", "ip route show default | awk '{print $3}'"],
-            capture_output=True, text=True, timeout=5,
+            _wsl_command("bash", "-lc", "ip route show default | awk '{print $3}'"),
+            capture_output=True,
+            text=True,
+            timeout=_env_float("AIGP_WSL_HOST_IP_TIMEOUT_SECONDS", 15.0),
         )
         ip = out.stdout.strip()
         if ip and ip.count(".") == 3:
@@ -492,11 +642,16 @@ def _print_px4_bringup_instructions(wsl_host_ip: str) -> None:
     make_cmd = (
         f"cd ~/PX4-Autopilot && PX4_SIM_HOST_ADDR={wsl_host_ip} make px4_sitl none_iris"
     )
+    ps_cmd = f'{_wsl_display_prefix()} -e bash -lc "{make_cmd}"'
     print("\n[mavlink] === Start PX4-SITL in a SECOND terminal ===")
     print("  From Windows PowerShell:")
-    print(f"    wsl -d Ubuntu -e bash -c '{make_cmd}'")
-    print("  From inside WSL Ubuntu:")
+    print(f"    {ps_cmd}")
+    print("  From inside WSL:")
     print(f"    {make_cmd}")
+    print(
+        "\nSet AIGP_WSL_DISTRO=<name> in .env.local if PX4 is installed in a "
+        "non-default WSL distro."
+    )
     print(
         "\nLook for 'INFO  [simulator_mavlink] Simulator connected on TCP port 4560.' "
         "in the PX4 log."
@@ -509,6 +664,128 @@ def _print_px4_bringup_instructions(wsl_host_ip: str) -> None:
         "Once connected, AirSim will push PX4's MAVLink to 127.0.0.1:14550 (the probe). "
         "Frame rate ~2 Hz heartbeat is enough to PASS.\n"
     )
+
+
+def _start_px4_sitl_for_probe() -> subprocess.Popen | None:
+    """Start PX4-SITL in WSL for one-shot probe mode."""
+    if sys.platform != "win32":
+        print("[mavlink] auto-starting PX4 is only supported on Windows/WSL.")
+        return None
+
+    script = ROOT / "scripts" / "launch_px4_wsl.sh"
+    if not script.is_file():
+        print(f"[mavlink] PX4 WSL launcher not found: {script}")
+        return None
+
+    if not _warm_wsl():
+        return None
+
+    timeout = _env_float("AIGP_WSL_PATH_TIMEOUT_SECONDS", 45.0)
+    try:
+        translated = subprocess.run(
+            _wsl_command("wslpath", "-u", str(script)),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,
+        )
+    except subprocess.TimeoutExpired as exc:
+        print(
+            f"[mavlink] could not resolve WSL launcher path within {timeout:.0f}s: {exc}"
+        )
+        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"[mavlink] could not resolve WSL launcher path: {exc}")
+        return None
+
+    px4_script = translated.stdout.strip()
+    if not px4_script:
+        print(f"[mavlink] could not translate {script} to a WSL path.")
+        return None
+
+    print("[mavlink] auto-starting PX4-SITL in WSL for probe mode...")
+    log_dir = ROOT / "logs" / "mavlink"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    px4_log = log_dir / "probe_px4_latest.log"
+    with px4_log.open("w", encoding="utf-8") as log_handle:
+        proc = subprocess.Popen(
+            _wsl_command("bash", px4_script),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+    _handles.px4 = proc
+    _handles.px4_log = px4_log
+    print(f"[mavlink] PX4-SITL log: {px4_log}")
+    return proc
+
+
+def _wait_for_px4_hil_connection(px4_proc: subprocess.Popen, timeout_seconds: float = 90.0) -> bool:
+    """Wait until PX4 consumes AirSim's single-shot HIL TCP listener."""
+    print(
+        f"[mavlink] waiting up to {timeout_seconds:.0f}s for PX4-SITL to connect "
+        f"to AirSim HIL TCP :{PX4_HIL_TCP_PORT}..."
+    )
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if px4_proc.poll() is not None:
+            print(f"[mavlink] PX4-SITL exited early with code {px4_proc.returncode}.")
+            if _handles.px4_log is not None:
+                tail = _tail_text(_handles.px4_log)
+                if tail:
+                    print("[mavlink] PX4-SITL log tail:")
+                    print(tail)
+            return False
+        if not _is_tcp_listening_passive(PX4_HIL_TCP_PORT):
+            print("[mavlink] PX4-SITL appears connected to AirSim HIL.")
+            return True
+        time.sleep(1.0)
+    print("[mavlink] PX4-SITL did not consume the HIL listener before probe start.")
+    return False
+
+
+def _run_mavlink_udp_probe(probe_seconds: float) -> int:
+    print(f"[mavlink] running probe for {probe_seconds:.0f}s.\n")
+    sys.stdout.flush()
+    return subprocess.call(
+        [
+            sys.executable,
+            "-m",
+            "src.check_mavlink",
+            "--duration",
+            str(probe_seconds),
+            "--quiet",
+            "--decode-attitude",
+        ],
+    )
+
+
+def _run_mavlink_probe_session(probe_seconds: float) -> int:
+    try:
+        px4_proc = _start_px4_sitl_for_probe()
+        if px4_proc is None:
+            _print_px4_bringup_instructions(_windows_host_ip_for_wsl())
+        else:
+            _wait_for_px4_hil_connection(px4_proc)
+
+        rc = _run_mavlink_udp_probe(probe_seconds)
+        print()
+        if rc == 0:
+            print("[mavlink] SUCCESS: Colosseum + PX4-SITL emitted MAVLink.")
+        else:
+            print(
+                "[mavlink] FAIL: probe saw no MAVLink. Verify (1) PX4 actually started, "
+                "(2) PX4 logged 'Simulator connected on TCP port 4560', (3) Windows "
+                "Defender Firewall isn't blocking inbound UDP from WSL."
+            )
+        return rc
+    except KeyboardInterrupt:
+        _cleanup_on_interrupt()
+        raise SystemExit(130) from None
+    finally:
+        _terminate_started_processes("[mavlink] probe finished; stopping launched processes...")
+        if restore_simpleflight_settings():
+            print("[mavlink] restored SimpleFlight AirSim settings after probe.")
 
 
 def _build_mavlink_launch_plan() -> dict:
@@ -617,9 +894,7 @@ def main_mavlink_all() -> None:
 
 def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> None:
     _register_signal_handlers_once()
-    _handles.ue = None
-    _handles.main = None
-    _handles.cleanup_done = False
+    _handles.reset()
 
     _load_env_local()
 
@@ -676,31 +951,10 @@ def launch_mavlink(*, run_probe: bool = False, probe_seconds: float = 60.0) -> N
             "start UE manually with the new settings."
         )
 
-    _print_px4_bringup_instructions(_windows_host_ip_for_wsl())
-
     if run_probe:
-        print(
-            f"[mavlink] running probe for {probe_seconds:.0f}s -- start PX4-SITL now.\n"
-        )
-        try:
-            rc = subprocess.call(
-                [sys.executable, "-m", "src.check_mavlink",
-                 "--duration", str(probe_seconds)],
-            )
-        except KeyboardInterrupt:
-            _cleanup_on_interrupt()
-            raise SystemExit(130) from None
+        raise SystemExit(_run_mavlink_probe_session(probe_seconds))
 
-        print()
-        if rc == 0:
-            print("[mavlink] SUCCESS: Colosseum + PX4-SITL emitted MAVLink.")
-        else:
-            print(
-                "[mavlink] FAIL: probe saw no MAVLink. Verify (1) PX4 actually started, "
-                "(2) PX4 logged 'Simulator connected on TCP port 4560', (3) Windows "
-                "Defender Firewall isn't blocking inbound UDP from WSL."
-            )
-        raise SystemExit(rc)
+    _print_px4_bringup_instructions(_windows_host_ip_for_wsl())
 
     print(
         "[mavlink] UE is running. Run `uv run check-mavlink` in another terminal "
@@ -734,20 +988,19 @@ def launch(
     script_path: str = "main.py",
 ) -> None:
     _register_signal_handlers_once()
-    _handles.ue = None
-    _handles.main = None
-    _handles.cleanup_done = False
+    _handles.reset()
 
     _load_env_local()
 
     from src.config import load_config
-    from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint, resolve_control_transport
+    from src.mavlink_endpoints import first_mavlink_heartbeat_endpoint
     from src.simulator_specs import assert_specification_snapshot_if_required
 
     config = load_config()
     assert_specification_snapshot_if_required(config)
     sim_cfg = config["simulator"]
-    transport = resolve_control_transport(config)
+    restored_simpleflight = _maybe_restore_simpleflight_from_backup()
+    transport = _launch_transport(config, restored_simpleflight=restored_simpleflight)
     resolved_transport = transport
     resolved_mavlink_endpoint: str | None = None
     if transport == "mavlink":
@@ -767,7 +1020,6 @@ def launch(
     airsim_port = int(sim_cfg.get("airsim_port", 41451))
     rpc_ready_timeout_s = max(15.0, float(sim_cfg.get("rpc_ready_timeout_seconds", 120.0)))
     rpc_tout_label = f"{rpc_ready_timeout_s:.0f}"
-    _maybe_restore_simpleflight_from_backup()
     _ensure_camera_settings(
         airsim_port,
         view_mode,

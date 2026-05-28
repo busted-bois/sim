@@ -128,6 +128,48 @@ def _mavlink_highres_imu(
     return False, last_err, endpoints
 
 
+def _mavlink_attitude(config: dict) -> tuple[bool, str, list[str]]:
+    from pymavlink import mavutil as _mavutil
+
+    endpoints = candidate_mavlink_endpoints(config)
+    mav_cfg = config.get("control", {}).get("mavlink", {})
+    attitude_cfg = mav_cfg.get("attitude", {})
+    interval_us = int(1e6 / max(1.0, float(attitude_cfg.get("request_hz", 50.0))))
+    last_err = ""
+    for endpoint in endpoints:
+        connection = None
+        try:
+            connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
+            heartbeat = connection.wait_heartbeat(timeout=2.0)
+            if heartbeat is None:
+                continue
+            message_id = getattr(_mavutil.mavlink, "MAVLINK_MSG_ID_ATTITUDE", None)
+            if message_id is not None:
+                connection.mav.message_interval_send(int(message_id), interval_us)
+            deadline = time.monotonic() + 2.5
+            samples = 0
+            while time.monotonic() < deadline:
+                message = connection.recv_match(
+                    type=["ATTITUDE"],
+                    blocking=True,
+                    timeout=0.5,
+                )
+                if message is not None:
+                    samples += 1
+                    yaw = float(getattr(message, "yaw", 0.0))
+                    return True, f"{endpoint} yaw_rad={yaw:.3f} samples={samples}", endpoints
+            last_err = "timed out waiting for ATTITUDE after requesting stream"
+        except Exception as exc:
+            last_err = str(exc)
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except OSError:
+                    pass
+    return False, last_err, endpoints
+
+
 def _normalized_resolution(vision_cfg: dict[str, Any]) -> list[int]:
     resolution = vision_cfg.get("resolution", [640, 360])
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
@@ -338,6 +380,21 @@ def run_preflight() -> int:
                     f"endpoints={imu_endpoints}. last_err={imu_detail}"
                 )
                 if require_imu:
+                    errors.append(message)
+                else:
+                    warnings.append(f"{message} (warning only before simulator launch)")
+        attitude_cfg = config.get("control", {}).get("mavlink", {}).get("attitude", {})
+        if bool(attitude_cfg.get("enabled", True)):
+            att_ok, att_detail, att_endpoints = _mavlink_attitude(config)
+            require_attitude = bool(attitude_cfg.get("require_stream", False))
+            if att_ok:
+                passes.append(f"MAVLink ATTITUDE detected via {att_detail}")
+            else:
+                message = (
+                    "MAVLink ATTITUDE not detected on any endpoint after requesting the stream. "
+                    f"endpoints={att_endpoints}. last_err={att_detail}"
+                )
+                if require_attitude:
                     errors.append(message)
                 else:
                     warnings.append(f"{message} (warning only before simulator launch)")

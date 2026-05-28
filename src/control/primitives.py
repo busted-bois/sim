@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import errno
+import math
 import os
 import sys
 import threading
 import time
 from typing import TYPE_CHECKING
+
+import airsim
 
 if TYPE_CHECKING:
     from src.config import Config
@@ -195,6 +198,47 @@ def land_with_telemetry(
         if sampler is not None:
             sampler.stop()
             print(f"[{label}] Landing telemetry saved: {sampler.out_path}")
+
+
+def set_front_camera_pose(client: FlightClient, config: Config | dict) -> None:
+    vision_cfg = config.get("vision", {})
+    camera_name = str(vision_cfg.get("camera_name", "0"))
+    cam_cfg = config.get("camera", {})
+    pose_offset = tuple(cam_cfg.get("pose_offset", [0.35, 0.0, -0.05]))
+    pitch_up_degrees = float(cam_cfg.get("pitch_up_degrees", 20.0))
+    roll_degrees = float(cam_cfg.get("roll_degrees", 0.0))
+    yaw_degrees = float(cam_cfg.get("yaw_degrees", 0.0))
+    front_pose = airsim.Pose(
+        airsim.Vector3r(pose_offset[0], pose_offset[1], pose_offset[2]),
+        _airsim_quaternion_from_euler(
+            math.radians(roll_degrees),
+            math.radians(pitch_up_degrees),
+            math.radians(yaw_degrees),
+        ),
+    )
+    try:
+        client.simSetCameraPose(camera_name, front_pose)
+    except Exception as exc:
+        print(f"Warning: failed to set front camera pose for '{camera_name}': {exc}")
+
+
+def _airsim_quaternion_from_euler(
+    roll_rad: float,
+    pitch_rad: float,
+    yaw_rad: float,
+) -> airsim.Quaternionr:
+    cr = math.cos(roll_rad / 2.0)
+    sr = math.sin(roll_rad / 2.0)
+    cp = math.cos(pitch_rad / 2.0)
+    sp = math.sin(pitch_rad / 2.0)
+    cy = math.cos(yaw_rad / 2.0)
+    sy = math.sin(yaw_rad / 2.0)
+    return airsim.Quaternionr(
+        cr * sp * cy + sr * cp * sy,
+        sr * cp * cy - cr * sp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
 
 
 def wait_until_stationary(

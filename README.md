@@ -177,6 +177,12 @@ uv run mavlink-all   # live; needs WSL mirrored networking
 
 `mavlink-all` exits with code 2 if MAVLink packets arrive but ATTITUDE decode stays 0 for 90s (`-SkipAttitudeGate` to disable). Config: `control.mavlink.attitude` in `sim.config.json`. Wire into `PymavlinkFlightClient` via `src/mavlink/integration.py`.
 
+For `uv run sim-mavlink probe`, PX4 auto-starts through WSL. If PX4 is not in the
+default distro, set `AIGP_WSL_DISTRO=<name>` in `.env.local`. Cold WSL starts can be
+slow on first run; tune `AIGP_WSL_STARTUP_TIMEOUT_SECONDS` or
+`AIGP_WSL_PATH_TIMEOUT_SECONDS` if a teammate's machine needs longer than the 45s
+defaults. The probe writes the PX4 auto-start log to `logs/mavlink/probe_px4_latest.log`.
+
 ## Project Structure
 
 ```
