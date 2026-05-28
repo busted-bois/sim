@@ -3,12 +3,13 @@ name: configure-simulator
 description: Configure the AIGP drone simulator end-to-end for a chosen combination of Unreal Engine version, course/map, and control transport (AirSim RPC vs MAVLink/PX4). Use when the user says things like "set up the simulator", "configure UE5 + MAVLink", "switch to PX4 mode", "use the square gate course", "swap to AirSim transport", "I need the simulator running with X". Returns exact step-by-step commands and the precise `sim.config.json` / `~/Documents/AirSim/settings.json` deltas to apply. Does not cover the one-time PX4 build inside WSL — see the `setup-px4-mavlink-bridge` skill for that.
 metadata:
   applies-to: ai-grand-prix_drone-challenge
-  combos-covered: ue5.4+blocksv2+airsim, ue5.4+blocksv2+mavlink, ue5.4+custom-course+airsim, ue5.4+custom-course+mavlink
+  combos-covered: ue5.4+blocksv2+airsim, ue5.4+blocksv2+mavlink
+  pending-combos: ue5.4+custom-course+airsim, ue5.4+custom-course+mavlink
 ---
 
 # Configure Simulator
 
-This skill gets the simulator into a specific, reproducible configuration. **Every supported combination of `(engine, course, transport)` resolves to one reference runbook** in [`references/`](references/). Load only the reference you need.
+This skill gets the simulator into a specific, reproducible configuration. **Every supported combination of `(engine, course, transport)` resolves to one reference runbook** in [`references/`](references/). Load only the reference you need. Custom-course flows are documented as a pending dependency and must not be presented as runnable unless `src/course_sync.py` and `course/` are present on the checked-out branch.
 
 ## How to use this skill
 
@@ -22,7 +23,7 @@ This skill gets the simulator into a specific, reproducible configuration. **Eve
 | Dimension     | Values                                                    | Default in this repo                    |
 | ------------- | --------------------------------------------------------- | --------------------------------------- |
 | **engine**    | `ue5.4` (Colosseum fork), `ue4.27` (legacy upstream AirSim) | `ue5.4`                                 |
-| **course**    | `blocksv2`, `custom` (any other UE map asset)             | `blocksv2`                              |
+| **course**    | `blocksv2`; `custom` is pending `course_sync` support     | `blocksv2`                              |
 | **transport** | `airsim` (SimpleFlight RPC), `mavlink` (PX4-SITL)         | `airsim`                                |
 
 `engine=ue4.27` and `engine=ue4.16` exist only as historical pointers — this codebase targets UE 5.4. See [`references/legacy-ue4-airsim.md`](references/legacy-ue4-airsim.md) before promising any UE 4.x setup.
@@ -33,8 +34,8 @@ This skill gets the simulator into a specific, reproducible configuration. **Eve
 | ------- | -------- | --------- | --------------------------------------------------------------- | -------------------------------- |
 | ue5.4   | blocksv2 | airsim    | [`references/ue54-blocksv2-airsim.md`](references/ue54-blocksv2-airsim.md)   | `uv run sim`                     |
 | ue5.4   | blocksv2 | mavlink   | [`references/ue54-blocksv2-mavlink.md`](references/ue54-blocksv2-mavlink.md) | `uv run mavlink-all`             |
-| ue5.4   | custom   | airsim    | [`references/ue54-custom-course.md`](references/ue54-custom-course.md)   | `uv run sim map=<course>`        |
-| ue5.4   | custom   | mavlink   | [`references/ue54-custom-course.md`](references/ue54-custom-course.md)   | stage with `uv run sim map=<course>`, then `uv run mavlink-all` |
+| ue5.4   | custom   | airsim    | [`references/ue54-custom-course.md`](references/ue54-custom-course.md)   | pending `course_sync`; do not run on this branch |
+| ue5.4   | custom   | mavlink   | [`references/ue54-custom-course.md`](references/ue54-custom-course.md)   | pending `course_sync`; do not run on this branch |
 | ue4.27  | any      | airsim    | [`references/legacy-ue4-airsim.md`](references/legacy-ue4-airsim.md)         | not supported by this repo       |
 | ue4.16  | any      | any       | [`references/legacy-ue4-airsim.md`](references/legacy-ue4-airsim.md)         | not supported by this repo       |
 
@@ -53,7 +54,7 @@ All bundled content for this skill lives under `.agents/skills/configure-simulat
 
 | What you're adding                                                | Where it goes                                                          |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| A new course (gates/obstacles for the existing map)               | **No new skill file.** Drop the actors at `course/<name>/FlyingExampleMapV2/` (repo root) and swap with `uv run sim map=<name>`. See [`references/ue54-custom-course.md`](references/ue54-custom-course.md). |
+| A new course (gates/obstacles for the existing map)               | Pending `course_sync` support. Once present, drop actors at `course/<name>/FlyingExampleMapV2/` and swap with `uv run sim map=<name>`. See [`references/ue54-custom-course.md`](references/ue54-custom-course.md). |
 | A course needing unique *launch* steps (custom physics, lighting) | `references/courses/<course-name>.md`. Add a row to the matrix above pointing at it. |
 | A new transport (e.g. ROS 2 bridge)                               | `references/transports/<transport>.md`. Add a matrix column.            |
 | A new engine version with a different launcher                    | `references/<engine-tag>-<course>-<transport>.md`. Add matrix rows.    |
@@ -61,7 +62,7 @@ All bundled content for this skill lives under `.agents/skills/configure-simulat
 
 **Do not fork this SKILL.md per combo.** The router stays singular; new combos = new rows + new reference files only.
 
-Course content (the External Actors that define each course) lives under `course/<token>/` at the repo root, **not** in this skill — `src/course_sync.py` stages it into the uproject's `FlyingExampleMapV2` on launch. The skill only stores the **instructions** for swapping; the swap itself is the deterministic `uv run sim map=<course>` script, not an AI edit. See [`references/ue54-custom-course.md`](references/ue54-custom-course.md).
+Course content (the External Actors that define each course) will live under `course/<token>/` at the repo root once the course system lands. `src/course_sync.py` is expected to stage it into the uproject's `FlyingExampleMapV2` on launch. Until those files exist on the checked-out branch, custom-course requests are not runnable here; point users at [`references/ue54-custom-course.md`](references/ue54-custom-course.md) for the dependency check instead of running `uv run sim map=<course>`.
 
 If a new combination genuinely needs different prereqs (e.g. a new engine version with a different launcher), add a row to the matrix above and drop a new file in `references/`. Do **not** fork this skill.
 
@@ -71,8 +72,8 @@ The user rarely names all three dimensions explicitly. Map natural phrases:
 
 - "MAVLink mode", "PX4 mode", "use the PX4 bridge" → `transport=mavlink`
 - "regular sim", "default sim", "SimpleFlight", "RPC mode" → `transport=airsim`
-- "BlocksV2", "the default map", "current map", "stock" → `course=blocksv2` (i.e. `map=main`)
-- "square gate", "ring course", "wall course", "custom map" → `course=custom`. Resolve to the matching `course/<token>` name and swap with `uv run sim map=<token>` — do **not** hand-edit `map_asset`. See [`references/ue54-custom-course.md`](references/ue54-custom-course.md).
+- "BlocksV2", "the default map", "current map", "stock" → `course=blocksv2`
+- "square gate", "ring course", "wall course", "custom map" → `course=custom`. First verify `src/course_sync.py` and `course/` exist. If either is missing, say custom-course swapping is pending on this branch; do **not** hand-edit `map_asset` or run `uv run sim map=<token>`. See [`references/ue54-custom-course.md`](references/ue54-custom-course.md).
 - "UE5", "Unreal 5", "Colosseum" → `engine=ue5.4`
 - "UE4", "legacy AirSim", "old Unreal" → `engine=ue4.27` (and warn it's unsupported here)
 

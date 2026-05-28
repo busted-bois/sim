@@ -1,6 +1,6 @@
-# UE 5.4 + custom course (swap via `uv run sim map=<course>`)
+# UE 5.4 + custom course (pending `course_sync` support)
 
-Course swapping in this repo is a **deterministic script**, not an AI edit. Do **not** hand-edit `map_asset` — the launcher stages the chosen course's actors into the map for you. Your job here is to pick the right course token and run one command.
+Course swapping is intended to be a **deterministic script**, not an AI edit. Do **not** hand-edit `map_asset`. On branches that include `src/course_sync.py`, the launcher stages the chosen course's actors into the map for you. On this branch, treat custom-course support as pending until the prerequisite check below passes.
 
 > **Prerequisite — the course system must be present on your branch.**
 > This runbook uses `src/course_sync.py` and the launcher's `map=` override, which originated on the `babblewall` branch and is **not yet merged** into `main` / `sim_config_ai_skill`. Verify before relying on it:
@@ -16,11 +16,13 @@ Course swapping in this repo is a **deterministic script**, not an AI edit. Do *
 
 Every course reuses the **same** UE map, `FlyingExampleMapV2`. A "course" is just a set of External Actors (gates, obstacles) stored at `course/<token>/FlyingExampleMapV2/`. On launch, `course_sync.py` copies the chosen course's actors into the uproject's `Content/__ExternalActors__/FlyingCPP/Maps/FlyingExampleMapV2`, replacing whatever was there. So `map_name` / `map_asset` never change — only the actor content does. This is why a course swap is mechanical and needs no AI.
 
-## Swap the course (one command)
+## Swap the course
 
 ```powershell
 uv run sim map=<course>
 ```
+
+Only run this command after the prerequisite check above passes.
 
 - `map=` overrides `sim.config.json`; if repeated, last wins; `map=none` or empty = no staging (keep current).
 - The token must match a folder under `course/` (matched case-insensitively) **and** that folder must be in the extracted layout `course/<token>/FlyingExampleMapV2/...`.
