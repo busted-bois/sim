@@ -87,4 +87,4 @@ After running any combo's launch command, verify success per its reference. Gene
 - `uv run verify-sim-physics-metadata` — confirms 120 Hz physics is recorded in `docs/simulator_specs.json`.
 - For MAVLink combos: `uv run check-mavlink --duration 20` should show non-zero MAVLink packets and (if `--decode-attitude`) non-zero ATTITUDE decodes.
 
-Do not declare success on log lines alone — confirm the drone actually appears in the Unreal viewport and (for autonomous runs) `main.py` prints `Connected!` followed by phase logs.
+Do not declare success on log lines alone — confirm the drone actually appears in the Unreal viewport and, for autonomous runs, that `main.py` shows the expected transport-specific startup output from the selected reference (for example, AirSim/RPC runs may print `Connected!`, while MAVLink/PX4 runs should be verified using their documented startup/telemetry logs instead).
