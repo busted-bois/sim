@@ -43,7 +43,7 @@ MAVLink/PX4 mode is **probe-only** in this repo — it brings UE up with PX4Mult
 }
 ```
 
-**Algorithm pairing.** MAVLink mode in this repo is **probe-only** — `mavlink-all` does not run `main.py`. If you want `main.py` to start, set `"algorithm"` to `"mavlink_jitter"` (MAVLink-specific) and use `uv run sim` directly. For probe-only flows (the recommended path), the algorithm field is unread.
+**Algorithm pairing.** MAVLink mode in this repo is **probe-only** — `mavlink-all` does not run `main.py`. If you want `main.py` to start, set `"algorithm"` to `"mavlink_jitter"` (MAVLink-specific), **but do not treat `uv run sim` as a one-command MAVLink bring-up**: it does **not** start PX4-SITL. Run `uv run mavlink-all` first (or `uv run sim-mavlink` and then start PX4-SITL yourself in a separate WSL terminal) until PX4 is up and the MAVLink bridge is live, then run `uv run sim` to start `main.py` against that existing PX4 session. For probe-only flows (the recommended path), the algorithm field is unread.
 
 ## `~/Documents/AirSim/settings.json`
 
