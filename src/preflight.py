@@ -223,6 +223,14 @@ def _preflight_static_only(argv: list[str] | None = None) -> bool:
     return "--static-only" in args
 
 
+def _local_unreal_path_warning_reason(*, static_only: bool) -> str | None:
+    if static_only:
+        return "warning only for static preflight"
+    if sys.platform != "win32":
+        return "warning only on non-Windows hosts"
+    return None
+
+
 def run_preflight(*, static_only: bool | None = None) -> int:
     _load_env_local()
     config = load_config()
@@ -262,11 +270,16 @@ def run_preflight(*, static_only: bool | None = None) -> int:
     vision_cfg = config.get("vision", {})
     camera_cfg = config.get("camera", {})
     control_cfg = config.get("control", {})
+    local_unreal_warning_reason = _local_unreal_path_warning_reason(static_only=static_only)
     colosseum_path = str(sim_cfg.get("colosseum_path", "")).strip()
     if not colosseum_path:
         errors.append("simulator.colosseum_path is empty")
     elif not Path(colosseum_path).exists():
-        errors.append(f"Unreal executable not found: {colosseum_path}")
+        message = f"Unreal executable not found: {colosseum_path}"
+        if local_unreal_warning_reason:
+            warnings.append(f"{message} ({local_unreal_warning_reason})")
+        else:
+            errors.append(message)
     else:
         passes.append("Unreal executable path exists")
 
@@ -274,9 +287,17 @@ def run_preflight(*, static_only: bool | None = None) -> int:
         sim_cfg.get("project_path", "")
     ).strip()
     if not project_path:
-        errors.append("PROJECT_PATH not found (.env.local or simulator.project_path)")
+        message = "PROJECT_PATH not found (.env.local or simulator.project_path)"
+        if local_unreal_warning_reason:
+            warnings.append(f"{message} ({local_unreal_warning_reason})")
+        else:
+            errors.append(message)
     elif not Path(project_path).exists():
-        errors.append(f"Project file path not found: {project_path}")
+        message = f"Project file path not found: {project_path}"
+        if local_unreal_warning_reason:
+            warnings.append(f"{message} ({local_unreal_warning_reason})")
+        else:
+            errors.append(message)
     else:
         passes.append("PROJECT_PATH exists")
 
