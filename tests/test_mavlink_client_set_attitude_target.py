@@ -4,7 +4,7 @@ import unittest
 from pymavlink import mavutil
 
 from src.control.flight_client import build_attitude_only_type_mask, build_body_rate_type_mask
-from src.control.mavlink_client import PymavlinkFlightClient
+from src.control.mavlink_client import PX4_CUSTOM_MAIN_MODE_AUTO, PymavlinkFlightClient
 from tests.mavlink_fakes import FakeMavConnection, FakeMessage, fake_mavlink_monotonic_sleep
 
 
@@ -148,7 +148,7 @@ class PymavlinkFlightClientSetAttitudeTargetTests(unittest.TestCase):
     def test_guided_mode_throttled_between_streams(self) -> None:
         heartbeat = FakeMessage("HEARTBEAT", base_mode=0, source_system=7, source_component=3)
         connection = FakeMavConnection(heartbeat, [])
-        client = self._client(connection)
+        client = self._client(connection, guided_custom_mode=PX4_CUSTOM_MAIN_MODE_AUTO)
         mode = mavutil.mavlink.MAV_CMD_DO_SET_MODE
 
         def guided_count() -> int:

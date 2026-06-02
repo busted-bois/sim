@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import socket
 import struct
 import subprocess
@@ -18,7 +19,16 @@ from src.mavlink.attitude import decode_attitude_payload, roll_pitch_yaw_deg  # 
 from src.mavlink.attitude_bridge import AttitudeTelemetryBridge  # noqa: E402
 from src.mavlink.frame import MAVLINK_V2_STX, frame_payload, parse_mavlink  # noqa: E402
 from src.mavlink.messages import MAVLINK_MSG_ID_ATTITUDE  # noqa: E402
-from tests.mavlink_fakes import FakeMav, FakeMessage  # noqa: E402
+
+_FAKES_SPEC = importlib.util.spec_from_file_location(
+    "mavlink_fakes", ROOT / "tests" / "mavlink_fakes.py"
+)
+if _FAKES_SPEC is None or _FAKES_SPEC.loader is None:
+    raise ImportError("Could not load tests/mavlink_fakes.py")
+_FAKES = importlib.util.module_from_spec(_FAKES_SPEC)
+_FAKES_SPEC.loader.exec_module(_FAKES)
+FakeMav = _FAKES.FakeMav
+FakeMessage = _FAKES.FakeMessage
 
 SMOKE_PORT = 14598
 

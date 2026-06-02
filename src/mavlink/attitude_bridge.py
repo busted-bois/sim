@@ -73,7 +73,8 @@ class AttitudeTelemetryBridge:
     def request_interval(self, mav: Any) -> None:
         if not self.enabled:
             return
-        message_interval_send = getattr(mav, "message_interval_send", None)
+        sender = getattr(mav, "mav", mav)
+        message_interval_send = getattr(sender, "message_interval_send", None)
         if message_interval_send is None:
             return
         interval_us = int(1e6 / self.request_hz)

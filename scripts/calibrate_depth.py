@@ -88,6 +88,7 @@ def main():
                 seq=collected,
                 timestamp_s=time.time(),
                 frame_age_s=0,
+                sim_time_ns=0,
                 width=response_rgb.width,
                 height=response_rgb.height,
                 image_rgb=img_rgb

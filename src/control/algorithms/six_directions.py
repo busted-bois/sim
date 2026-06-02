@@ -49,6 +49,7 @@ class SixDirections(Algorithm):
 
         takeoff_with_settle(client, max_attempts=4, label="six_directions")
 
+        # Velocity setpoints use MAV_FRAME_LOCAL_NED (north/east/down at arm origin).
         for label, vx, vy, vz in selected:
             print(f"[six_directions] Moving {label} for {duration_s:.1f}s")
             t0 = time.perf_counter()

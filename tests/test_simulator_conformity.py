@@ -1,10 +1,55 @@
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest.mock import patch
 
 from src.config import apply_low_end_overrides
 from src.control.command_rate import CommandRateGate, normalize_command_rate_hz
-from src.preflight import official_conformant_vision_errors
+from src.preflight import official_conformant_vision_errors, run_preflight
 from src.simulator_specs import conformity_fingerprint, resolve_specification_path
 from src.vision.intrinsics import horizontal_fov_degrees
+
+
+def _minimal_preflight_config() -> dict:
+    return {
+        "algorithm": "six_directions",
+        "simulator": {
+            "colosseum_path": "Z:/missing/UnrealEditor.exe",
+            "airsim_port": 41451,
+            "rpc_ready_timeout_seconds": 1,
+            "physics_update_hz": 120.0,
+            "specification_required": False,
+        },
+        "vision": {
+            "fps": 30.0,
+            "resolution": [640, 360],
+            "fov_degrees": 90.0,
+            "startup_autotune_enabled": False,
+        },
+        "camera": {
+            "pose_offset": [0.35, 0.0, -0.05],
+            "pitch_up_degrees": 20.0,
+        },
+        "control": {
+            "command_rate_hz": 90.0,
+            "max_speed_ms": 5.0,
+            "latency_tuning": {"enabled": False},
+        },
+    }
+
+
+def _run_preflight_with_missing_local_paths(*, static_only: bool, platform: str) -> tuple[int, str]:
+    out = StringIO()
+    with (
+        patch("src.preflight._load_env_local", return_value=None),
+        patch("src.preflight.load_config", return_value=_minimal_preflight_config()),
+        patch("src.preflight.resolve_specification_path", return_value=None),
+        patch("src.preflight.sys.platform", platform),
+        patch.dict("os.environ", {"PROJECT_PATH": ""}, clear=False),
+        redirect_stdout(out),
+    ):
+        rc = run_preflight(static_only=static_only)
+    return rc, out.getvalue()
 
 
 class SimulatorConformityTests(unittest.TestCase):
@@ -127,6 +172,41 @@ class SimulatorConformityTests(unittest.TestCase):
         config["vision"]["resolution"] = [1280, 720]
         changed = conformity_fingerprint(config)
         self.assertNotEqual(baseline, changed)
+
+    def test_static_preflight_warns_for_missing_local_unreal_paths(self) -> None:
+        rc, output = _run_preflight_with_missing_local_paths(
+            static_only=True,
+            platform="win32",
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("[WARN] Unreal executable not found", output)
+        self.assertIn("[WARN] PROJECT_PATH not found", output)
+        self.assertIn("warning only for static preflight", output)
+        self.assertIn("Preflight result: OK", output)
+
+    def test_non_windows_preflight_warns_for_missing_local_unreal_paths(self) -> None:
+        rc, output = _run_preflight_with_missing_local_paths(
+            static_only=False,
+            platform="linux",
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("[WARN] Unreal executable not found", output)
+        self.assertIn("[WARN] PROJECT_PATH not found", output)
+        self.assertIn("warning only on non-Windows hosts", output)
+        self.assertIn("Preflight result: OK", output)
+
+    def test_windows_live_preflight_fails_for_missing_local_unreal_paths(self) -> None:
+        rc, output = _run_preflight_with_missing_local_paths(
+            static_only=False,
+            platform="win32",
+        )
+
+        self.assertEqual(rc, 1)
+        self.assertIn("[FAIL] Unreal executable not found", output)
+        self.assertIn("[FAIL] PROJECT_PATH not found", output)
+        self.assertIn("Preflight result: FAILED", output)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from src.control.flight_client import (
     build_position_type_mask,
     build_velocity_type_mask,
 )
-from src.control.mavlink_client import PymavlinkFlightClient
+from src.control.mavlink_client import PX4_CUSTOM_MAIN_MODE_AUTO, PymavlinkFlightClient
 from tests.mavlink_fakes import FakeMavConnection, FakeMessage
 
 
@@ -201,6 +201,7 @@ class PymavlinkSetPositionTargetLocalNedTests(unittest.TestCase):
         client = PymavlinkFlightClient(
             endpoint="udpin:0.0.0.0:14550",
             command_rate_hz=command_rate_hz,
+            guided_custom_mode=PX4_CUSTOM_MAIN_MODE_AUTO,
             send_timesync_requests=False,
             prepare_for_flight_on_connect=False,
             request_state_messages_on_connect=False,

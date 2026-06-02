@@ -28,11 +28,13 @@ This repo uses multiple AI coding tools (OpenCode, Claude, Cursor, Copilot). Ins
 
 ```bash
 uv run sim                              # One command: .env.local, UE5 (if configured), main.py
+# With control.transport "mavlink" (Windows): uv run sim also auto-starts PX4-SITL in WSL, then main.py
 uv run sim low-end                      # Low-res, reduced telemetry, attitude_four_motion
 uv run sim 3rd-person                   # FlyWithMe camera instead of FPV
 uv run sim-very-soft                    # Gentle landing profile
 uv run sim vjoy                         # Manual vJoy control + GUI
-uv run preflight                        # Safety check before launch
+uv run preflight                        # Safety check before launch (--static-only or AIGP_PREFLIGHT_STATIC_ONLY=1 skips live UDP)
+uv run prerun                           # Static MAVLink/config checks only (no UE); then uv run sim
 uv run verify-sim-physics-metadata      # Assert docs/simulator_specs.json documents 120 Hz physics
 uv run extract-simulator-specs          # Regenerate snapshot from Unreal (needs PROJECT_PATH + UE)
 uv run calibrate                        # Depth calibration with manual GUI
@@ -43,6 +45,9 @@ uv run mavlink-all                      # All-in-one: UE + PX4-SITL (WSL) + prob
 uv run sim-restore-simpleflight         # Manually restore SimpleFlight settings.json from backup (uv run sim does this automatically)
 uv run check-mavlink --decode-attitude    # Also decode ATTITUDE roll/pitch/yaw
 uv run attitude-listen                  # ATTITUDE-only UDP listener (Layer 1, no pymavlink)
+uv run position-print                   # Print current NED position once and exit
+uv run position-print --stream          # Repeat until Ctrl+C; --duration 30 for timed stream
+uv run position-print --transport airsim  # Force SimpleFlight RPC (no PX4 required)
 uv run python scripts/smoke_attitude_integration.py  # Smoke (decode + UDP inject)
 uv run --group dev pytest tests/ -q     # Unit tests (MAVLink ATTITUDE, etc.)
 uv run main.py                          # Run drone client (needs simulator running)
@@ -52,11 +57,15 @@ uv run timesync-smoke                   # Probe TIMESYNC against running MAVLink
 uv run sim-timesync-smoke               # Launch sim first, then probe TIMESYNC
 uv run attitude-smoke                   # Short MAVLink SET_ATTITUDE_TARGET stream
 uv run sim-attitude-smoke               # Same via sim_launch (AirSim settings + UE if configured)
+uv run tracking-smoke                   # LocalTracker + MAVLink (needs PX4-SITL / sim-mavlink)
+uv run integration-smoke                # unittest + exploration-smoke + attitude integration (offline)
 ```
 
-**MAVLink commands are probe-only.** `sim-mavlink`, `sim-mavlink probe`, and `mavlink-all` switch AirSim to PX4Multirotor mode and verify the MAVLink bridge — they do **not** run `main.py`. Bare `uv run sim` (SimpleFlight + RPC) is the path for autonomous flight.
+**MAVLink branch test (Windows):** set `control.transport` to `"mavlink"` in `sim.config.json`, build PX4 once in WSL (`make px4_sitl none_iris`), then run **`uv run sim` only** — do not chain `sim-mavlink` + `sim` (that launches two UE instances). Optional: `uv run prerun` before a long UE load. First time after enabling WSL mirrored networking: `wsl --shutdown` once. Launcher runs idempotent MAVLink prereqs (WSL, PX4 binary, `.wslconfig`, stale PX4 stop) then auto-starts PX4-SITL.
 
-`uv run sim` auto-restores SimpleFlight settings from `~/Documents/AirSim/settings.simpleflight.bak.json` if leftover PX4Multirotor config detected. Use `uv run sim-restore-simpleflight` to force manually.
+**MAVLink probe commands** (`sim-mavlink`, `mavlink-all`, etc.) verify the MAVLink bridge only — they do **not** run `main.py`. With `control.transport: "airsim"`, `uv run sim` uses SimpleFlight RPC (default autonomous path).
+
+`uv run sim` auto-restores SimpleFlight settings from `~/Documents/AirSim/settings.simpleflight.bak.json` if leftover PX4Multirotor config detected — **skipped** when `control.transport` is `mavlink`. Use `uv run sim-restore-simpleflight` to force manually.
 
 After Unreal starts (or if launch is skipped), the launcher **autostarts** `main.py` once AirSim RPC accepts connections, up to `simulator.rpc_ready_timeout_seconds`.
 
@@ -71,11 +80,17 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `AIGP_ENABLE_TRACE=1` — enable flight path trace line.
 - `AIGP_PAUSE_BEFORE_EXIT=1` — pause before client exit.
 - `AIGP_SKIP_MAVLINK_INTEGRATION=1` — skip UDP loopback integration tests.
+- `AIGP_SKIP_MAVLINK_PREREQ=1` — skip MAVLink WSL/PX4 prerequisite phase in `uv run sim`.
+- `AIGP_PREFLIGHT_STATIC_ONLY=1` — `uv run preflight` skips live UDP/RPC probes (same as `--static-only`).
 - `AIRSIM_PORT` — set by launcher, forwarded to main.py.
 
 ### Output Artifacts
 
 - `logs/landing_telemetry.csv` — landing telemetry (when `landing.telemetry_log.enabled=true`).
+- `logs/position_trace.csv` — MAVLink `LOCAL_POSITION_NED` path (when `control.mavlink.position_trace.enabled=true`).
+- `logs/tracking_state.csv` — fused LOCAL_NED tracker (when `control.mavlink.tracking.enabled=true`; ATTITUDE + HIGHRES_IMU + LOCAL_POSITION_NED).
+- `logs/internal_mapping_{timestamp}.csv` — exploration pose log (`exploration.internal_mapping`; fused tracking by default).
+- On-screen position/time — AirSim `simPrintLogMessage` when `control.mavlink.position_hud.enabled=true`. Use `data_source: "tracking"` for fused pose with roll/pitch/yaw (degrees), velocity, IMU rate, and tracking status; defaults to tracking when `control.mavlink.tracking.enabled` and transport is mavlink. `data_source: "trace"` shows estimator position/altitude only.
 - `logs/latency_tuning_recommendation.json` — autotuner results.
 - `logs/vision_frames/` — debug frame dumps (when `vision.save_debug_frames=true`).
 
@@ -86,8 +101,13 @@ Set via `.env.local` (loaded by `sim_launch.py` and `launch.sh`) or inline:
 - `.env.local` — `PROJECT_PATH` to UE5 project. Loaded by `uv run sim` / `launch.sh` / `launch.ps1`. Not committed.
 - `src/config.py` — Reads `sim.config.json` from project root.
 - `src/sim_launch.py` — Launcher. Entry point for `uv run sim`, `uv run sim-very-soft`, `uv run sim-low-end`, `uv run calibrate`, `uv run sim-attitude-smoke`, `uv run sim-timesync-smoke`.
-- `src/preflight.py` — Preflight safety check. Entry point for `uv run preflight`.
+- `src/preflight.py` — Preflight safety check. Entry points: `uv run preflight`, `uv run prerun` (static-only).
+- `src/mavlink_prereq.py` — MAVLink WSL/PX4 prerequisites; used by `sim_launch` and preflight static checks.
 - `src/landing_telemetry.py` — Optional CSV samples during landing.
+- `src/position_trace.py` — MAVLink `LOCAL_POSITION_NED` trace (estimator fixes, CSV on shutdown).
+- `src/tracking/` — Arm-gated LOCAL_NED origin, HIGHRES_IMU propagation (120 Hz dead reckoning), ATTITUDE fusion, UDP vision sync, `TrackingSnapshot` API. Enable with `control.mavlink.tracking.enabled: true`; request HIGHRES_IMU at 120 Hz and set `ned_environment.use_full_attitude: true` for robust exploration SLAM.
+- `src/vision/udp_video.py` — UDP port 5600 chunked JPEG reassembly (`sim_time_ns` header).
+- `src/position_hud.py` — On-screen HUD via AirSim `simPrintLogMessage` (display-only RPC; `position_hud.data_source` trace or tracking).
 - `src/control/` — Flight client abstraction (`flight_client.py`), AirSim adapter, MAVLink client (`mavlink_client.py`), primitives, command rate, IMU, timesync.
 - `src/control/algorithms/` — Pluggable flight algorithms via `@register("name")` decorator. Auto-discovered from `*.py` in the directory.
 - `src/vision/` — Vision subsystem: `feed.py` (FPV capture), `intrinsics.py` (pinhole K), `depth_perception.py` (MiDaS ONNX), `processing.py`.
@@ -113,6 +133,10 @@ Auto-discovered from `src/control/algorithms/*.py`:
 
 Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonomous_explore"`.
 
+### Exploration mapping (`autonomous_explore.exploration`)
+
+Leg/altitude/panorama mapping plus optional `exploration.slam` (grid, landmarks, loop closure). SLAM and `internal_mapping` consume fused `LocalTracker` state (full roll/pitch/yaw + IMU) when MAVLink tracking is enabled. See `docs/exploration.md` and `src.control.exploration`.
+
 ## Adding a New Algorithm
 
 1. Create `src/control/algorithms/my_algo.py`
@@ -133,6 +157,16 @@ Active algorithm set in `sim.config.json` → `"algorithm"`. Currently `"autonom
 
 Helpers on `PymavlinkFlightClient` and `FlightClient` protocol. Checklist: `docs/set_position_target_pr_test_plan.md`.
 
+### Internal NED mapping (`NedEnvironmentMap`)
+
+- Module: `src/control/ned_environment.py` — ingests `LOCAL_POSITION_NED` + `ATTITUDE`, exposes LOCAL/BODY transforms and spawn-relative XY.
+- MAVLink: `PymavlinkFlightClient.get_ned_environment()` (telemetry pump requests ATTITUDE when `control.mavlink.attitude.enabled`).
+- Algorithms: `Algorithm.ned_environment(client)`, `ned_environment_health(client)`; `SensorSnapshot.ned` in `latest_sensor_snapshot()`.
+- AirSim: `AirSimAdapter.get_ned_environment()` refreshes from RPC each call.
+- Setpoint helper: `plan_body_velocity()`; debug: `NedEnvironmentMap.export_snapshot_json()`.
+- Preflight (MAVLink): warns if ATTITUDE stream missing (`control.mavlink.attitude.require_stream` to hard-fail).
+- Docs: `docs/ned_coordinate_mapping.md`.
+
 ## Algorithm Config Sections in sim.config.json
 
 Each algorithm has its own top-level config key matching its name (e.g. `"autonomous_explore"`, `"attitude_four_motion"`). Read by algorithm constructor via `self._config`.
@@ -144,6 +178,7 @@ Key top-level config keys:
 - `"safety"` — `algorithm_timeout_seconds`
 - `"low_end_profile"` — overrides applied when `AIGP_LOW_END=1`
 - `"waypoints"` — NED coordinate list
+- `"autonomous_explore"."exploration"` — mapping scheduler (panorama, legs, altitude layers); see `docs/exploration.md`
 
 ## Ruff Exclusions
 

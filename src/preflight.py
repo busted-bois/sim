@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -47,6 +48,22 @@ def _has_nested_key(data: Any, key_path: str) -> bool:
             return False
         current = current[part]
     return isinstance(current, Mapping) and parts[-1] in current
+
+
+def _udp_video_port_probe(port: int, *, timeout_s: float = 0.5) -> tuple[bool, str]:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind(("0.0.0.0", int(port)))
+        sock.settimeout(timeout_s)
+        try:
+            data, addr = sock.recvfrom(2048)
+            return True, f"{len(data)} bytes from {addr[0]}:{addr[1]}"
+        except TimeoutError:
+            return False, "no UDP packets within probe window"
+    except OSError as exc:
+        return False, str(exc)
+    finally:
+        sock.close()
 
 
 def _airsim_reachable(host: str, port: int) -> bool:
@@ -128,6 +145,48 @@ def _mavlink_highres_imu(
     return False, last_err, endpoints
 
 
+def _mavlink_attitude(config: dict) -> tuple[bool, str, list[str]]:
+    from pymavlink import mavutil as _mavutil
+
+    endpoints = candidate_mavlink_endpoints(config)
+    mav_cfg = config.get("control", {}).get("mavlink", {})
+    attitude_cfg = mav_cfg.get("attitude", {})
+    interval_us = int(1e6 / max(1.0, float(attitude_cfg.get("request_hz", 50.0))))
+    last_err = ""
+    for endpoint in endpoints:
+        connection = None
+        try:
+            connection = _mavutil.mavlink_connection(endpoint, autoreconnect=False)
+            heartbeat = connection.wait_heartbeat(timeout=2.0)
+            if heartbeat is None:
+                continue
+            message_id = getattr(_mavutil.mavlink, "MAVLINK_MSG_ID_ATTITUDE", None)
+            if message_id is not None:
+                connection.mav.message_interval_send(int(message_id), interval_us)
+            deadline = time.monotonic() + 2.5
+            samples = 0
+            while time.monotonic() < deadline:
+                message = connection.recv_match(
+                    type=["ATTITUDE"],
+                    blocking=True,
+                    timeout=0.5,
+                )
+                if message is not None:
+                    samples += 1
+                    yaw = float(getattr(message, "yaw", 0.0))
+                    return True, f"{endpoint} yaw_rad={yaw:.3f} samples={samples}", endpoints
+            last_err = "timed out waiting for ATTITUDE after requesting stream"
+        except Exception as exc:
+            last_err = str(exc)
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except OSError:
+                    pass
+    return False, last_err, endpoints
+
+
 def _normalized_resolution(vision_cfg: dict[str, Any]) -> list[int]:
     resolution = vision_cfg.get("resolution", [640, 360])
     if isinstance(resolution, (list, tuple)) and len(resolution) == 2:
@@ -157,10 +216,27 @@ def official_conformant_vision_errors(
     return errors
 
 
-def run_preflight() -> int:
+def _preflight_static_only(argv: list[str] | None = None) -> bool:
+    if os.environ.get("AIGP_PREFLIGHT_STATIC_ONLY", "").strip() == "1":
+        return True
+    args = argv if argv is not None else sys.argv[1:]
+    return "--static-only" in args
+
+
+def _local_unreal_path_warning_reason(*, static_only: bool) -> str | None:
+    if static_only:
+        return "warning only for static preflight"
+    if sys.platform != "win32":
+        return "warning only on non-Windows hosts"
+    return None
+
+
+def run_preflight(*, static_only: bool | None = None) -> int:
     _load_env_local()
     config = load_config()
     transport = resolve_control_transport(config)
+    if static_only is None:
+        static_only = _preflight_static_only()
 
     errors: list[str] = []
     warnings: list[str] = []
@@ -194,11 +270,16 @@ def run_preflight() -> int:
     vision_cfg = config.get("vision", {})
     camera_cfg = config.get("camera", {})
     control_cfg = config.get("control", {})
+    local_unreal_warning_reason = _local_unreal_path_warning_reason(static_only=static_only)
     colosseum_path = str(sim_cfg.get("colosseum_path", "")).strip()
     if not colosseum_path:
         errors.append("simulator.colosseum_path is empty")
     elif not Path(colosseum_path).exists():
-        errors.append(f"Unreal executable not found: {colosseum_path}")
+        message = f"Unreal executable not found: {colosseum_path}"
+        if local_unreal_warning_reason:
+            warnings.append(f"{message} ({local_unreal_warning_reason})")
+        else:
+            errors.append(message)
     else:
         passes.append("Unreal executable path exists")
 
@@ -206,9 +287,17 @@ def run_preflight() -> int:
         sim_cfg.get("project_path", "")
     ).strip()
     if not project_path:
-        errors.append("PROJECT_PATH not found (.env.local or simulator.project_path)")
+        message = "PROJECT_PATH not found (.env.local or simulator.project_path)"
+        if local_unreal_warning_reason:
+            warnings.append(f"{message} ({local_unreal_warning_reason})")
+        else:
+            errors.append(message)
     elif not Path(project_path).exists():
-        errors.append(f"Project file path not found: {project_path}")
+        message = f"Project file path not found: {project_path}"
+        if local_unreal_warning_reason:
+            warnings.append(f"{message} ({local_unreal_warning_reason})")
+        else:
+            errors.append(message)
     else:
         passes.append("PROJECT_PATH exists")
 
@@ -311,6 +400,14 @@ def run_preflight() -> int:
         warnings.append("Simulator specification snapshot not found; dimension checks were skipped")
 
     if transport == "mavlink":
+        from src.mavlink_prereq import run_static_mavlink_checks
+
+        static_errors, static_warnings, static_passes = run_static_mavlink_checks(config)
+        passes.extend(static_passes)
+        warnings.extend(static_warnings)
+        errors.extend(static_errors)
+
+    if transport == "mavlink" and not static_only:
         heartbeat_ok, detail, endpoints = _mavlink_heartbeat(config)
         require_reachable = bool(
             config.get("preflight", {}).get("require_mavlink_reachable", False)
@@ -341,7 +438,36 @@ def run_preflight() -> int:
                     errors.append(message)
                 else:
                     warnings.append(f"{message} (warning only before simulator launch)")
-    else:
+        tracking_cfg = config.get("control", {}).get("mavlink", {}).get("tracking", {})
+        if bool(tracking_cfg.get("enabled", False)):
+            passes.append("MAVLink internal tracking is enabled in config")
+        udp_cfg = config.get("vision", {}).get("udp_video", {})
+        if bool(udp_cfg.get("enabled", False)):
+            port = int(udp_cfg.get("port", 5600))
+            udp_ok, udp_detail = _udp_video_port_probe(port)
+            if udp_ok:
+                passes.append(f"UDP video port {port} received packets ({udp_detail})")
+            else:
+                warnings.append(
+                    f"UDP video enabled on port {port} but no packets yet ({udp_detail}). "
+                    "Start the simulator video stream before flight."
+                )
+        attitude_cfg = config.get("control", {}).get("mavlink", {}).get("attitude", {})
+        if bool(attitude_cfg.get("enabled", True)):
+            att_ok, att_detail, att_endpoints = _mavlink_attitude(config)
+            require_attitude = bool(attitude_cfg.get("require_stream", False))
+            if att_ok:
+                passes.append(f"MAVLink ATTITUDE detected via {att_detail}")
+            else:
+                message = (
+                    "MAVLink ATTITUDE not detected on any endpoint after requesting the stream. "
+                    f"endpoints={att_endpoints}. last_err={att_detail}"
+                )
+                if require_attitude:
+                    errors.append(message)
+                else:
+                    warnings.append(f"{message} (warning only before simulator launch)")
+    elif not static_only:
         host, port = simulator_endpoint(config)
         require_reachable = bool(config.get("preflight", {}).get("require_airsim_reachable", False))
         if _airsim_reachable(host, port):
@@ -372,6 +498,14 @@ def run_preflight() -> int:
 
 def main() -> None:
     raise SystemExit(run_preflight())
+
+
+def main_prerun() -> None:
+    """Static MAVLink/config checks without waiting for a running simulator."""
+    rc = run_preflight(static_only=True)
+    if rc == 0:
+        print("Prerun result: OK — next: uv run sim")
+    raise SystemExit(rc)
 
 
 if __name__ == "__main__":

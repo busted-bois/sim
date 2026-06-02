@@ -77,6 +77,7 @@ From a fresh Cursor session, use this exact sequence.
      ```bash
      uv run preflight
      ```
+   - For MAVLink on Windows without starting UE: `uv run prerun` (static WSL/PX4/config checks only).
 
 8. **Optional gentler landing profile (new)**
    - Run:
@@ -115,7 +116,8 @@ From a fresh Cursor session, use this exact sequence.
 
 | Step | What to do |
 | ---- | ---------- |
-| **Start** | From repo root: `uv run preflight` (optional), then `uv run sim`. Ensure `.env.local` has `PROJECT_PATH` to your `.uproject`. |
+| **Start** | From repo root: `uv run preflight` or `uv run prerun` (optional), then `uv run sim`. Ensure `.env.local` has `PROJECT_PATH` to your `.uproject`. |
+| **MAVLink (Windows)** | Set `control.transport` to `"mavlink"`. One-time: build PX4 in WSL (`make px4_sitl none_iris`). Run **`uv run sim` only** (not `sim-mavlink` then `sim`). After first mirrored `.wslconfig` write: `wsl --shutdown` once. |
 | **Low-end smooth mode** | Use `uv run sim low-end` to prioritize smoother control on weaker hardware by reducing runtime logging and telemetry load. |
 | **Stop** | In the terminal running the client, press `Ctrl+C`. Then close Unreal. Closing Unreal first may disconnect the client with errors; that is usually harmless. |
 | **Reset** | Restart the Unreal/AirSim session if the drone or API state acts stuck; run `uv run sim` again. |
@@ -130,6 +132,8 @@ From a fresh Cursor session, use this exact sequence.
 | Unreal asks for a project file first | `PROJECT_PATH` missing or wrong | Set `PROJECT_PATH` in `.env.local` or `simulator.project_path`, or run `pwsh scripts/fix_project_path.ps1`. |
 | Connection / RPC errors | Simulator not up or wrong port | Start Unreal; check `simulator.airsim_port` matches AirSim. |
 | Preflight warns “AirSim RPC not reachable” | Normal if UE is not running yet | Start the sim, or set `preflight.require_airsim_reachable` to `false` (default) to only warn. |
+| Two Unreal windows / no MAVLink HUD | Ran `sim-mavlink` then `uv run sim`, or `transport` still `airsim` | Use **`uv run sim` only** with `control.transport: "mavlink"`. |
+| MAVLink prereq fails in &lt;5s | PX4 not built in WSL or WSL missing | Follow the printed `wsl` build command; run `uv run prerun` to verify before UE. |
 | `HIGHRES_IMU` smoke test times out | MAVLink transport not active, wrong endpoint, or autopilot not publishing IMU | Set `control.transport="mavlink"`, verify `control.mavlink.endpoint`, and rerun `uv run highres-imu-smoke` after the vehicle is fully up. |
 
 ## MAVLink HIGHRES_IMU

@@ -24,6 +24,7 @@ from src.control.flight_client import (
     build_body_rate_type_mask,
     build_position_type_mask,
     build_velocity_type_mask,
+    build_velocity_yaw_rate_type_mask,
 )
 from src.control.highres_imu import (
     HighresImuHealth,
@@ -32,8 +33,26 @@ from src.control.highres_imu import (
     merge_highres_imu_sample,
 )
 from src.control.mavlink_timesync import TimesyncOutboundRequest, TimesyncSnapshot, TimesyncStore
+from src.control.ned_environment import (
+    MavlinkNedIngest,
+    NedEnvironmentHealth,
+    NedEnvironmentMap,
+    load_ned_environment_config,
+)
+from src.control.utils import Quaternionr, orientation_from_rpy, orientation_from_yaw
+from src.mavlink.attitude_bridge import AttitudeTelemetryBridge
+from src.mavlink.integration import attach_attitude_bridge
+from src.position_trace import PositionTraceSnapshot, PositionTraceStore
 
 _logger = logging.getLogger(__name__)
+
+# PX4 custom main modes (param2 for MAV_CMD_DO_SET_MODE + MAV_MODE_FLAG_CUSTOM_MODE_ENABLED).
+PX4_CUSTOM_MAIN_MODE_AUTO: Final[int] = 4
+PX4_CUSTOM_MAIN_MODE_OFFBOARD: Final[int] = 6
+_DEFAULT_GUIDED_CUSTOM_MODE: Final[int] = PX4_CUSTOM_MAIN_MODE_OFFBOARD
+_OFFBOARD_PRIME_SETPOINT_COUNT: Final[int] = 10
+_OFFBOARD_PRIME_INTERVAL_S: Final[float] = 0.05
+_MAV_AUTOPILOT_PX4: Final[int] = int(getattr(mavutil.mavlink, "MAV_AUTOPILOT_PX4", 12))
 
 
 def _parse_udp_endpoint(endpoint: str) -> tuple[str, int]:
@@ -62,6 +81,7 @@ class _Vector3r:
 class _KinematicsEstimated:
     position: _Vector3r
     linear_velocity: _Vector3r
+    orientation: Quaternionr
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +136,7 @@ class PymavlinkFlightClient:
         endpoint: str | None = None,
         command_rate_hz: float = 50.0,
         state_request_hz: float = 20.0,
-        guided_custom_mode: int = 4,
+        guided_custom_mode: int = _DEFAULT_GUIDED_CUSTOM_MODE,
         takeoff_altitude_m: float = 5.0,
         takeoff_climb_speed_ms: float = 1.0,
         land_descent_speed_ms: float = 0.6,
@@ -144,6 +164,9 @@ class PymavlinkFlightClient:
         attitude_target_throttle_body_z: bool = False,
         connection_factory: Callable[..., Any] | None = None,
         log_commands: bool = True,
+        sim_config: dict[str, Any] | None = None,
+        position_trace: PositionTraceStore | None = None,
+        local_tracker: Any | None = None,
     ) -> None:
         self._endpoint = endpoint.strip() if endpoint else self._DEFAULT_ENDPOINT
         _parse_udp_endpoint(self._endpoint)
@@ -155,6 +178,8 @@ class PymavlinkFlightClient:
         )
         self._state_request_hz = state_request_hz
         self._guided_custom_mode = guided_custom_mode
+        self._offboard_ready = False
+        self._autopilot: int | None = None
         self._takeoff_altitude_m = takeoff_altitude_m
         self._takeoff_climb_speed_ms = takeoff_climb_speed_ms
         self._land_descent_speed_ms = land_descent_speed_ms
@@ -207,6 +232,47 @@ class PymavlinkFlightClient:
         self._guided_mode_last_sent_monotonic_s: float | None = None
         self._motion_epoch_monotonic: float | None = None
         self._attitude_target_throttle_body_z = bool(attitude_target_throttle_body_z)
+        self._local_position_log_counter = 0
+        self._position_trace = position_trace
+        self._local_tracker = local_tracker
+        self._armed_previous = False
+
+        sim_cfg = sim_config or {}
+        ned_settings = load_ned_environment_config(sim_cfg)
+        self._ned_environment = NedEnvironmentMap(ned_settings)
+        self._ned_ingest = MavlinkNedIngest(self._ned_environment)
+        self._attitude_bridge = AttitudeTelemetryBridge.from_sim_config(sim_cfg)
+        attach_attitude_bridge(self, self._attitude_bridge)
+
+    def get_ned_environment(self) -> NedEnvironmentMap:
+        return self._ned_environment
+
+    def get_ned_environment_health(self) -> NedEnvironmentHealth:
+        return self._ned_environment.get_health()
+
+    def _kinematics_from_ned(self) -> _KinematicsEstimated:
+        snap = self._ned_environment.snapshot()
+        pos = snap.position
+        vel = snap.velocity
+        if snap.has_attitude and snap.attitude is not None:
+            att = snap.attitude
+            orientation = orientation_from_rpy(att.roll, att.pitch, att.yaw)
+        else:
+            orientation = orientation_from_yaw(0.0)
+        return _KinematicsEstimated(
+            position=_Vector3r(pos.x, pos.y, pos.z),
+            linear_velocity=_Vector3r(vel.vx, vel.vy, vel.vz),
+            orientation=orientation,
+        )
+
+    def _publish_telemetry_from_ned(self, armed: bool) -> None:
+        kinematics = self._kinematics_from_ned()
+        with self._telemetry_lock:
+            self._telemetry = _Telemetry(
+                state=_MultirotorState(kinematics_estimated=kinematics),
+                armed=armed,
+            )
+            self._state_ready_evt.set()
 
     def confirmConnection(self) -> None:
         self._mav = self._connection_factory(
@@ -219,6 +285,16 @@ class PymavlinkFlightClient:
         heartbeat = self._mav.wait_heartbeat(timeout=self._heartbeat_timeout_s)
         if heartbeat is None:
             raise TimeoutError(f"No MAVLink HEARTBEAT received on {self._endpoint}.")
+
+        self._autopilot = self._message_source_id(heartbeat, "get_autopilot")
+        if (
+            self._autopilot == _MAV_AUTOPILOT_PX4
+            and self._guided_custom_mode == PX4_CUSTOM_MAIN_MODE_AUTO
+        ):
+            _logger.warning(
+                "guided_custom_mode=4 (AUTO) with PX4 autopilot: velocity setpoints "
+                "are typically ignored. Use guided_custom_mode=6 (OFFBOARD)."
+            )
 
         self._target_system = int(
             getattr(self._mav, "target_system", 0) or heartbeat.get_srcSystem() or 1
@@ -233,15 +309,9 @@ class PymavlinkFlightClient:
             )
 
         armed = (int(heartbeat.base_mode) & int(mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)) != 0
-        zero = _Vector3r(0.0, 0.0, 0.0)
         with self._telemetry_lock:
             self._telemetry = _Telemetry(
-                state=_MultirotorState(
-                    kinematics_estimated=_KinematicsEstimated(
-                        position=zero,
-                        linear_velocity=zero,
-                    )
-                ),
+                state=_MultirotorState(kinematics_estimated=self._kinematics_from_ned()),
                 armed=armed,
             )
         self._state_ready_evt.set()
@@ -251,7 +321,8 @@ class PymavlinkFlightClient:
             self._request_message_intervals()
         self._start_telemetry_pump()
         if self._prepare_for_flight_on_connect:
-            self._set_guided_mode(force=True)
+            if self._guided_custom_mode != PX4_CUSTOM_MAIN_MODE_OFFBOARD:
+                self._set_guided_mode(force=True)
 
     def enableApiControl(self, enable: bool) -> None:
         _ = enable
@@ -277,6 +348,8 @@ class PymavlinkFlightClient:
         while time.monotonic() < deadline:
             telemetry = self._get_latest_telemetry()
             if telemetry is not None and telemetry.armed == arm:
+                if not arm:
+                    self._offboard_ready = False
                 return
             time.sleep(0.05)
 
@@ -300,10 +373,7 @@ class PymavlinkFlightClient:
             self._state_ready_evt.wait(timeout=self._heartbeat_timeout_s)
             telemetry = self._get_latest_telemetry()
             if telemetry is None:
-                zero = _Vector3r(0.0, 0.0, 0.0)
-                return _MultirotorState(
-                    kinematics_estimated=_KinematicsEstimated(position=zero, linear_velocity=zero)
-                )
+                return _MultirotorState(kinematics_estimated=self._kinematics_from_ned())
         return telemetry.state
 
     def cancelLastTask(self) -> None:
@@ -315,13 +385,22 @@ class PymavlinkFlightClient:
     def moveByVelocityAsync(
         self, vx: float, vy: float, vz: float, duration: float, **kwargs
     ) -> _Joinable:
-        _ = kwargs
+        yaw_rate_rad_s = 0.0
+        yaw_mode = kwargs.get("yaw_mode")
+        if yaw_mode is not None and bool(getattr(yaw_mode, "is_rate", False)):
+            yaw_rate_rad_s = math.radians(float(getattr(yaw_mode, "yaw_or_rate", 0.0)))
         if self._log_commands:
             _logger.info(
-                "[MAVLink <<] VELOCITY vx=%.2f vy=%.2f vz=%.2f dur=%.1fs",
-                vx, vy, vz, duration,
+                "[MAVLink <<] VELOCITY vx=%.2f vy=%.2f vz=%.2f yaw_rate=%.1f deg/s dur=%.1fs",
+                vx,
+                vy,
+                vz,
+                math.degrees(yaw_rate_rad_s),
+                duration,
             )
-        return _Joinable(lambda: self._stream_velocity(vx, vy, vz, duration))
+        return _Joinable(
+            lambda: self._stream_velocity(vx, vy, vz, duration, yaw_rate_rad_s=yaw_rate_rad_s)
+        )
 
     def moveByVelocityZAsync(self, vx: float, vy: float, z: float, duration: float) -> _Joinable:
         if self._log_commands:
@@ -364,6 +443,13 @@ class PymavlinkFlightClient:
                 vz=vz,
             )
         )
+
+    def submitVelocityLocalForward(self, speed_ms: float, vz: float = 0.0) -> None:
+        from src.control.ned_environment import local_velocity_forward
+
+        yaw = self._ned_environment.heading_yaw_rad or 0.0
+        vel = local_velocity_forward(self._ned_environment, speed_ms, vz, yaw_rad=yaw)
+        self.submitVelocityLocalNed(vel.vx, vel.vy, vel.vz)
 
     def submitVelocityBodyNed(self, vx: float, vy: float, vz: float) -> None:
         if self._log_commands:
@@ -550,11 +636,20 @@ class PymavlinkFlightClient:
             max_staleness_ms=self._highres_imu_max_staleness_ms,
         )
 
+    def getPositionTraceSnapshot(self) -> PositionTraceSnapshot | None:
+        if self._position_trace is None:
+            return None
+        return self._position_trace.snapshot()
+
     def close(self) -> None:
         self._stop_evt.set()
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
+        if self._position_trace is not None:
+            self._position_trace.flush()
+        if self._local_tracker is not None:
+            self._local_tracker.flush()
         if self._mav is not None:
             try:
                 self._mav.close()
@@ -563,13 +658,15 @@ class PymavlinkFlightClient:
             self._mav = None
             self._guided_mode_last_sent_monotonic_s = None
             self._motion_epoch_monotonic = None
+            self._offboard_ready = False
 
     def _takeoff(self) -> None:
         if self._log_commands:
             _logger.info("[MAVLink <<] TAKEOFF alt=%sm", self._takeoff_altitude_m)
         self._state_ready_evt.wait(timeout=self._heartbeat_timeout_s)
-        self._set_guided_mode(force=True)
-        self._send_takeoff_command()
+        self._ensure_offboard_ready()
+        if self._guided_custom_mode != PX4_CUSTOM_MAIN_MODE_OFFBOARD:
+            self._send_takeoff_command()
 
         target_z = -abs(self._takeoff_altitude_m)
         climb_vz = -abs(self._takeoff_climb_speed_ms)
@@ -633,6 +730,8 @@ class PymavlinkFlightClient:
             if message_id is None:
                 continue
             self._mav.mav.message_interval_send(int(message_id), interval_us)
+        if self._attitude_bridge.enabled:
+            self._attitude_bridge.request_interval(self._mav)
         if self._highres_imu_enabled:
             message_id = getattr(mavutil.mavlink, "MAVLINK_MSG_ID_HIGHRES_IMU", None)
             if message_id is not None:
@@ -655,6 +754,8 @@ class PymavlinkFlightClient:
         armed_bit = mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
         next_timesync_request_s = time.monotonic()
         message_types = ["LOCAL_POSITION_NED", "HEARTBEAT", "TIMESYNC"]
+        if self._attitude_bridge.enabled:
+            message_types.append("ATTITUDE")
         if self._highres_imu_enabled:
             message_types.append("HIGHRES_IMU")
         while not self._stop_evt.is_set():
@@ -673,12 +774,16 @@ class PymavlinkFlightClient:
                 if message_type == "LOCAL_POSITION_NED":
                     self._handle_local_position(message)
                     if self._log_commands:
-                        _logger.info(
-                            "[MAVLink >>] LOCAL_POSITION_NED x=%.2f y=%.2f z=%.2f",
-                            message.x,
-                            message.y,
-                            message.z,
-                        )
+                        self._local_position_log_counter += 1
+                        if self._local_position_log_counter % 20 == 0:
+                            _logger.info(
+                                "[MAVLink >>] LOCAL_POSITION_NED x=%.2f y=%.2f z=%.2f",
+                                message.x,
+                                message.y,
+                                message.z,
+                            )
+                elif message_type == "ATTITUDE":
+                    self._handle_attitude(message)
                 elif message_type == "HEARTBEAT":
                     armed = (int(message.base_mode) & int(armed_bit)) != 0
                     self._handle_heartbeat(armed)
@@ -694,24 +799,60 @@ class PymavlinkFlightClient:
             except Exception:
                 continue
 
-    def _handle_local_position(self, message: Any) -> None:
-        position = _Vector3r(float(message.x), float(message.y), float(message.z))
-        velocity = _Vector3r(float(message.vx), float(message.vy), float(message.vz))
+    def _armed_from_latest_telemetry(self) -> bool:
         previous = self._get_latest_telemetry()
-        armed = previous.armed if previous is not None else False
-        with self._telemetry_lock:
-            self._telemetry = _Telemetry(
-                state=_MultirotorState(
-                    kinematics_estimated=_KinematicsEstimated(
-                        position=position,
-                        linear_velocity=velocity,
-                    )
-                ),
+        return previous.armed if previous is not None else False
+
+    def _handle_attitude(self, message: Any) -> None:
+        self._attitude_bridge.on_message(message)
+        self._ned_ingest.on_attitude(message)
+        if self._local_tracker is not None:
+            self._local_tracker.on_attitude(
+                float(getattr(message, "roll", 0.0)),
+                float(getattr(message, "pitch", 0.0)),
+                float(getattr(message, "yaw", 0.0)),
+            )
+        self._publish_telemetry_from_ned(self._armed_from_latest_telemetry())
+
+    def _handle_local_position(self, message: Any) -> None:
+        self._ned_ingest.on_local_position_ned(message)
+        armed = self._armed_from_latest_telemetry()
+        self._publish_telemetry_from_ned(armed)
+        time_boot_ms = int(getattr(message, "time_boot_ms", 0))
+        x = float(message.x)
+        y = float(message.y)
+        z = float(message.z)
+        vx = float(message.vx)
+        vy = float(message.vy)
+        vz = float(message.vz)
+        if self._position_trace is not None:
+            self._position_trace.record(
+                time_boot_ms, x, y, z, vx, vy, vz, time.monotonic_ns()
+            )
+        if self._local_tracker is not None:
+            self._local_tracker.on_local_position(
+                time_boot_ms=time_boot_ms,
+                x=x,
+                y=y,
+                z=z,
+                vx=vx,
+                vy=vy,
+                vz=vz,
                 armed=armed,
             )
-            self._state_ready_evt.set()
 
     def _handle_heartbeat(self, armed: bool) -> None:
+        if self._local_tracker is not None:
+            self._local_tracker.on_heartbeat_armed(armed)
+        if armed and not self._armed_previous:
+            snap = self._ned_environment.snapshot()
+            if snap.has_position and self._ned_environment.settings.spawn_relative_enabled:
+                self._ned_environment.set_spawn_origin(
+                    snap.position.x,
+                    snap.position.y,
+                    snap.position.z,
+                )
+        self._armed_previous = armed
         previous = self._get_latest_telemetry()
         if previous is None:
             return
@@ -785,6 +926,13 @@ class PymavlinkFlightClient:
             self._highres_imu_last_monotonic_ns = received_ns
         if self._highres_imu_log_messages:
             print(f"[mavlink] HIGHRES_IMU {format_highres_imu_health(self.getHighresImuHealth())}")
+        if self._local_tracker is not None:
+            self._local_tracker.on_highres_imu(sample)
+
+    def getTrackingSnapshot(self):
+        if self._local_tracker is None:
+            return None
+        return self._local_tracker.latest_snapshot()
 
     def _send_timesync_request(self) -> None:
         if self._mav is None:
@@ -818,11 +966,34 @@ class PymavlinkFlightClient:
         except Exception:
             return None
 
+    def _ensure_offboard_ready(self) -> None:
+        if self._offboard_ready or self._guided_custom_mode != PX4_CUSTOM_MAIN_MODE_OFFBOARD:
+            return
+        if self._mav is None or self._target_system is None:
+            return
+        if self._log_commands:
+            _logger.info(
+                "[MAVLink <<] Priming OFFBOARD (%d zero setpoints before mode switch)",
+                _OFFBOARD_PRIME_SETPOINT_COUNT,
+            )
+        hover = SetPositionTargetLocalNedCommand(
+            frame=SET_POSITION_FRAME_LOCAL_NED,
+            type_mask=build_velocity_type_mask(),
+        )
+        for _ in range(_OFFBOARD_PRIME_SETPOINT_COUNT):
+            self._send_set_position_target_local_ned(hover)
+            time.sleep(_OFFBOARD_PRIME_INTERVAL_S)
+        self._set_guided_mode(force=True)
+        self._offboard_ready = True
+
     def _set_guided_mode(self, *, force: bool = False) -> None:
         if self._mav is None or self._target_system is None:
             return
         if force and self._log_commands:
-            _logger.info("[MAVLink <<] SET_GUIDED_MODE force=%s", force)
+            _logger.info(
+                "[MAVLink <<] DO_SET_MODE custom_mode=%s (6=OFFBOARD)",
+                self._guided_custom_mode,
+            )
         now_s = time.monotonic()
         if not force and self._guided_mode_last_sent_monotonic_s is not None:
             if (
@@ -864,16 +1035,28 @@ class PymavlinkFlightClient:
             abs(self._takeoff_altitude_m),
         )
 
-    def _stream_velocity(self, vx: float, vy: float, vz: float, duration_s: float) -> None:
+    def _stream_velocity(
+        self,
+        vx: float,
+        vy: float,
+        vz: float,
+        duration_s: float,
+        *,
+        yaw_rate_rad_s: float = 0.0,
+    ) -> None:
         assert self._mav is not None and self._target_system is not None
-        velocity_only_type_mask = build_velocity_type_mask()
+        if abs(yaw_rate_rad_s) > 1e-6:
+            type_mask = build_velocity_yaw_rate_type_mask()
+        else:
+            type_mask = build_velocity_type_mask()
         self._stream_set_position_target_local_ned(
             SetPositionTargetLocalNedCommand(
                 frame=SET_POSITION_FRAME_LOCAL_NED,
-                type_mask=velocity_only_type_mask,
+                type_mask=type_mask,
                 vx=float(vx),
                 vy=float(vy),
                 vz=float(vz),
+                yaw_rate=float(yaw_rate_rad_s),
             ),
             duration_s,
         )
@@ -882,7 +1065,9 @@ class PymavlinkFlightClient:
         self, command: SetPositionTargetLocalNedCommand, duration_s: float
     ) -> None:
         assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode(force=False)
+        self._ensure_offboard_ready()
+        if self._guided_custom_mode != PX4_CUSTOM_MAIN_MODE_OFFBOARD:
+            self._set_guided_mode(force=False)
         period_s = self._command_rate_gate.period_s
         deadline = time.monotonic() + max(0.0, float(duration_s))
         next_tick = time.monotonic()
@@ -956,7 +1141,9 @@ class PymavlinkFlightClient:
         self, command: SetAttitudeTargetCommand, duration_s: float
     ) -> None:
         assert self._mav is not None and self._target_system is not None
-        self._set_guided_mode(force=False)
+        self._ensure_offboard_ready()
+        if self._guided_custom_mode != PX4_CUSTOM_MAIN_MODE_OFFBOARD:
+            self._set_guided_mode(force=False)
         period_s = self._command_rate_gate.period_s
         deadline = time.monotonic() + max(0.0, float(duration_s))
         next_tick = time.monotonic()
